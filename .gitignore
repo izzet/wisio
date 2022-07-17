@@ -1,3 +1,5 @@
 __pycache__
 .ipynb_checkpoints
 .vscode
+/vani-env/
+dask-worker-space

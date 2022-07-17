@@ -280,18 +280,19 @@ class Analyzer(object):
         # Create empty cluster
         cluster = None
         # Check specificed cluster type
-        if (cluster_options.cluster_type == ClusterType.Local):
+        if (cluster_options.cluster_type is ClusterType.Local):
+            os.environ["BBPATH"] = os.environ.get('BBPATH', "/tmp")
             cluster = LocalCluster(n_workers=8,
                                    local_directory=os.environ["BBPATH"])
-        elif (cluster_options.cluster_type == ClusterType.LSF):
+        elif (cluster_options.cluster_type is ClusterType.LSF):
             # Initialize cluster
             cluster = LSFCluster(cores=cores,
                                  processes=processes,
                                  memory=memory,
-                                 dashboard_address=dashboard_address,
+                                 scheduler_options={"dashboard_address": dashboard_address,
+                                                    "host":host},
                                  death_timeout=300,
                                  header_skip=['-n', '-R', '-M', '-P', '-W 00:30'],
-                                 host=host,
                                  job_extra=['-nnodes 1',
                                             '-G asccasc',
                                             '-q {}'.format(worker_queue),
