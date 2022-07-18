@@ -18,6 +18,7 @@ from .utils.data_aug import set_bins
 from .utils.data_filtering import filter_non_io_traces, split_io_mpi_trace, split_read_write_metadata
 from .utils.print_utils import print_header, print_tabbed
 
+
 # Define constants
 WORKER_CHECK_INTERVAL = 5.0
 
@@ -289,8 +290,7 @@ class Analyzer(object):
             cluster = LSFCluster(cores=cores,
                                  processes=processes,
                                  memory=memory,
-                                 scheduler_options={"dashboard_address": dashboard_address,
-                                                    "host":host},
+                                 scheduler_options={"dashboard_address": dashboard_address, "host": host},
                                  death_timeout=300,
                                  header_skip=['-n', '-R', '-M', '-P', '-W 00:30'],
                                  job_extra=['-nnodes 1',
