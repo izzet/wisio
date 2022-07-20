@@ -1,29 +1,18 @@
 # Import system lib
 import asyncio
+import dask.dataframe as dd
 import os
 import socket
-import dask
-from enum import Enum
-from time import perf_counter, sleep
-from typing import Any
-
-# Import third parties
-import dask.dataframe as dd
-import numpy as np
-import pandas as pd
-from dask.dataframe import DataFrame, Series
+from dask.dataframe import DataFrame
 from dask.distributed import Client, LocalCluster, wait
 from dask_jobqueue import LSFCluster
+from enum import Enum
+from time import perf_counter, sleep
 from tqdm.auto import tqdm
-
-
-# Import locals
-from vani.common.nodes import Node
+from typing import Any
 from vani.common.filter_groups import TimelineFilterGroup
 from vani.common.filters import BandwidthFilter, DurationFilter, IOSizeFilter, ParallelismFilter
-from vani.utils.data_aug import set_bins
 from vani.utils.data_filtering import filter_non_io_traces, split_io_mpi_trace, split_read_write_metadata
-from vani.utils.print_utils import print_header, print_tabbed
 
 
 # Define constants
@@ -128,6 +117,8 @@ class Analyzer(object):
             filters = filter_group.filters()
             # Loop through filters
             for filter in filters:
+                print("Filter: ", filter.name())
+                print("-----")
                 # Init tasks
                 nodes = []
                 # Create root node
@@ -140,60 +131,14 @@ class Analyzer(object):
                     # Analyze node
                     potential_bottlenecks, bins, bin_step = node.analyze()
                     # Analyze potential bottlenecks
-                    for index, potential_bottleneck in enumerate(potential_bottlenecks.index.array):
+                    for index, bottleneck_bin in enumerate(potential_bottlenecks.index.array):
                         # Create a node
-                        nodes.append(filter_group.create_node(ddf=node.ddf[node.ddf['tbin'] == potential_bottleneck],
-                                                              bin=(potential_bottleneck, potential_bottleneck + bin_step),
+                        nodes.append(filter_group.create_node(ddf=node.ddf[node.ddf['tbin'] == bottleneck_bin],
+                                                              bin=(bottleneck_bin, bottleneck_bin + bin_step),
                                                               filter=filter,
-                                                              label=potential_bottlenecks[index]))
-
-                    print("HEY")
-
-        # Find problematic sizes by bin first
-        problematic_size_bin_tasks = []
-        problematic_size_bin_tasks.append((io_ddf_read_write, 0, job_time, "root", total_size, 0))
-
-        while len(problematic_size_bin_tasks) > 0:
-            parent_df, size_bin, bin_step, path, size, depth = problematic_size_bin_tasks.pop()
-            # print_header(f"Finding problematic sizes by bin - depth: {depth}", tab_indent=depth)
-            print_tabbed(f"[{size_bin}-{size_bin + bin_step}] {path} ({size} {size/total_size})", tab_indent=depth)
-            problematic_size_bin_df = parent_df[parent_df["tbin"] == size_bin] if size_bin > 0 else parent_df
-            problematic_size_bin_task, problematic_size_bin_step = self._prepare_compute_sizes_by_bin(
-                df=problematic_size_bin_df,
-                start=size_bin,
-                stop=size_bin + bin_step,
-                granularity=granularity
-            )
-            problematic_bws_bin_task, problematic_bw_bin_step = self._prepare_compute_bws_by_bin(
-                df=problematic_size_bin_df,
-                start=size_bin,
-                stop=size_bin + bin_step,
-                granularity=granularity
-            )
-            if problematic_size_bin_task is None:
-                continue
-                print_tabbed(f"No need to dig further because {problematic_size_bin_step} < {max_duration}", tab_indent=depth + 1)
-
-                # problematic_bw_bin_task = self._prepare_compute_bw_by_bin(problematic_size_bin_df)
-                # print(problematic_bw_bin_task.compute())
-
-            else:
-                problematic_bws_bin_task_result = problematic_bws_bin_task.compute()
-                problematic_bws_by_bin, bws_by_bin = self._extract_problematic_sizes_by_bin(problematic_bws_bin_task_result, depth, True)
-                # print(problematic_bws_by_bin)
-
-                problematic_size_bin_task_result = problematic_size_bin_task.compute()
-                problematic_sizes_by_bin, sizes_by_bin = self._extract_problematic_sizes_by_bin(problematic_size_bin_task_result, depth)
-                for index, label in enumerate(problematic_sizes_by_bin):
-                    problematic_size_bin = problematic_sizes_by_bin.index.array[index]
-                    problematic_size_bin_path = f"{path}..{label}"
-                    problematic_size_bin_size = sizes_by_bin.array[index]
-                    problematic_size_bin_tasks.append((problematic_size_bin_df,
-                                                       problematic_size_bin,
-                                                       problematic_size_bin_step,
-                                                       problematic_size_bin_path,
-                                                       problematic_size_bin_size,
-                                                       depth + 1))
+                                                              label=potential_bottlenecks.values[index],
+                                                              parent=node))
+                root.render_tree()
 
         # Close progress
         pbar.set_description("Analysis completed")
@@ -203,66 +148,6 @@ class Analyzer(object):
         # keep_alive_task.cancel()
 
         return io_df_read_write, job_time
-
-    def _extract_problematic_sizes_by_bin(self, sizes_by_bin: Series, depth=0, debug=False):
-        # Prepare labels
-        labels = [label for label in range(1, self.n_bins + 1)]
-        # Arrange size bins
-        fixed_sizes_by_bin = sizes_by_bin.sort_values(ascending=False)
-        if depth == 0:
-            # Add zeroed bin to fix labeling, this has no effect if there's already 0-indexed bins
-            dummy_bin = pd.Series([0], index=[0])
-            fixed_sizes_by_bin = sizes_by_bin.add(dummy_bin, fill_value=0).sort_values(ascending=False)
-        # Label size bins
-        labeled_sizes_by_bin = pd.cut(fixed_sizes_by_bin, bins=self.n_bins, labels=labels)  # , precision=20)
-        # Flag >50% problematic by default
-        problematic_sizes_by_bin = labeled_sizes_by_bin[labeled_sizes_by_bin > int(self.n_bins / 2)]
-        # if debug:
-        #     print_tabbed("{:<25} {:<25} {:<10} {:<15}".format('bin', 'size', 'label', 'problematic'), tab_indent=depth)
-        #     for index, label in enumerate(labeled_sizes_by_bin):
-        #         bin = labeled_sizes_by_bin.index.array[index]
-        #         size = fixed_sizes_by_bin.array[index]
-        #         problematic = 'x' if label in problematic_sizes_by_bin.array else ''
-        #         print_tabbed("{:<25} {:<25} {:<10} {:<15}".format(bin, size, label, problematic), tab_indent=depth)
-        # Return problematic sizes by bin
-        return problematic_sizes_by_bin, fixed_sizes_by_bin
-
-    def _calculate_bins_for_time_range(self, start: float, stop: float):
-        # Return linear space between start and stop
-        return np.linspace(start, stop, num=self.n_bins, retstep=True)
-
-    def _prepare_compute_bws_by_bin(self, df: DataFrame, start: float, stop: float, granularity: float):
-        # Calculate bins
-        bins, step = self._calculate_bins_for_time_range(start, stop)
-        # Check whether step is less than granularity
-        if step < granularity:
-            # Then do not analysis
-            return None, step
-        # Set bins
-        set_bins(df, bins, step)
-        # Compute bin sizes
-        return df.groupby("tbin")["bandwidth"].mean()/1024.0, step
-
-    def _prepare_compute_sizes_by_bin(self, df: DataFrame, start: float, stop: float, granularity: float):
-        # Calculate bins
-        bins, step = self._calculate_bins_for_time_range(start, stop)
-        # Check whether step is less than granularity
-        if step < granularity:
-            # Then do not analysis
-            return None, step
-        # Set bins
-        set_bins(df, bins, step)
-        # Compute bin sizes
-        return df.groupby("tbin")["size"].sum()/1024.0/1024.0/1024.0, step
-
-    def _compute_bin_stats(self, df: DataFrame):
-        tbin_grpd = df.groupby("tbin")
-
-        tbin_grp_size_task = tbin_grpd["size"].sum()/1024.0/1024.0/1024.0
-        tbin_grp_bw_task = tbin_grpd["bandwidth"].mean()/1024.0
-        tbin_grp_ct_task = tbin_grpd["index"].count()
-
-        return dask.compute(tbin_grp_size_task, tbin_grp_bw_task, tbin_grp_ct_task)
 
     def _compute_timed(self, title: str, task: Any):
         # Compute job time

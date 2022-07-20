@@ -13,6 +13,12 @@ class _Filter(object):
     def detect_bottlenecks(self, results: Series, threshold=False, inversed=False) -> Any:
         raise NotImplementedError
 
+    def is_inversed(self) -> bool:
+        raise NotImplementedError
+
+    def name(self) -> str:
+        raise NotImplementedError
+
     def prepare(self, ddf: DataFrame) -> Any:
         raise NotImplementedError
 
@@ -20,6 +26,9 @@ class _Filter(object):
 class _Node(object):
 
     def analyze(self) -> Any:
+        raise NotImplementedError
+
+    def render_tree(self) -> None:
         raise NotImplementedError
 
 
