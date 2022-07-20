@@ -1,7 +1,8 @@
+anytree
 dask
+dask_jobqueue
 distributed
 numpy
 pandas
-dask_jobqueue
-tqdm
 pyarrow
+tqdm

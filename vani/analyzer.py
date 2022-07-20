@@ -1,22 +1,29 @@
-# Import third parties
+# Import system lib
 import asyncio
 import os
 import socket
 import dask
+from enum import Enum
+from time import perf_counter, sleep
+from typing import Any
+
+# Import third parties
 import dask.dataframe as dd
 import numpy as np
 import pandas as pd
 from dask.dataframe import DataFrame, Series
 from dask.distributed import Client, LocalCluster, wait
 from dask_jobqueue import LSFCluster
-from enum import Enum
-from time import perf_counter, sleep
 from tqdm.auto import tqdm
 
+
 # Import locals
-from .utils.data_aug import set_bins
-from .utils.data_filtering import filter_non_io_traces, split_io_mpi_trace, split_read_write_metadata
-from .utils.print_utils import print_header, print_tabbed
+from vani.common.nodes import Node
+from vani.common.filter_groups import TimelineFilterGroup
+from vani.common.filters import BandwidthFilter, DurationFilter, IOSizeFilter, ParallelismFilter
+from vani.utils.data_aug import set_bins
+from vani.utils.data_filtering import filter_non_io_traces, split_io_mpi_trace, split_read_write_metadata
+from vani.utils.print_utils import print_header, print_tabbed
 
 
 # Define constants
@@ -82,32 +89,69 @@ class Analyzer(object):
 
         # Read logs into a dataframe
         pbar.set_description("Reading logs into dataframe")
-        df, _ = self.__read_parquet(log_dir=log_dir)
+        ddf = self.__read_parquet(log_dir=log_dir)
         pbar.update()
 
         # Compute job time
         pbar.set_description("Computing job time")
         #! Could be delayed, we will see
-        job_time, _ = self._compute_job_time(df)
+        job_time = self._compute_timed("Job time", ddf['tend'].max())
         pbar.update()
 
         # Filter non-I/O traces (except for MPI)
         # Split dataframe into I/O, MPI and trace
         # Split io_df into read & write and metadata dataframes
-        df = filter_non_io_traces(df)
-        io_df, mpi_df, trace_df = split_io_mpi_trace(df)
-        io_df_read_write, io_df_metadata = split_read_write_metadata(io_df)
+        ddf = filter_non_io_traces(ddf)
+        io_ddf, mpi_ddf, trace_ddf = split_io_mpi_trace(ddf)
+        io_ddf_read_write, io_ddf_metadata = split_read_write_metadata(io_ddf)
 
         # Compute stats
-        max_duration, _ = self._compute_max_duration(io_df_read_write)
-        total_size_task = io_df_read_write["size"].sum()/1024.0/1024.0/1024.0
-        total_size = total_size_task.compute()
+        max_duration = self._compute_timed("Max duration", DurationFilter.on(io_ddf_read_write))
+        mean_bw = self._compute_timed("Mean BW", BandwidthFilter.on(ddf=io_ddf_read_write))
+        n_ranks = self._compute_timed("# Ranks", ParallelismFilter.on(ddf=io_ddf_read_write))
+        total_size = self._compute_timed("Total size", IOSizeFilter.on(ddf=io_ddf_read_write))
 
         print("---------------")
 
+        # Define filter groups
+        filter_groups = [
+            TimelineFilterGroup(job_time=job_time,
+                                total_size=total_size,
+                                mean_bw=mean_bw,
+                                max_duration=max_duration,
+                                n_ranks=n_ranks,
+                                n_bins=2)
+        ]
+        # Loop through filter groups
+        for filter_group in filter_groups:
+            # Get filters
+            filters = filter_group.filters()
+            # Loop through filters
+            for filter in filters:
+                # Init tasks
+                nodes = []
+                # Create root node
+                root = filter_group.create_node(ddf=io_ddf_read_write, bin=(0, job_time), filter=filter, label='root')
+                nodes.append(root)
+                # Run tasks
+                while nodes:
+                    # Read nodes
+                    node = nodes.pop()
+                    # Analyze node
+                    potential_bottlenecks, bins, bin_step = node.analyze()
+                    # Analyze potential bottlenecks
+                    for index, potential_bottleneck in enumerate(potential_bottlenecks.index.array):
+                        # Create a node
+                        nodes.append(filter_group.create_node(ddf=node.ddf[node.ddf['tbin'] == potential_bottleneck],
+                                                              bin=(potential_bottleneck, potential_bottleneck + bin_step),
+                                                              filter=filter,
+                                                              label=potential_bottlenecks[index]))
+
+                    print("HEY")
+
         # Find problematic sizes by bin first
         problematic_size_bin_tasks = []
-        problematic_size_bin_tasks.append((io_df_read_write, 0, job_time, "root", total_size, 0))
+        problematic_size_bin_tasks.append((io_ddf_read_write, 0, job_time, "root", total_size, 0))
 
         while len(problematic_size_bin_tasks) > 0:
             parent_df, size_bin, bin_step, path, size, depth = problematic_size_bin_tasks.pop()
@@ -173,13 +217,13 @@ class Analyzer(object):
         labeled_sizes_by_bin = pd.cut(fixed_sizes_by_bin, bins=self.n_bins, labels=labels)  # , precision=20)
         # Flag >50% problematic by default
         problematic_sizes_by_bin = labeled_sizes_by_bin[labeled_sizes_by_bin > int(self.n_bins / 2)]
-        if debug:
-            print_tabbed("{:<25} {:<25} {:<10} {:<15}".format('bin', 'size', 'label', 'problematic'), tab_indent=depth)
-            for index, label in enumerate(labeled_sizes_by_bin):
-                bin = labeled_sizes_by_bin.index.array[index]
-                size = fixed_sizes_by_bin.array[index]
-                problematic = 'x' if label in problematic_sizes_by_bin.array else ''
-                print_tabbed("{:<25} {:<25} {:<10} {:<15}".format(bin, size, label, problematic), tab_indent=depth)
+        # if debug:
+        #     print_tabbed("{:<25} {:<25} {:<10} {:<15}".format('bin', 'size', 'label', 'problematic'), tab_indent=depth)
+        #     for index, label in enumerate(labeled_sizes_by_bin):
+        #         bin = labeled_sizes_by_bin.index.array[index]
+        #         size = fixed_sizes_by_bin.array[index]
+        #         problematic = 'x' if label in problematic_sizes_by_bin.array else ''
+        #         print_tabbed("{:<25} {:<25} {:<10} {:<15}".format(bin, size, label, problematic), tab_indent=depth)
         # Return problematic sizes by bin
         return problematic_sizes_by_bin, fixed_sizes_by_bin
 
@@ -211,12 +255,6 @@ class Analyzer(object):
         # Compute bin sizes
         return df.groupby("tbin")["size"].sum()/1024.0/1024.0/1024.0, step
 
-    def _mean_of_bws_of_group(io_df_read_write: DataFrame, group_by: str):
-        return io_df_read_write.groupby(group_by)["bandwidth"].mean()/1024.0
-
-    def _sum_of_sizes_of_group(io_df_read_write: DataFrame, group_by: str):
-        return io_df_read_write.groupby(group_by)["size"].sum()/1024.0/1024.0/1024.0
-
     def _compute_bin_stats(self, df: DataFrame):
         tbin_grpd = df.groupby("tbin")
 
@@ -226,29 +264,16 @@ class Analyzer(object):
 
         return dask.compute(tbin_grp_size_task, tbin_grp_bw_task, tbin_grp_ct_task)
 
-    def _compute_job_time(self, df: DataFrame):
+    def _compute_timed(self, title: str, task: Any):
         # Compute job time
         t_start = perf_counter()
-        job_time = df['tend'].max().compute()
+        value = task.compute()
         t_end = perf_counter()
-        t_elapsed = t_end - t_start
         # Print performance
         if self.debug:
-            print(f"Job time: {job_time} seconds ({t_elapsed})")
+            print(f"{title}: {value} ({t_end - t_start})")
         # Return job time
-        return job_time, t_elapsed
-
-    def _compute_max_duration(self, df: DataFrame):
-        # Compute job time
-        t_start = perf_counter()
-        max_duration = df['duration'].max().compute()
-        t_end = perf_counter()
-        t_elapsed = t_end - t_start
-        # Print performance
-        if self.debug:
-            print(f"Max duration: {max_duration} ({t_elapsed})")
-        # Return job time
-        return max_duration, t_elapsed
+        return value
 
     def _current_n_workers(self):
         # Get current number of workers
@@ -321,19 +346,11 @@ class Analyzer(object):
         t_start = perf_counter()
         df = dd.read_parquet("{}/*.parquet".format(log_dir), engine=engine)
         t_end = perf_counter()
-        t_elapsed = t_end - t_start
         # Print performance
         if self.debug:
-            print(f"Logs read ({t_elapsed})")
+            print(f"Logs read ({t_end - t_start})")
         # Return job time
-        return df, t_elapsed
-
-    def __set_bins(self, io_df_read_write: DataFrame, tbins: list, step: int):
-        io_df_read_write["tbin"] = 0
-        for tbin in tbins:
-            tstart_cond = io_df_read_write["tstart"].ge(tbin)
-            tend_cond = io_df_read_write["tend"].lt(tbin + step)
-            io_df_read_write["tbin"] = io_df_read_write["tbin"].mask(tstart_cond & tend_cond, tbin)
+        return df
 
     def __wait_until_workers_alive(self):
         # Get current number of workers
