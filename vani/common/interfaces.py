@@ -2,7 +2,7 @@ from dask.dataframe import DataFrame, Series
 from numpy import ndarray
 from typing import Any, List, Tuple
 
-_BinInfo = Tuple[ndarray, Any]
+_BinInfo = Tuple[ndarray, float]
 
 
 class _Filter(object):
@@ -34,17 +34,17 @@ class _Node(object):
 
 class _FilterGroup(object):
 
-    def create_node(self, ddf: DataFrame, bin: Tuple[float, float], filter: _Filter, label: str, parent=None, children=None) -> _Node:
+    def calculate_bins(self, start: Any, stop: Any) -> _BinInfo:
+        raise NotImplementedError
+
+    def create_node(self, ddf: DataFrame, bin: Tuple[float, float], filter: _Filter, parent=None) -> _Node:
         raise NotImplementedError
 
     def filters(self) -> List[_Filter]:
         raise NotImplementedError
 
-    def is_bin_threshold_exceeded(self, bin_step: Any) -> bool:
-        raise NotImplementedError
-
     def metrics_of(self, filter: _Filter) -> List[_Filter]:
         raise NotImplementedError
 
-    def set_bins(self, ddf: DataFrame, start: Any, stop: Any) -> _BinInfo:
+    def set_bins(self, ddf: DataFrame, bins: ndarray):
         raise NotImplementedError

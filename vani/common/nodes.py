@@ -1,31 +1,24 @@
 import dask
 from anytree import NodeMixin, RenderTree
 from dask.dataframe import DataFrame
-from typing import Any, Tuple
-
+from typing import Any, List, Tuple
+from vani.common.constants import PERCENTAGE_FORMAT, SECONDS_FORMAT, VALUE_FORMAT
 from vani.common.interfaces import _Filter, _FilterGroup, _Node
 
 
 class Node(_Node, NodeMixin):
 
-    def __init__(self, ddf: DataFrame, bin: Tuple[float, float], filter_group: _FilterGroup, filter: _Filter, label: str, parent=None, children=None) -> None:
+    def __init__(self, ddf: DataFrame, bin: Tuple[float, float], filter_group: _FilterGroup, filter: _Filter, parent=None) -> None:
         super(Node, self).__init__()
+        start, stop = bin
         self.bin = bin
+        self.bin_step = stop - start
         self.ddf = ddf
         self.filter = filter
         self.filter_group = filter_group
-        self.label = label
         self.metrics = filter_group.metrics_of(filter)
-        self.name = label
-        self.observations = []
         self.parent = parent
         self.score = 0
-        if children:
-            self.children = children
-        start, stop = bin
-        bins, step = filter_group.set_bins(ddf=ddf, start=start, stop=stop)
-        self.bins = bins
-        self.bin_step = step
 
     def analyze(self):
         # Apply filter first
@@ -34,42 +27,15 @@ class Node(_Node, NodeMixin):
         metric_tasks = self.__apply_metrics(ddf=self.ddf)
         # Compute tasks
         filter_result, *metric_results = dask.compute(filter_task, *metric_tasks)
-
+        # Keep results
         self.filter_result = filter_result
         self.metric_results = metric_results
-
         # Detect bottlenecks
         self.bottlenecks = self.__detect_filter_bottlenecks(filter_result=filter_result)
         # Make observations for each metric
         self.observations = self.__detect_metric_bottlenecks(metric_results=metric_results)
-        # Then cross metrics
-        return self.bottlenecks, self.bins, self.bin_step
-
-    def render_tree(self):
-        for pre, fill, node in RenderTree(self):
-            name = '-'.join(['{:.3f}'.format(bin) for bin in node.bin])
-            print("%s%s" % (pre, f'[{name}]={node.label}'))
-            bottleneck_lines = []
-            for bottleneck_index in range(len(node.bottlenecks)):
-                bottleneck_bin = node.bottlenecks.index.array[bottleneck_index]
-                bottleneck_bins = [bottleneck_bin, bottleneck_bin + node.bin_step]
-                bottleneck_name = '-'.join(['{:.3f}'.format(bin) for bin in bottleneck_bins])
-                bottleneck_value = node.bottlenecks.values[bottleneck_index]
-                bottleneck_lines.append(f'[{bottleneck_name}]={bottleneck_value} ({node.filter_result.values[bottleneck_index]})')
-            bottleneck_formatted = ', '.join(bottleneck_lines)
-            print(" %s%s %s" % (fill, f'{self.filter.name()}:', bottleneck_formatted))
-            for index, metric in enumerate(self.metrics):
-                metric_result = node.metric_results[index]
-                observation = node.observations[index]
-                observation_lines = []
-                for observation_index in range(len(observation)):
-                    observation_bin = observation.index.array[observation_index]
-                    observation_bins = [observation_bin, observation_bin + node.bin_step]
-                    observation_name = '-'.join(['{:.3f}'.format(bin) for bin in observation_bins])
-                    observation_value = observation.values[observation_index]
-                    observation_lines.append(f'[{observation_name}]={observation_value} ({metric_result.values[observation_index]})')
-                observations_formatted = ', '.join(observation_lines)
-                print(" %s%s %s" % (fill, f'{metric.name()}:', observations_formatted))
+        # Return bottlenecks
+        return self.bottlenecks
 
     def __apply_filter(self, ddf: DataFrame) -> Any:
         # Let filter prepare data
@@ -101,3 +67,63 @@ class Node(_Node, NodeMixin):
             observation = metric.detect_bottlenecks(results=metric_results[index], threshold=False)
             observations.append(observation)
         return observations
+
+
+class FilterGroupNode(NodeMixin):
+
+    def __init__(self, filter_group: _FilterGroup) -> None:
+        super(FilterGroupNode, self).__init__()
+        self.filter_group = filter_group
+
+
+class AnalysisNode(NodeMixin):
+
+    def __init__(self, filter_group_nodes: List[FilterGroupNode]) -> None:
+        super(AnalysisNode, self).__init__()
+        self.children = filter_group_nodes
+
+    def render_tree(self):
+        for pre, fill, node in RenderTree(self):
+            if isinstance(node, AnalysisNode):
+                print(f"{pre} Analysis")
+            elif isinstance(node, FilterGroupNode):
+                print(f"{pre} Filter Group")
+            else:
+                name = '-'.join([SECONDS_FORMAT.format(bin) for bin in node.bin])
+                print("%s%s" % (pre, f'[{name}]'))
+                self.__render_node_filter_result(fill=fill, node=node)
+                self.__render_node_metric_results(fill=fill, node=node)
+
+    def __render_node(self, fill: Any, node: _Node):
+        print("Here")
+
+    def __render_node_filter_result(self, fill: Any, node: _Node):
+        lines = []
+        for index in range(len(node.filter_result)):
+            bin = node.filter_result.index.array[index]
+            bins = [bin, bin + node.bin_step]
+            bin_name = '-'.join([SECONDS_FORMAT.format(bin) for bin in bins])
+            bin_label = node.bottlenecks.values[index] if len(node.bottlenecks) else 1
+            bin_value = node.filter_result.values[index]
+            bin_value_fmt = VALUE_FORMAT.format(bin_value)
+            bin_percent = (bin_value/node.filter.max)*100.0
+            bin_percent_fmt = PERCENTAGE_FORMAT.format(bin_percent)
+            lines.append(f'[{bin_name}]={bin_label} ({bin_value_fmt} {bin_percent_fmt})')
+        print("%s%s %s" % (fill, f'{node.filter.name()}:', ', '.join(lines)))
+
+    def __render_node_metric_results(self, fill: Any, node: _Node):
+        for index, metric in enumerate(node.metrics):
+            metric_result = node.metric_results[index]
+            observation = node.observations[index]
+            lines = []
+            for observation_index in range(len(observation)):
+                bin = observation.index.array[observation_index]
+                bins = [bin, bin + node.bin_step]
+                bin_name = '-'.join([SECONDS_FORMAT.format(bin) for bin in bins])
+                bin_label = observation.values[observation_index]
+                bin_value = metric_result.values[observation_index]
+                bin_value_fmt = VALUE_FORMAT.format(bin_value)
+                bin_percent = (bin_value/metric.max)*100.0
+                bin_percent_fmt = PERCENTAGE_FORMAT.format(bin_percent)
+                lines.append(f'[{bin_name}]={bin_label} ({bin_value_fmt} {bin_percent_fmt})')
+            print("%s%s %s" % (fill, f'{metric.name()}:', ', '.join(lines)))

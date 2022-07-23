@@ -8,15 +8,6 @@ def set_bandwidths(io_df_read_write: DataFrame):
         correct_dur, io_df_read_write['size']*1.0/(io_df_read_write['tend'] - io_df_read_write['tstart'])/1024.0/1024.0)
 
 
-def set_bins(df: DataFrame, bins: list, bin_step: float, column_name='tbin'):
-    df[column_name] = 0
-    for bin in bins:
-        # 0 <= tmid < 3.744676801893446
-        tstart_cond = df["tmid"].ge(bin)
-        tend_cond = df["tmid"].lt(bin + bin_step)
-        df[column_name] = df[column_name].mask(tstart_cond & tend_cond, bin)
-
-
 def set_durations(io_df: DataFrame, duration_column_name='duration', time_start_column_name='tstart', time_end_column_name='tend'):
     # Set durations according tend - tstart
     io_df[duration_column_name] = io_df[time_end_column_name] - io_df[time_start_column_name]

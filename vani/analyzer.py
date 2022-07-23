@@ -1,22 +1,22 @@
-# Import system lib
 import asyncio
+import dask
 import dask.dataframe as dd
 import os
 import socket
 from dask.dataframe import DataFrame
-from dask.distributed import Client, LocalCluster, wait
+from dask.distributed import Client, LocalCluster
 from dask_jobqueue import LSFCluster
 from enum import Enum
 from time import perf_counter, sleep
-from tqdm.auto import tqdm
-from typing import Any
+from vani.common.constants import SECONDS_FORMAT
 from vani.common.filter_groups import TimelineFilterGroup
 from vani.common.filters import BandwidthFilter, DurationFilter, IOSizeFilter, ParallelismFilter
+from vani.common.nodes import AnalysisNode, FilterGroupNode
 from vani.utils.data_filtering import filter_non_io_traces, split_io_mpi_trace, split_read_write_metadata
 
 
 # Define constants
-WORKER_CHECK_INTERVAL = 5.0
+_WORKER_CHECK_INTERVAL = 5.0
 
 
 class ClusterType(Enum):
@@ -37,55 +37,22 @@ class Analyzer(object):
         # Keep values
         self.cluster_options = cluster_options
         self.debug = debug
-        self.n_bins = 10
         self.n_workers = n_workers
-
-        # Declare vars
-        n_steps = 3
-
-        # Start progress
-        pbar = tqdm(total=n_steps)
-
         # Initialize cluster
-        pbar.set_description(f"Initializing {cluster_options.cluster_type.name} cluster")
         self.cluster = self.__initialize_cluster(cluster_options=cluster_options)
-        pbar.update()
-
         # Initialize client
-        pbar.set_description("Initializing Dask client")
         self.client = Client(self.cluster)
-        pbar.update()
-
         # Scale cluster
-        pbar.set_description(f"Scaling up the cluster to {n_workers} nodes")
-        if (cluster_options.cluster_type != ClusterType.Local):
+        if cluster_options.cluster_type != ClusterType.Local:
             self.cluster.scale(n_workers)
             self.__wait_until_workers_alive()
-        pbar.update()
-
-        # Close progress
-        pbar.set_description("Analyzer initialized 4")
-        pbar.close()
 
     def analyze_parquet_logs(self, log_dir: str, granularity=0.2):
         # Keep workers alive
         # keep_alive_task = asyncio.create_task(self.__keep_workers_alive())
 
-        # Declare vars
-        # Start progress
-        n_steps = 7
-        pbar = tqdm(total=n_steps)
-
         # Read logs into a dataframe
-        pbar.set_description("Reading logs into dataframe")
         ddf = self.__read_parquet(log_dir=log_dir)
-        pbar.update()
-
-        # Compute job time
-        pbar.set_description("Computing job time")
-        #! Could be delayed, we will see
-        job_time = self._compute_timed("Job time", ddf['tend'].max())
-        pbar.update()
 
         # Filter non-I/O traces (except for MPI)
         # Split dataframe into I/O, MPI and trace
@@ -95,10 +62,7 @@ class Analyzer(object):
         io_ddf_read_write, io_ddf_metadata = split_read_write_metadata(io_ddf)
 
         # Compute stats
-        max_duration = self._compute_timed("Max duration", DurationFilter.on(io_ddf_read_write))
-        mean_bw = self._compute_timed("Mean BW", BandwidthFilter.on(ddf=io_ddf_read_write))
-        n_ranks = self._compute_timed("# Ranks", ParallelismFilter.on(ddf=io_ddf_read_write))
-        total_size = self._compute_timed("Total size", IOSizeFilter.on(ddf=io_ddf_read_write))
+        job_time, io_time, max_duration, mean_bw, total_ranks, total_size = self.__compute_stats(ddf=ddf, io_ddf_read_write=io_ddf_read_write)
 
         print("---------------")
 
@@ -108,11 +72,17 @@ class Analyzer(object):
                                 total_size=total_size,
                                 mean_bw=mean_bw,
                                 max_duration=max_duration,
-                                n_ranks=n_ranks,
+                                total_ranks=total_ranks,
                                 n_bins=2)
         ]
+
+        filter_group_nodes = []
+
         # Loop through filter groups
         for filter_group in filter_groups:
+
+            filter_group_node = FilterGroupNode(filter_group=filter_group)
+            filter_group_nodes.append(filter_group_node)
             # Get filters
             filters = filter_group.filters()
             # Loop through filters
@@ -122,60 +92,39 @@ class Analyzer(object):
                 # Init tasks
                 nodes = []
                 # Create root node
-                root = filter_group.create_node(ddf=io_ddf_read_write, bin=(0, job_time), filter=filter, label='root')
+                filter_group.set_bins(ddf=io_ddf_read_write, bins=[0, job_time])
+                root = filter_group.create_node(ddf=io_ddf_read_write, bin=(0, job_time), filter=filter, parent=filter_group_node)
                 nodes.append(root)
                 # Run tasks
                 while nodes:
                     # Read nodes
                     node = nodes.pop()
                     # Analyze node
-                    potential_bottlenecks, bins, bin_step = node.analyze()
-                    # Analyze potential bottlenecks
-                    for index, bottleneck_bin in enumerate(potential_bottlenecks.index.array):
-                        # Create a node
-                        nodes.append(filter_group.create_node(ddf=node.ddf[node.ddf['tbin'] == bottleneck_bin],
-                                                              bin=(bottleneck_bin, bottleneck_bin + bin_step),
-                                                              filter=filter,
-                                                              label=potential_bottlenecks.values[index],
-                                                              parent=node))
-                root.render_tree()
+                    bottlenecks = node.analyze()
+                    for index, bottleneck_bin in enumerate(bottlenecks.index.array):
+                        start, stop = node.bin
+                        bins, bin_step = filter_group.next_bins(start=start, stop=stop)
+                        bottleneck_ddf = node.ddf[node.ddf['tbin'] == bottleneck_bin]
+                        filter_group.set_bins(ddf=bottleneck_ddf, bins=bins)
+                        for bin_index in range(len(bins) - 1):
+                            bin_ddf = bottleneck_ddf[bottleneck_ddf['tbin'] == bins[bin_index]]
+                            # Create a node
+                            nodes.append(filter_group.create_node(ddf=bin_ddf,
+                                                                  bin=(bins[bin_index], bins[bin_index + 1]),
+                                                                  filter=filter,
+                                                                  parent=node))
 
-        # Close progress
-        pbar.set_description("Analysis completed")
-        pbar.close()
+            # filter_group_node.render_tree()
+
+        analysis = AnalysisNode(filter_group_nodes=filter_group_nodes)
+        analysis.render_tree()
 
         # Cancel task
         # keep_alive_task.cancel()
 
-        return io_df_read_write, job_time
-
-    def _compute_timed(self, title: str, task: Any):
-        # Compute job time
-        t_start = perf_counter()
-        value = task.compute()
-        t_end = perf_counter()
-        # Print performance
-        if self.debug:
-            print(f"{title}: {value} ({t_end - t_start})")
-        # Return job time
-        return value
-
     def _current_n_workers(self):
         # Get current number of workers
         return len(self.client.scheduler_info()["workers"])
-
-    def _persist(self, df: DataFrame):
-        # Persist data frame
-        t_start = perf_counter()
-        df = df.persist()
-        wait(df)
-        t_end = perf_counter()
-        t_elapsed = t_end - t_start
-        # Print performance
-        if self.debug:
-            print(f"Persisting dataframe took {t_elapsed} seconds")
-        # Return job time
-        return df, t_elapsed
 
     def __initialize_cluster(self, cluster_options: ClusterOptions):
         # Prepare cluster configuration
@@ -218,11 +167,34 @@ class Analyzer(object):
         # Return initialized cluster
         return cluster
 
+    def __compute_stats(self, ddf: DataFrame, io_ddf_read_write: DataFrame):
+        # Create I/O time metrics
+        io_tend = io_ddf_read_write['tend'].max()
+        io_tstart = io_ddf_read_write['tstart'].min()
+        # Init stat tasks
+        stats_tasks = {
+            "Job time": ddf['tend'].max(),
+            "I/O time": (io_tend - io_tstart),
+            "Max duration": DurationFilter.on(io_ddf_read_write),
+            "Mean BW": BandwidthFilter.on(ddf=io_ddf_read_write),
+            "Total ranks": ParallelismFilter.on(ddf=io_ddf_read_write),
+            "Total size": IOSizeFilter.on(ddf=io_ddf_read_write)
+        }
+        # Compute stats
+        job_time, io_time, max_duration, mean_bw, total_ranks, total_size = dask.compute(*stats_tasks.values())
+        stats = [job_time, io_time, max_duration, mean_bw, total_ranks, total_size]
+        # Print stats
+        if self.debug:
+            for index, stat in enumerate(stats_tasks):
+                print(f"{stat}: {SECONDS_FORMAT.format(stats[index])}")
+        # Return stats
+        return job_time, io_time, max_duration, mean_bw, total_ranks, total_size
+
     async def __keep_workers_alive(self):
         # While the job is still executing
         while True:
             # Wait a second
-            await asyncio.sleep(WORKER_CHECK_INTERVAL)
+            await asyncio.sleep(_WORKER_CHECK_INTERVAL)
             # Check workers
             self.__wait_until_workers_alive()
 
@@ -248,7 +220,7 @@ class Analyzer(object):
             # Try correcting state
             self.cluster._correct_state()
             # Sleep a little
-            sleep(WORKER_CHECK_INTERVAL)
+            sleep(_WORKER_CHECK_INTERVAL)
             # Get current number of workers
             current_n_workers = self._current_n_workers()
         # Print result
