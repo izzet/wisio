@@ -23,12 +23,9 @@ class _Filter(object):
         raise NotImplementedError
 
 
-class _Node(object):
+class _BinNode(object):
 
     def analyze(self) -> Any:
-        raise NotImplementedError
-
-    def render_tree(self) -> None:
         raise NotImplementedError
 
 
@@ -37,13 +34,16 @@ class _FilterGroup(object):
     def calculate_bins(self, start: Any, stop: Any) -> _BinInfo:
         raise NotImplementedError
 
-    def create_node(self, ddf: DataFrame, bin: Tuple[float, float], filter: _Filter, parent=None) -> _Node:
+    def create_node(self, ddf: DataFrame, bin: Tuple[float, float], filter: _Filter, parent=None) -> _BinNode:
         raise NotImplementedError
 
     def filters(self) -> List[_Filter]:
         raise NotImplementedError
 
     def metrics_of(self, filter: _Filter) -> List[_Filter]:
+        raise NotImplementedError
+
+    def name(self) -> str:
         raise NotImplementedError
 
     def set_bins(self, ddf: DataFrame, bins: ndarray):

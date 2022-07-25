@@ -69,6 +69,18 @@ class DurationFilter(Filter):
         return ddf
 
 
+class FileFilter(Filter):
+
+    def apply(self, ddf: DataFrame) -> Any:
+        return ddf["filename"].nunique()
+
+    def name(self) -> str:
+        return "Files"
+
+    def prepare(self, ddf: DataFrame) -> Any:
+        return ddf.groupby("tbin")
+
+
 class IOSizeFilter(Filter):
 
     def apply(self, ddf: DataFrame) -> Any:
@@ -108,7 +120,7 @@ class ParallelismFilter(Filter):
 class TransferSizeFilter(Filter):
 
     def apply(self, ddf: DataFrame) -> Any:
-        return super().apply(ddf)
+        return ddf["size"].mean()/1024.0/1024.0
 
     def name(self) -> str:
         return 'Xfer Size'

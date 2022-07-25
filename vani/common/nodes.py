@@ -3,13 +3,13 @@ from anytree import NodeMixin, RenderTree
 from dask.dataframe import DataFrame
 from typing import Any, List, Tuple
 from vani.common.constants import PERCENTAGE_FORMAT, SECONDS_FORMAT, VALUE_FORMAT
-from vani.common.interfaces import _Filter, _FilterGroup, _Node
+from vani.common.interfaces import _BinNode, _Filter, _FilterGroup
 
 
-class Node(_Node, NodeMixin):
+class BinNode(_BinNode, NodeMixin):
 
     def __init__(self, ddf: DataFrame, bin: Tuple[float, float], filter_group: _FilterGroup, filter: _Filter, parent=None) -> None:
-        super(Node, self).__init__()
+        super(BinNode, self).__init__()
         start, stop = bin
         self.bin = bin
         self.bin_step = stop - start
@@ -68,6 +68,51 @@ class Node(_Node, NodeMixin):
             observations.append(observation)
         return observations
 
+    def __format_filter_lines(self, filter_name: str, lines: List[str]):
+        return f"{filter_name}={' '.join(lines)}"
+
+    def __render_node_filter_result(self):
+        lines = []
+        for index in range(len(self.filter_result)):
+            bin = self.filter_result.index.array[index]
+            bins = [bin, bin + self.bin_step]
+            bin_name = "-".join([SECONDS_FORMAT.format(bin) for bin in bins])
+            bin_label = str(self.bottlenecks.values[index] if len(self.bottlenecks) else 1)
+            bin_value = self.filter_result.values[index]
+            bin_value_fmt = VALUE_FORMAT.format(bin_value)
+            bin_percent = (bin_value/self.filter.max)*100.0
+            bin_percent_fmt = PERCENTAGE_FORMAT.format(bin_percent)
+            lines.append(" ".join([bin_label, bin_value_fmt, bin_percent_fmt]))
+        return self.__format_filter_lines(self.filter.name(), lines)
+
+    def __render_node_metric_results(self):
+        all_lines = []
+        for index, metric in enumerate(self.metrics):
+            metric_result = self.metric_results[index]
+            observation = self.observations[index]
+            lines = []
+            for observation_index in range(len(observation)):
+                bin = observation.index.array[observation_index]
+                bins = [bin, bin + self.bin_step]
+                bin_name = "-".join([SECONDS_FORMAT.format(bin) for bin in bins])
+                bin_label = str(observation.values[observation_index])
+                bin_value = metric_result.values[observation_index]
+                bin_value_fmt = VALUE_FORMAT.format(bin_value)
+                bin_percent = (bin_value/metric.max)*100.0
+                bin_percent_fmt = PERCENTAGE_FORMAT.format(bin_percent)
+                lines.append(" ".join([bin_label, bin_value_fmt, bin_percent_fmt]))
+            all_lines.append(self.__format_filter_lines(metric.name(), lines))
+        return all_lines
+
+    def __repr__(self) -> str:
+        bin_name = "-".join([SECONDS_FORMAT.format(bin) for bin in self.bin])
+        columns = []
+        filter_result_fmt = self.__render_node_filter_result()
+        metric_results_fmt = self.__render_node_metric_results()
+        columns.append(filter_result_fmt)
+        columns.extend(metric_results_fmt)
+        return f"[{bin_name}] {' | '.join(columns)}"
+
 
 class FilterGroupNode(NodeMixin):
 
@@ -85,53 +130,8 @@ class AnalysisNode(NodeMixin):
     def render_tree(self):
         for pre, fill, node in RenderTree(self):
             if isinstance(node, AnalysisNode):
-                print(f"{pre} Analysis")
+                print("%s%s" % (pre, "Analysis"))
             elif isinstance(node, FilterGroupNode):
-                print(f"{pre} Filter Group")
+                print("%s%s" % (pre, node.filter_group))
             else:
-                bin_name = "-".join([SECONDS_FORMAT.format(bin) for bin in node.bin])
-                columns = []
-                filter_result_fmt = self.__render_node_filter_result(fill=fill, node=node)
-                metric_results_fmt = self.__render_node_metric_results(fill=fill, node=node)
-                columns.append(filter_result_fmt)
-                columns.extend(metric_results_fmt)
-                print("%s%s" % (pre, f"[{bin_name}] {' | '.join(columns)}"))
-
-    def __render_node(self, fill: Any, node: _Node):
-        print("Here")
-
-    def __render_node_filter_result(self, fill: Any, node: _Node):
-        lines = []
-        for index in range(len(node.filter_result)):
-            bin = node.filter_result.index.array[index]
-            bins = [bin, bin + node.bin_step]
-            bin_name = "-".join([SECONDS_FORMAT.format(bin) for bin in bins])
-            bin_label = str(node.bottlenecks.values[index] if len(node.bottlenecks) else 1)
-            bin_value = node.filter_result.values[index]
-            bin_value_fmt = VALUE_FORMAT.format(bin_value)
-            bin_percent = (bin_value/node.filter.max)*100.0
-            bin_percent_fmt = PERCENTAGE_FORMAT.format(bin_percent)
-            lines.append(" ".join([bin_label, bin_value_fmt, bin_percent_fmt]))
-        return self.__format_filter_lines(node.filter.name(), lines)
-
-    def __render_node_metric_results(self, fill: Any, node: _Node):
-        all_lines = []
-        for index, metric in enumerate(node.metrics):
-            metric_result = node.metric_results[index]
-            observation = node.observations[index]
-            lines = []
-            for observation_index in range(len(observation)):
-                bin = observation.index.array[observation_index]
-                bins = [bin, bin + node.bin_step]
-                bin_name = "-".join([SECONDS_FORMAT.format(bin) for bin in bins])
-                bin_label = str(observation.values[observation_index])
-                bin_value = metric_result.values[observation_index]
-                bin_value_fmt = VALUE_FORMAT.format(bin_value)
-                bin_percent = (bin_value/metric.max)*100.0
-                bin_percent_fmt = PERCENTAGE_FORMAT.format(bin_percent)
-                lines.append(" ".join([bin_label, bin_value_fmt, bin_percent_fmt]))
-            all_lines.append(self.__format_filter_lines(metric.name(), lines))
-        return all_lines
-
-    def __format_filter_lines(self, filter_name: str, lines: List[str]):
-        return f"{filter_name}={' '.join(lines)}"
+                print("%s%s" % (pre, node))

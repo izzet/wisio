@@ -2,9 +2,9 @@ import numpy as np
 from dask.dataframe import DataFrame
 from numpy import ndarray
 from typing import Any, List, Tuple
-from vani.common.filters import BandwidthFilter, IOSizeFilter, ParallelismFilter
-from vani.common.interfaces import _BinInfo, _Filter, _FilterGroup, _Node
-from vani.common.nodes import Node
+from vani.common.filters import BandwidthFilter, FileFilter, IOSizeFilter, ParallelismFilter, TransferSizeFilter
+from vani.common.interfaces import _BinInfo, _BinNode, _Filter, _FilterGroup
+from vani.common.nodes import BinNode
 
 
 class FilterGroup(_FilterGroup):
@@ -12,13 +12,16 @@ class FilterGroup(_FilterGroup):
     def __init__(self, n_bins=2) -> None:
         self.n_bins = n_bins
 
-    def create_node(self, ddf: DataFrame, bin: Tuple[float, float], filter: _Filter, parent=None) -> _Node:
-        return Node(ddf=ddf, bin=bin, filter_group=self, filter=filter, parent=parent)
+    def create_node(self, ddf: DataFrame, bin: Tuple[float, float], filter: _Filter, parent=None) -> _BinNode:
+        return BinNode(ddf=ddf, bin=bin, filter_group=self, filter=filter, parent=parent)
+
+    def __repr__(self) -> str:
+        return self.name()
 
 
 class TimelineFilterGroup(FilterGroup):
 
-    def __init__(self, job_time: float, total_size: float, mean_bw: float, max_duration: float, total_ranks: int, n_bins=2) -> None:
+    def __init__(self, job_time: float, total_size: float, mean_bw: float, max_duration: float, total_ranks: int, total_files: int, n_bins=2) -> None:
         super().__init__(n_bins)
         assert job_time > 0
         assert mean_bw > 0
@@ -30,11 +33,14 @@ class TimelineFilterGroup(FilterGroup):
         self.max_duration = max_duration
         self.total_ranks = total_ranks
         self.total_size = total_size
+        self.total_files = total_files
         # Init filters
         self.filter_instances = [
             IOSizeFilter(min=0, max=self.total_size, n_bins=n_bins),
             BandwidthFilter(min=0, max=self.mean_bw, n_bins=n_bins),
-            ParallelismFilter(min=0, max=self.total_ranks, n_bins=n_bins)
+            ParallelismFilter(min=0, max=self.total_ranks, n_bins=n_bins),
+            FileFilter(min=0, max=self.total_files, n_bins=n_bins),
+            # TransferSizeFilter(min=0, max=1, n_bins=n_bins)
         ]
 
     def filters(self) -> List[_Filter]:
@@ -42,6 +48,9 @@ class TimelineFilterGroup(FilterGroup):
 
     def metrics_of(self, filter: _Filter) -> List[_Filter]:
         return [metric for metric in self.filters() if metric != filter]
+
+    def name(self) -> str:
+        return "Timeline Analysis"
 
     def next_bins(self, start: Any, stop: Any) -> _BinInfo:
         # Return linear space between start and stop
