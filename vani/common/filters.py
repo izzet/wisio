@@ -74,6 +74,9 @@ class FileFilter(Filter):
     def apply(self, ddf: DataFrame) -> Any:
         return ddf["filename"].nunique()
 
+    def is_inversed(self) -> bool:
+        return True
+
     def name(self) -> str:
         return "Files"
 
