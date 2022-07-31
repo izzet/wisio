@@ -16,6 +16,9 @@ class _Filter(object):
     def is_inversed(self) -> bool:
         raise NotImplementedError
 
+    def is_normally_distributed(self) -> bool:
+        raise NotImplementedError
+
     def name(self) -> str:
         raise NotImplementedError
 

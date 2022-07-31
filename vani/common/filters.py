@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from dask.dataframe import DataFrame, Series
+from scipy import stats
 from typing import Any
 from vani.common.interfaces import _Filter
 
@@ -18,23 +19,35 @@ class Filter(_Filter):
         # Create min/max indices
         min_max_indices = [np.finfo(float).min, np.finfo(float).max]
         min_max_values = [self.min, self.max]
+        # Check if the filter is normally distributed
+        if self.is_normally_distributed():
+            min_max_values = [self.min, self.max/2]
         # Check if the effect of the filter is inversed
         if self.is_inversed():
-            labels = [label for label in reversed(labels)]
-            min_max_indices = [np.finfo(float).max, np.finfo(float).min]
-            min_max_values = [self.max, self.min]
+            labels = list(reversed(labels))
+            min_max_indices = list(reversed(min_max_indices))
+            min_max_values = list(reversed(min_max_values))
         # Add zeroed bin to fix labeling, this has no effect if there's already 0-indexed bins
         min_max_bins = pd.Series(min_max_values, index=min_max_indices)
         fixed_results = results.add(min_max_bins, fill_value=0).sort_values(ascending=False)
-        # Label results
+        # Check if the filter is normally distributed
+        if self.is_normally_distributed():
+            normalized_results = stats.norm.pdf(fixed_results, loc=self.max/2, scale=np.std(fixed_results))
+            fixed_results = pd.Series(normalized_results, index=fixed_results.index)
+            # Label results
         labeled_results = pd.cut(fixed_results, bins=self.n_bins, labels=labels)
         # Delete the effect of min/max bins
         for min_max_index in min_max_indices:
             del labeled_results[min_max_index]
         # Flag >50% problematic or all depending on threshold
+        if self.is_inversed():
+            return labeled_results[labeled_results < int(self.n_bins / 2)] if threshold else labeled_results
         return labeled_results[labeled_results > int(self.n_bins / 2)] if threshold else labeled_results
 
     def is_inversed(self) -> bool:
+        return False
+
+    def is_normally_distributed(self) -> bool:
         return False
 
     @classmethod
@@ -112,6 +125,12 @@ class ParallelismFilter(Filter):
 
     def apply(self, ddf: DataFrame) -> Any:
         return ddf["rank"].nunique()
+
+    def is_inversed(self) -> bool:
+        return True
+
+    def is_normally_distributed(self) -> bool:
+        return True
 
     def name(self) -> str:
         return 'Parallelism'
