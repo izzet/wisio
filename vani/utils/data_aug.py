@@ -1,11 +1,10 @@
 from dask.dataframe import DataFrame
 
 
-def set_bandwidths(io_df_read_write: DataFrame):
-    correct_dur = ((io_df_read_write['tend'] - io_df_read_write['tstart']) > 0)
-    io_df_read_write['bandwidth'] = 0
-    io_df_read_write['bandwidth'] = io_df_read_write['bandwidth'].mask(
-        correct_dur, io_df_read_write['size']*1.0/(io_df_read_write['tend'] - io_df_read_write['tstart'])/1024.0/1024.0)
+def set_bandwidths(ddf: DataFrame, duration_column_name='duration'):
+    correct_dur = ((ddf['tend'] - ddf['tstart']) > 0)
+    ddf['bandwidth'] = 0
+    ddf['bandwidth'] = ddf['bandwidth'].mask(correct_dur, ddf['size'] / ddf[duration_column_name])
 
 
 def set_durations(io_df: DataFrame, duration_column_name='duration', time_start_column_name='tstart', time_end_column_name='tend'):

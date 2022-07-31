@@ -45,7 +45,7 @@ class Filter(_Filter):
 class BandwidthFilter(Filter):
 
     def apply(self, ddf: DataFrame) -> Any:
-        return ddf["bandwidth"].mean()/1024.0
+        return ddf["bandwidth"].mean()/1024.0/1024.0/1024.0
 
     def is_inversed(self) -> bool:
         return True
