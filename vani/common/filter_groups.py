@@ -6,7 +6,7 @@ from vani.common.filters import BandwidthFilter, FileFilter, IOSizeFilter, Paral
 from vani.common.interfaces import _BinInfo, _BinNode, _Filter, _FilterGroup
 from vani.common.nodes import BinNode
 
-__NUM_NEXT_BINS = 3
+_NUM_NEXT_BINS = 3
 
 
 class FilterGroup(_FilterGroup):
@@ -57,7 +57,7 @@ class TimelineFilterGroup(FilterGroup):
 
     def next_bins(self, start: Any, stop: Any) -> _BinInfo:
         # Return linear space between start and stop
-        return np.linspace(start, stop, num=__NUM_NEXT_BINS, retstep=True)
+        return np.linspace(start, stop, num=_NUM_NEXT_BINS, retstep=True)
 
     def set_bins(self, ddf: DataFrame, bins: ndarray):
         # Clear tbin values first
