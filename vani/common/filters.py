@@ -58,7 +58,7 @@ class Filter(_Filter):
 class BandwidthFilter(Filter):
 
     def apply(self, ddf: DataFrame) -> Any:
-        return ddf["bandwidth"].mean()/1024.0/1024.0/1024.0
+        return ddf['bandwidth'].mean()/1024.0/1024.0/1024.0
 
     def is_inversed(self) -> bool:
         return True
@@ -67,13 +67,13 @@ class BandwidthFilter(Filter):
         return 'Bandwidth'
 
     def prepare(self, ddf: DataFrame) -> Any:
-        return ddf.groupby("tbin")
+        return ddf.groupby('tbin')
 
 
 class DurationFilter(Filter):
 
     def apply(self, ddf: DataFrame) -> Any:
-        return ddf["duration"].max()
+        return ddf['duration'].max()
 
     def name(self) -> str:
         return 'Duration'
@@ -85,7 +85,7 @@ class DurationFilter(Filter):
 class FileFilter(Filter):
 
     def apply(self, ddf: DataFrame) -> Any:
-        return ddf["filename"].nunique()
+        return ddf['filename'].nunique()
 
     def is_inversed(self) -> bool:
         return True
@@ -94,6 +94,8 @@ class FileFilter(Filter):
         return "Files"
 
     def prepare(self, ddf: DataFrame) -> Any:
+        return ddf.groupby('tbin')
+
 
 class IOOpsFilter(Filter):
 
@@ -110,13 +112,13 @@ class IOOpsFilter(Filter):
 class IOSizeFilter(Filter):
 
     def apply(self, ddf: DataFrame) -> Any:
-        return ddf["size"].sum()/1024.0/1024.0/1024.0
+        return ddf['size'].sum()/1024.0/1024.0/1024.0
 
     def name(self) -> str:
         return 'Size'
 
     def prepare(self, ddf: DataFrame) -> Any:
-        return ddf.groupby("tbin")
+        return ddf.groupby('tbin')
 
 
 class IOTimeFilter(Filter):
@@ -136,7 +138,7 @@ class IOTimeFilter(Filter):
 class ParallelismFilter(Filter):
 
     def apply(self, ddf: DataFrame) -> Any:
-        return ddf["rank"].nunique()
+        return ddf['rank'].nunique()
 
     def is_inversed(self) -> bool:
         return True
@@ -145,19 +147,19 @@ class ParallelismFilter(Filter):
         return True
 
     def name(self) -> str:
-        return 'Parallelism'
+        return "Parallelism"
 
     def prepare(self, ddf: DataFrame) -> Any:
-        return ddf.groupby("tbin")
+        return ddf.groupby('tbin')
 
 
 class TransferSizeFilter(Filter):
 
     def apply(self, ddf: DataFrame) -> Any:
-        return ddf["size"].mean()/1024.0/1024.0/1024.0
+        return ddf['size'].mean()/1024.0/1024.0/1024.0
 
     def name(self) -> str:
-        return 'Xfer Size'
+        return "Xfer Size"
 
     def prepare(self, ddf: DataFrame) -> Any:
-        return ddf.groupby("tbin")
+        return ddf.groupby('tbin')
