@@ -94,7 +94,17 @@ class FileFilter(Filter):
         return "Files"
 
     def prepare(self, ddf: DataFrame) -> Any:
-        return ddf.groupby("tbin")
+
+class IOOpsFilter(Filter):
+
+    def apply(self, ddf: DataFrame) -> Any:
+        return ddf['index'].count()
+
+    def name(self) -> str:
+        return "Ops"
+
+    def prepare(self, ddf: DataFrame) -> Any:
+        return ddf.groupby('tbin')
 
 
 class IOSizeFilter(Filter):
@@ -112,13 +122,15 @@ class IOSizeFilter(Filter):
 class IOTimeFilter(Filter):
 
     def apply(self, ddf: DataFrame) -> Any:
-        print("IOTimeFilter")
+        io_time = ddf['duration'].sum()
+        n_ranks = ddf['rank'].nunique()
+        return io_time / n_ranks
 
     def name(self) -> str:
         return 'Time'
 
     def prepare(self, ddf: DataFrame) -> Any:
-        return ddf.groupby("tbin")
+        return ddf.groupby('tbin')
 
 
 class ParallelismFilter(Filter):
