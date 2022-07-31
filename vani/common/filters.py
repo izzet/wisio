@@ -142,7 +142,7 @@ class ParallelismFilter(Filter):
 class TransferSizeFilter(Filter):
 
     def apply(self, ddf: DataFrame) -> Any:
-        return ddf["size"].mean()/1024.0/1024.0
+        return ddf["size"].mean()/1024.0/1024.0/1024.0
 
     def name(self) -> str:
         return 'Xfer Size'
