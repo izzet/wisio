@@ -7,67 +7,67 @@ def set_bandwidths(ddf: DataFrame, duration_column_name='duration'):
     ddf['bandwidth'] = ddf['bandwidth'].mask(correct_dur, ddf['size'] / ddf[duration_column_name])
 
 
-def set_durations(io_df: DataFrame, duration_column_name='duration', time_start_column_name='tstart', time_end_column_name='tend'):
+def set_durations(ddf: DataFrame, duration_column_name='duration', time_start_column_name='tstart', time_end_column_name='tend'):
     # Set durations according tend - tstart
-    io_df[duration_column_name] = io_df[time_end_column_name] - io_df[time_start_column_name]
-    io_df['tmid'] = (io_df[time_end_column_name] + io_df[time_start_column_name])/2.0
+    ddf[duration_column_name] = ddf[time_end_column_name] - ddf[time_start_column_name]
+    ddf['tmid'] = (ddf[time_end_column_name] + ddf[time_start_column_name]) / 2.0
 
 
-def set_filenames(io_df: DataFrame):
+def set_filenames(ddf: DataFrame):
     # Prepare conditions
-    read_condition, write_condition = _read_write_cond_io_df(io_df)
-    open_condition = io_df['func_id'].str.contains("open")
-    mpi_condition = io_df['func_id'].str.contains("MPI")
-    fread_condition = io_df['func_id'].isin(["fread"])
-    close_condition = io_df['func_id'].str.contains('close')
-    fwrite_condition = io_df['func_id'].isin(["fwrite"])
-    readdir_condition = io_df['func_id'].isin(["readdir"])
+    read_condition, write_condition = _read_write_cond_io_df(ddf)
+    open_condition = ddf['func_id'].str.contains("open")
+    mpi_condition = ddf['func_id'].str.contains("MPI")
+    fread_condition = ddf['func_id'].isin(["fread"])
+    close_condition = ddf['func_id'].str.contains('close')
+    fwrite_condition = ddf['func_id'].isin(["fwrite"])
+    readdir_condition = ddf['func_id'].isin(["readdir"])
     # Then set corresponding filenames
-    io_df['filename'] = ""
-    io_df['filename'] = io_df['filename'].mask(open_condition & ~mpi_condition, io_df['args_1'])
-    io_df['filename'] = io_df['filename'].mask(open_condition & mpi_condition, io_df['args_2'])
-    io_df['filename'] = io_df['filename'].mask(close_condition, io_df['args_1'])
-    io_df['filename'] = io_df['filename'].mask(read_condition, io_df['args_1'])
-    io_df['filename'] = io_df['filename'].mask(fread_condition, io_df['args_4'])
-    io_df['filename'] = io_df['filename'].mask(write_condition, io_df['args_1'])
-    io_df['filename'] = io_df['filename'].mask(fwrite_condition, io_df['args_4'])
+    ddf['filename'] = ""
+    ddf['filename'] = ddf['filename'].mask(open_condition & ~mpi_condition, ddf['args_1'])
+    ddf['filename'] = ddf['filename'].mask(open_condition & mpi_condition, ddf['args_2'])
+    ddf['filename'] = ddf['filename'].mask(close_condition, ddf['args_1'])
+    ddf['filename'] = ddf['filename'].mask(read_condition, ddf['args_1'])
+    ddf['filename'] = ddf['filename'].mask(fread_condition, ddf['args_4'])
+    ddf['filename'] = ddf['filename'].mask(write_condition, ddf['args_1'])
+    ddf['filename'] = ddf['filename'].mask(fwrite_condition, ddf['args_4'])
     # Lastly, fix slashes
-    io_df['filename'] = io_df['filename'].str.replace('//', '/')
+    ddf['filename'] = ddf['filename'].str.replace('//', '/')
 
 
-def set_sizes_counts(io_df_read_write: DataFrame):
+def set_sizes_counts(ddf: DataFrame):
     # Prepare conditions
-    read_condition, fread_condition, write_condition, fwrite_condition = _read_write_cond_io_df_ext(io_df_read_write)
-    readdir_condition = io_df_read_write['func_id'].isin(["readdir"])
+    read_condition, fread_condition, write_condition, fwrite_condition = _read_write_cond_io_df_ext(ddf)
+    readdir_condition = ddf['func_id'].isin(["readdir"])
     # Then set corresponding sizes & counts
-    io_df_read_write['size'] = 0
-    io_df_read_write['count'] = 1
-    io_df_read_write['size'] = io_df_read_write['size'].mask(read_condition, io_df_read_write['args_3'])
-    io_df_read_write['size'] = io_df_read_write['size'].mask(fread_condition, io_df_read_write['args_3'])
-    io_df_read_write['count'] = io_df_read_write['count'].mask(fread_condition, io_df_read_write['args_2'])
-    io_df_read_write['size'] = io_df_read_write['size'].mask(write_condition, io_df_read_write['args_3'])
-    io_df_read_write['size'] = io_df_read_write['size'].mask(fwrite_condition, io_df_read_write['args_3'])
-    io_df_read_write['count'] = io_df_read_write['count'].mask(fwrite_condition, io_df_read_write['args_2'])
+    ddf['size'] = 0
+    ddf['count'] = 1
+    ddf['size'] = ddf['size'].mask(read_condition, ddf['args_3'])
+    ddf['size'] = ddf['size'].mask(fread_condition, ddf['args_3'])
+    ddf['count'] = ddf['count'].mask(fread_condition, ddf['args_2'])
+    ddf['size'] = ddf['size'].mask(write_condition, ddf['args_3'])
+    ddf['size'] = ddf['size'].mask(fwrite_condition, ddf['args_3'])
+    ddf['count'] = ddf['count'].mask(fwrite_condition, ddf['args_2'])
     # Handle corner cases
-    io_df_read_write['size'] = io_df_read_write['size'].mask(readdir_condition, "0")
-    io_df_read_write['count'] = io_df_read_write['count'].mask(readdir_condition, "1")
+    ddf['size'] = ddf['size'].mask(readdir_condition, "0")
+    ddf['count'] = ddf['count'].mask(readdir_condition, "1")
     # Set data types
-    io_df_read_write[['size', 'count']] = io_df_read_write[['size', 'count']].astype(float)
+    ddf[['size', 'count']] = ddf[['size', 'count']].astype(float)
 
 
-def _read_write_cond_io_df(io_df: DataFrame):
+def _read_write_cond_io_df(ddf: DataFrame):
     # Prepare conditions
-    read_condition = io_df['func_id'].isin(["read", "pread", "pread64", "readv"])
-    write_condition = io_df['func_id'].isin(["write", "pwrite", "pwrite64", "writev"])
+    read_condition = ddf['func_id'].isin(["read", "pread", "pread64", "readv"])
+    write_condition = ddf['func_id'].isin(["write", "pwrite", "pwrite64", "writev"])
     # Return conditions
     return read_condition, write_condition
 
 
-def _read_write_cond_io_df_ext(io_df: DataFrame):
+def _read_write_cond_io_df_ext(ddf: DataFrame):
     # Prepare conditions
-    read_condition = io_df['func_id'].isin(["read", "pread", "pread64", "readv"])
-    fread_condition = io_df['func_id'].isin(["fread"])
-    write_condition = io_df['func_id'].isin(["write", "pwrite", "pwrite64", "writev"])
-    fwrite_condition = io_df['func_id'].isin(["fwrite"])
+    read_condition = ddf['func_id'].isin(["read", "pread", "pread64", "readv"])
+    fread_condition = ddf['func_id'].isin(["fread"])
+    write_condition = ddf['func_id'].isin(["write", "pwrite", "pwrite64", "writev"])
+    fwrite_condition = ddf['func_id'].isin(["fwrite"])
     # Return conditions
     return read_condition, fread_condition, write_condition, fwrite_condition
