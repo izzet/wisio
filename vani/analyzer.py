@@ -15,8 +15,6 @@ from vani.common.filters import BandwidthFilter, DurationFilter, FileFilter, IOS
 from vani.common.nodes import AnalysisNode, BinNode, FilterGroupNode
 from vani.utils.data_filtering import filter_non_io_traces, split_io_mpi_trace, split_read_write_metadata
 
-
-# Define constants
 _WORKER_CHECK_INTERVAL = 5.0
 
 
@@ -53,7 +51,7 @@ class Analyzer(object):
         # keep_alive_task = asyncio.create_task(self.__keep_workers_alive())
 
         # Read logs into a dataframe
-        ddf = self.__read_parquet(log_dir=log_dir)
+        ddf = self._read_parquet(log_dir=log_dir)
 
         # Filter non-I/O traces (except for MPI)
         # Split dataframe into I/O, MPI and trace
@@ -78,7 +76,6 @@ class Analyzer(object):
                                 n_bins=10)
         ]
 
-        analysis_counter_start = perf_counter()
         filter_group_nodes = []
 
         # Loop through filter groups
@@ -150,39 +147,40 @@ class Analyzer(object):
             # Build line
             lines.append(f"{';'.join(reversed(columns))} {stop-start}")
         # Write lines into output file
-        with open(output_path, "w") as file:
+        with open(output_path, 'w') as file:
             file.write('\n'.join(lines))
 
     def _current_n_workers(self):
         # Get current number of workers
-        return len(self.client.scheduler_info()["workers"])
+        return len(self.client.scheduler_info()['workers'])
 
     def __initialize_cluster(self, cluster_options: ClusterOptions):
         # Prepare cluster configuration
-        cores = cluster_options.cluster_settings.get("cores", 4)
-        processes = cluster_options.cluster_settings.get("processes", 4)
-        memory = cluster_options.cluster_settings.get("memory", '{}GB'.format(128))
-        use_stdin = cluster_options.cluster_settings.get("use_stdin", True)
-        worker_time = cluster_options.cluster_settings.get("worker_time", "02:00")
-        worker_queue = cluster_options.cluster_settings.get("worker_queue", "pdebug")
-        log_file = cluster_options.cluster_settings.get("log_file", "vani.log")
-        host = cluster_options.cluster_settings.get("host", socket.gethostname())
-        dashboard_address = cluster_options.cluster_settings.get("dashboard_address", '{}:8264'.format(host))
+        cores = cluster_options.cluster_settings.get('cores', 4)
+        processes = cluster_options.cluster_settings.get('processes', 4)
+        memory = cluster_options.cluster_settings.get('memory', '{}GB'.format(128))
+        use_stdin = cluster_options.cluster_settings.get('use_stdin', True)
+        worker_time = cluster_options.cluster_settings.get('worker_time', '02:00')
+        worker_queue = cluster_options.cluster_settings.get('worker_queue', 'pdebug')
+        log_file = cluster_options.cluster_settings.get('log_file', 'vani.log')
+        host = cluster_options.cluster_settings.get('host', socket.gethostname())
+        dashboard_address = cluster_options.cluster_settings.get('dashboard_address', '{}:8264'.format(host))
         # Create empty cluster
         cluster = None
         # Check specificed cluster type
         if (cluster_options.cluster_type is ClusterType.Local):
-            os.environ["BBPATH"] = os.environ.get('BBPATH', "/tmp")
+            user = os.environ.get('USER')
+            local_directory = os.environ.get('BBPATH', f"/tmp/{user}/vani-analysis-tool")
             cluster = LocalCluster(n_workers=8,
-                                   local_directory=os.environ["BBPATH"])
+                                   local_directory=local_directory)
         elif (cluster_options.cluster_type is ClusterType.LSF):
             # Initialize cluster
             cluster = LSFCluster(cores=cores,
                                  processes=processes,
                                  memory=memory,
-                                 scheduler_options={"dashboard_address": dashboard_address, "host": host},
+                                 scheduler_options={'dashboard_address': dashboard_address, 'host': host},
                                  death_timeout=300,
-                                 header_skip=['-n', '-R', '-M', '-P', '-W 00:30'],
+                                 header_skip=['-N', '-R', '-M', '-P', '-W 00:30'],
                                  job_extra=['-nnodes 1',
                                             '-G asccasc',
                                             '-q {}'.format(worker_queue),
@@ -214,8 +212,8 @@ class Analyzer(object):
         }
         # Compute stats
         job_time, io_time, max_duration, mean_bw, total_ranks, total_size, total_files = dask.compute(*stats_tasks.values())
-        stats = [job_time, io_time, max_duration, mean_bw, total_ranks, total_size, total_files]
         # Print stats
+        stats = [job_time, io_time, max_duration, mean_bw, total_ranks, total_size, total_files]
         if self.debug:
             for index, stat in enumerate(stats_tasks):
                 print(f"{stat}: {SECONDS_FORMAT.format(stats[index])}")
@@ -230,10 +228,10 @@ class Analyzer(object):
             # Check workers
             self.__wait_until_workers_alive()
 
-    def __read_parquet(self, log_dir: str, engine="pyarrow-dataset"):
+    def _read_parquet(self, log_dir: str, engine='auto'):
         # Read logs into a dataframe
         t_start = perf_counter()
-        df = dd.read_parquet("{}/*.parquet".format(log_dir), engine=engine)
+        df = dd.read_parquet(f"{log_dir}/*.parquet", engine=engine)
         t_end = perf_counter()
         # Print performance
         if self.debug:
@@ -245,7 +243,7 @@ class Analyzer(object):
         # Get current number of workers
         current_n_workers = self._current_n_workers()
         # Wait until enough number of workers alive
-        while (self.client.status == "running" and current_n_workers < self.n_workers):
+        while (self.client.status == 'running' and current_n_workers < self.n_workers):
             # Print current status
             if self.debug:
                 print(f"{current_n_workers}/{self.n_workers} workers running", end="\r")
