@@ -57,7 +57,7 @@ class BinNode(_BinNode, NodeMixin):
         return metric_tasks
 
     def __detect_filter_bottlenecks(self, filter_result: Any) -> Any:
-        return self.filter.detect_bottlenecks(results=filter_result, threshold=True)
+        return self.filter.detect_bottlenecks(results=filter_result, threshold=False)
 
     def __detect_metric_bottlenecks(self, metric_results: Any) -> Any:
         # Init observations

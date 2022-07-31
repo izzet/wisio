@@ -48,7 +48,7 @@ class Analyzer(object):
             self.cluster.scale(n_workers)
             self.__wait_until_workers_alive()
 
-    def analyze_parquet_logs(self, log_dir: str, max_depth=5):
+    def analyze_parquet_logs(self, log_dir: str, max_depth=3):
         # Keep workers alive
         # keep_alive_task = asyncio.create_task(self.__keep_workers_alive())
 
@@ -75,7 +75,7 @@ class Analyzer(object):
                                 max_duration=max_duration,
                                 total_ranks=total_ranks,
                                 total_files=total_files,
-                                n_bins=2)
+                                n_bins=10)
         ]
 
         analysis_counter_start = perf_counter()
@@ -122,6 +122,7 @@ class Analyzer(object):
                                                                   bin=(bins[bin_index], bins[bin_index + 1]),
                                                                   filter=filter,
                                                                   parent=node))
+                break
 
         analysis = AnalysisNode(filter_group_nodes=filter_group_nodes)
 

@@ -6,6 +6,8 @@ from vani.common.filters import BandwidthFilter, FileFilter, IOSizeFilter, Paral
 from vani.common.interfaces import _BinInfo, _BinNode, _Filter, _FilterGroup
 from vani.common.nodes import BinNode
 
+__NUM_NEXT_BINS = 3
+
 
 class FilterGroup(_FilterGroup):
 
@@ -28,6 +30,7 @@ class TimelineFilterGroup(FilterGroup):
         assert max_duration > 0
         assert total_ranks > 0
         assert total_size > 0
+        # Set filter group stats
         self.job_time = job_time
         self.mean_bw = mean_bw
         self.max_duration = max_duration
@@ -54,13 +57,14 @@ class TimelineFilterGroup(FilterGroup):
 
     def next_bins(self, start: Any, stop: Any) -> _BinInfo:
         # Return linear space between start and stop
-        return np.linspace(start, stop, num=self.n_bins + 1, retstep=True)
+        return np.linspace(start, stop, num=__NUM_NEXT_BINS, retstep=True)
 
     def set_bins(self, ddf: DataFrame, bins: ndarray):
         # Clear tbin values first
         ddf['tbin'] = 0
         # Then set bins
         for bin_index in range(len(bins) - 1):
+            # Read bin range
             bin_start = bins[bin_index]
             bin_stop = bins[bin_index + 1]
             # 0 <= tmid < 3.744676801893446
