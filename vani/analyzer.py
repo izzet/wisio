@@ -11,7 +11,7 @@ from enum import Enum
 from time import perf_counter, sleep
 from vani.common.constants import SECONDS_FORMAT
 from vani.common.filter_groups import TimelineFilterGroup
-from vani.common.filters import BandwidthFilter, DurationFilter, FileFilter, IOSizeFilter, ParallelismFilter
+from vani.common.filters import *
 from vani.common.nodes import AnalysisNode, BinNode, FilterGroupNode
 from vani.utils.data_filtering import filter_non_io_traces, split_io_mpi_trace, split_read_write_metadata
 
@@ -62,17 +62,20 @@ class Analyzer(object):
 
         # Compute stats
         print("---------------")
-        job_time, io_time, max_duration, mean_bw, total_ranks, total_size, total_files = self.__compute_stats(ddf=ddf, io_ddf_read_write=io_ddf_read_write)
+        job_time, io_time, max_duration, mean_bw, total_ranks, total_size, total_files, total_ops = self.__compute_stats(
+            ddf=ddf, io_ddf_read_write=io_ddf_read_write)
         print("---------------")
 
         # Define filter groups
         filter_groups = [
             TimelineFilterGroup(job_time=job_time,
+                                io_time=io_time,
                                 total_size=total_size,
                                 mean_bw=mean_bw,
                                 max_duration=max_duration,
                                 total_ranks=total_ranks,
                                 total_files=total_files,
+                                total_ops=total_ops,
                                 n_bins=10)
         ]
 
@@ -197,28 +200,26 @@ class Analyzer(object):
         return cluster
 
     def __compute_stats(self, ddf: DataFrame, io_ddf_read_write: DataFrame):
-        # Create I/O time metrics
-        io_tend = io_ddf_read_write['tend'].max()
-        io_tstart = io_ddf_read_write['tstart'].min()
         # Init stat tasks
         stats_tasks = {
             "Job time": ddf['tend'].max(),
-            "I/O time": (io_tend - io_tstart),
+            "I/O time pp.": IOTimeFilter.on(ddf=io_ddf_read_write),
             "Max duration": DurationFilter.on(io_ddf_read_write),
             "Mean BW": BandwidthFilter.on(ddf=io_ddf_read_write),
             "Total ranks": ParallelismFilter.on(ddf=io_ddf_read_write),
             "Total size": IOSizeFilter.on(ddf=io_ddf_read_write),
-            "Total files": FileFilter.on(ddf=io_ddf_read_write)
+            "Total files": FileFilter.on(ddf=io_ddf_read_write),
+            "Total ops": IOOpsFilter.on(ddf=io_ddf_read_write)
         }
         # Compute stats
-        job_time, io_time, max_duration, mean_bw, total_ranks, total_size, total_files = dask.compute(*stats_tasks.values())
+        job_time, io_time, max_duration, mean_bw, total_ranks, total_size, total_files, total_ops = dask.compute(*stats_tasks.values())
         # Print stats
-        stats = [job_time, io_time, max_duration, mean_bw, total_ranks, total_size, total_files]
+        stats = [job_time, io_time, max_duration, mean_bw, total_ranks, total_size, total_files, total_ops]
         if self.debug:
             for index, stat in enumerate(stats_tasks):
                 print(f"{stat}: {SECONDS_FORMAT.format(stats[index])}")
         # Return stats
-        return job_time, io_time, max_duration, mean_bw, total_ranks, total_size, total_files
+        return job_time, io_time, max_duration, mean_bw, total_ranks, total_size, total_files, total_ops
 
     async def __keep_workers_alive(self):
         # While the job is still executing

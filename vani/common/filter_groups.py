@@ -2,7 +2,7 @@ import numpy as np
 from dask.dataframe import DataFrame
 from numpy import ndarray
 from typing import Any, List, Tuple
-from vani.common.filters import BandwidthFilter, FileFilter, IOSizeFilter, ParallelismFilter, TransferSizeFilter
+from vani.common.filters import *
 from vani.common.interfaces import _BinInfo, _BinNode, _Filter, _FilterGroup
 from vani.common.nodes import BinNode
 
@@ -23,7 +23,7 @@ class FilterGroup(_FilterGroup):
 
 class TimelineFilterGroup(FilterGroup):
 
-    def __init__(self, job_time: float, total_size: float, mean_bw: float, max_duration: float, total_ranks: int, total_files: int, n_bins=2) -> None:
+    def __init__(self, job_time: float, io_time: float, total_size: float, mean_bw: float, max_duration: float, total_ranks: int, total_files: int, total_ops: int, n_bins=2) -> None:
         super().__init__(n_bins)
         assert job_time > 0
         assert mean_bw > 0
@@ -31,18 +31,22 @@ class TimelineFilterGroup(FilterGroup):
         assert total_ranks > 0
         assert total_size > 0
         # Set filter group stats
+        self.io_time = io_time
         self.job_time = job_time
-        self.mean_bw = mean_bw
         self.max_duration = max_duration
+        self.mean_bw = mean_bw
+        self.total_files = total_files
+        self.total_ops = total_ops
         self.total_ranks = total_ranks
         self.total_size = total_size
-        self.total_files = total_files
         # Init filters
         self.filter_instances = [
             IOSizeFilter(min=0, max=self.total_size, n_bins=n_bins),
+            IOTimeFilter(min=0, max=self.io_time, n_bins=n_bins),
+            IOOpsFilter(min=0, max=self.total_ops, n_bins=n_bins),
+            FileFilter(min=0, max=self.total_files, n_bins=n_bins),
             BandwidthFilter(min=0, max=self.mean_bw, n_bins=n_bins),
             ParallelismFilter(min=0, max=self.total_ranks, n_bins=n_bins),
-            FileFilter(min=0, max=self.total_files, n_bins=n_bins),
             # TransferSizeFilter(min=0, max=1, n_bins=n_bins)
         ]
 
