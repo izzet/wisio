@@ -40,10 +40,16 @@ class _BinNode(object):
 
 class _FilterGroup(object):
 
+    def binned_by(self) -> str:
+        raise NotImplementedError
+
     def calculate_bins(self, start: Any, stop: Any) -> _BinInfo:
         raise NotImplementedError
 
     def create_node(self, ddf: DataFrame, bin: Tuple[float, float], filter: _Filter, parent=None) -> _BinNode:
+        raise NotImplementedError
+
+    def create_root(self, ddf: DataFrame, filter: _Filter, parent=None) -> _BinNode:
         raise NotImplementedError
 
     def filters(self) -> List[_Filter]:
@@ -53,6 +59,9 @@ class _FilterGroup(object):
         raise NotImplementedError
 
     def name(self) -> str:
+        raise NotImplementedError
+
+    def prepare(self, ddf: DataFrame, debug=False) -> None:
         raise NotImplementedError
 
     def set_bins(self, ddf: DataFrame, bins: ndarray):

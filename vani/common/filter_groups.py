@@ -1,7 +1,9 @@
+import dask
 import numpy as np
 from dask.dataframe import DataFrame
 from numpy import ndarray
 from typing import Any, List, Tuple
+from vani.common.constants import SECONDS_FORMAT
 from vani.common.filters import *
 from vani.common.interfaces import _BinInfo, _BinNode, _Filter, _FilterGroup
 from vani.common.nodes import BinNode
@@ -23,33 +25,18 @@ class FilterGroup(_FilterGroup):
 
 class TimelineFilterGroup(FilterGroup):
 
-    def __init__(self, job_time: float, io_time: float, total_size: float, mean_bw: float, max_duration: float, max_size: float, total_ranks: int, total_files: int, total_ops: int, n_bins=2) -> None:
+    def __init__(self, job_time: float, n_bins=2) -> None:
         super().__init__(n_bins)
         assert job_time > 0
-        assert mean_bw > 0
-        assert max_duration > 0
-        assert total_ranks > 0
-        assert total_size > 0
-        # Set filter group stats
-        self.io_time = io_time
         self.job_time = job_time
-        self.max_duration = max_duration
-        self.max_size = max_size
-        self.mean_bw = mean_bw
-        self.total_files = total_files
-        self.total_ops = total_ops
-        self.total_ranks = total_ranks
-        self.total_size = total_size
-        # Init filters
-        self.filter_instances = [
-            IOSizeFilter(min=0, max=self.total_size, n_bins=n_bins),
-            IOTimeFilter(min=0, max=self.io_time, n_bins=n_bins),
-            IOOpsFilter(min=0, max=self.total_ops, n_bins=n_bins),
-            FileFilter(min=0, max=self.total_files, n_bins=n_bins),
-            BandwidthFilter(min=0, max=self.mean_bw, n_bins=n_bins),
-            ParallelismFilter(min=0, max=self.total_ranks, n_bins=n_bins),
-            TransferSizeFilter(min=0, max=self.max_size, n_bins=n_bins)
-        ]
+        self.n_bins = n_bins
+
+    def binned_by(self) -> str:
+        return 'tbin'
+
+    def create_root(self, ddf: DataFrame, filter: _Filter, parent=None) -> _BinNode:
+        self.set_bins(ddf=ddf, bins=[0, self.job_time])
+        return self.create_node(ddf=ddf, bin=(0, self.job_time), filter=filter, parent=parent)
 
     def filters(self) -> List[_Filter]:
         return self.filter_instances
@@ -64,9 +51,49 @@ class TimelineFilterGroup(FilterGroup):
         # Return linear space between start and stop
         return np.linspace(start, stop, num=_NUM_NEXT_BINS, retstep=True)
 
+    def prepare(self, ddf: DataFrame, debug=False) -> None:
+        # Init stat tasks
+        stats_tasks = {
+            "I/O time/p": IOTimeFilter.on(ddf=ddf),
+            "Max duration": DurationFilter.on(ddf=ddf),
+            "Max xfer": ddf['size'].max()/1024.0/1024.0,
+            "Mean BW": BandwidthFilter.on(ddf=ddf),
+            "Total ranks": ParallelismFilter.on(ddf=ddf),
+            "Total size": IOSizeFilter.on(ddf=ddf),
+            "Total files": FileFilter.on(ddf=ddf),
+            "Total ops": IOOpsFilter.on(ddf=ddf)
+        }
+        # Compute stats
+        io_time, max_duration, max_size, mean_bw, total_ranks, total_size, total_files, total_ops = dask.compute(*stats_tasks.values())
+        # Print stats
+        stats = [io_time, max_duration, max_size, mean_bw, total_ranks, total_size, total_files, total_ops]
+        if debug:
+            for index, stat in enumerate(stats_tasks):
+                print(f"{stat}: {SECONDS_FORMAT.format(stats[index])}")
+        # Set stats
+        self.io_time = io_time
+        self.max_duration = max_duration
+        self.max_size = max_size
+        self.mean_bw = mean_bw
+        self.total_files = total_files
+        self.total_ops = total_ops
+        self.total_ranks = total_ranks
+        self.total_size = total_size
+        # Init filters
+        self.filter_instances = [
+            IOSizeFilter(min=0, max=self.total_size, n_bins=self.n_bins),
+            IOTimeFilter(min=0, max=self.io_time, n_bins=self.n_bins),
+            IOOpsFilter(min=0, max=self.total_ops, n_bins=self.n_bins),
+            FileFilter(min=0, max=self.total_files, n_bins=self.n_bins),
+            BandwidthFilter(min=0, max=self.mean_bw, n_bins=self.n_bins),
+            ParallelismFilter(min=0, max=self.total_ranks, n_bins=self.n_bins),
+            TransferSizeFilter(min=0, max=self.max_size, n_bins=self.n_bins)
+        ]
+
     def set_bins(self, ddf: DataFrame, bins: ndarray):
         # Clear tbin values first
-        ddf['tbin'] = 0
+        binned_by = self.binned_by()
+        ddf[binned_by] = 0
         # Then set bins
         for bin_index in range(len(bins) - 1):
             # Read bin range
@@ -75,4 +102,4 @@ class TimelineFilterGroup(FilterGroup):
             # 0 <= tmid < 3.744676801893446
             tstart_cond = ddf['tmid'].ge(bin_start)
             tend_cond = ddf['tmid'].lt(bin_stop)
-            ddf['tbin'] = ddf['tbin'].mask(tstart_cond & tend_cond, bin_start)
+            ddf[binned_by] = ddf[binned_by].mask(tstart_cond & tend_cond, bin_start)

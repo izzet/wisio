@@ -9,9 +9,9 @@ from dask.distributed import Client, LocalCluster
 from dask_jobqueue import LSFCluster
 from enum import Enum
 from time import perf_counter, sleep
-from vani.common.constants import SECONDS_FORMAT
 from vani.common.filter_groups import TimelineFilterGroup
 from vani.common.filters import *
+from vani.common.interfaces import _FilterGroup
 from vani.common.nodes import AnalysisNode, BinNode, FilterGroupNode
 from vani.utils.data_filtering import filter_non_io_traces, split_io_mpi_trace, split_read_write_metadata
 
@@ -46,7 +46,7 @@ class Analyzer(object):
             self.cluster.scale(n_workers)
             self.__wait_until_workers_alive()
 
-    def analyze_parquet_logs(self, log_dir: str, max_depth=3):
+    def analyze_parquet_logs(self, log_dir: str, max_depth=3, cross_filters=False):
         # Keep workers alive
         # keep_alive_task = asyncio.create_task(self.__keep_workers_alive())
 
@@ -58,72 +58,29 @@ class Analyzer(object):
         # Split io_df into read & write and metadata dataframes
         ddf = filter_non_io_traces(ddf)
         io_ddf, mpi_ddf, trace_ddf = split_io_mpi_trace(ddf)
-        io_ddf_read_write, io_ddf_metadata = split_read_write_metadata(io_ddf)
+        io_ddf_read, io_ddf_write, io_ddf_metadata = split_read_write_metadata(io_ddf)
 
         # Compute stats
-        print("---------------")
-        job_time, io_time, max_duration, max_size, mean_bw, total_ranks, total_size, total_files, total_ops = self.__compute_stats(
-            ddf=ddf, io_ddf_read_write=io_ddf_read_write)
-        print("---------------")
+        job_time = ddf['tend'].max().compute()
+        n_bins = 10
 
         # Define filter groups
         filter_groups = [
-            TimelineFilterGroup(job_time=job_time,
-                                io_time=io_time,
-                                total_size=total_size,
-                                mean_bw=mean_bw,
-                                max_duration=max_duration,
-                                max_size=max_size,
-                                total_ranks=total_ranks,
-                                total_files=total_files,
-                                total_ops=total_ops,
-                                n_bins=10)
+            ("Timeline - Read", TimelineFilterGroup(job_time=job_time, n_bins=n_bins), io_ddf_read),
+            ("Timeline - Write", TimelineFilterGroup(job_time=job_time, n_bins=n_bins), io_ddf_write)
         ]
 
         filter_group_nodes = []
 
         # Loop through filter groups
-        for filter_group in filter_groups:
-            # Create filter group node
-            filter_group_node = FilterGroupNode(filter_group=filter_group)
+        for title, filter_group, target_ddf in filter_groups:
+            # Analyze filter group
+            filter_group_node = self._analyze_filter_group(title=title,
+                                                           filter_group=filter_group,
+                                                           ddf=target_ddf,
+                                                           max_depth=max_depth,
+                                                           cross_filters=cross_filters)
             filter_group_nodes.append(filter_group_node)
-            # Get filters
-            filters = filter_group.filters()
-            # Loop through filters
-            for filter in filters:
-                # Init tasks
-                nodes = []
-                # Create root node
-                filter_group.set_bins(ddf=io_ddf_read_write, bins=[0, job_time])
-                root = filter_group.create_node(ddf=io_ddf_read_write, bin=(0, job_time), filter=filter, parent=filter_group_node)
-                nodes.append(root)
-                # Run tasks
-                while nodes:
-                    # Read nodes
-                    node = nodes.pop()
-                    # Analyze node
-                    bottlenecks = node.analyze()
-                    # If node is too way deep, stop further analysis
-                    if node.depth > max_depth:
-                        continue
-                    # Loop through bottlenecks
-                    for bottleneck_bin in bottlenecks.index.array:
-                        # Read bin info
-                        start, stop = node.bin
-                        # Set next bins
-                        bins, bin_step = filter_group.next_bins(start=start, stop=stop)
-                        bottleneck_ddf = node.ddf[node.ddf['tbin'] == bottleneck_bin]
-                        filter_group.set_bins(ddf=bottleneck_ddf, bins=bins)
-                        # Then loop through next bins
-                        for bin_index in range(len(bins) - 1):
-                            # Read bin dataframe
-                            bin_ddf = bottleneck_ddf[bottleneck_ddf['tbin'] == bins[bin_index]]
-                            # Add bin node to analysis queue
-                            nodes.append(filter_group.create_node(ddf=bin_ddf,
-                                                                  bin=(bins[bin_index], bins[bin_index + 1]),
-                                                                  filter=filter,
-                                                                  parent=node))
-                break
 
         analysis = AnalysisNode(filter_group_nodes=filter_group_nodes)
 
@@ -157,6 +114,54 @@ class Analyzer(object):
     def shutdown(self) -> None:
         self.client.close()
         self.cluster.close()
+
+    def _analyze_filter_group(self, title: str, filter_group: _FilterGroup, ddf: DataFrame, max_depth: int, cross_filters=False) -> FilterGroupNode:
+        # Create filter group node
+        filter_group_node = FilterGroupNode(title=title, filter_group=filter_group)
+        # Prepare filter group
+        filter_group.prepare(ddf=ddf, debug=self.debug)
+        # Get filters
+        filters = filter_group.filters()
+        # Loop through filters
+        for filter in filters:
+            # Init tasks
+            nodes = []
+            # Create root node
+            root = filter_group.create_root(ddf=ddf, filter=filter, parent=filter_group_node)
+            nodes.append(root)
+            # Run tasks
+            while nodes:
+                # Read nodes
+                node = nodes.pop()
+                # Analyze node
+                bottlenecks, score = node.analyze()
+                # If node is too way deep, stop further analysis
+                if node.depth > max_depth:
+                    continue
+                # Loop through bottlenecks
+                for bottleneck_bin in bottlenecks.index.array:
+                    # Read bin info
+                    start, stop = node.bin
+                    # Set next bins
+                    bins, _ = filter_group.next_bins(start=start, stop=stop)
+                    binned_by = filter_group.binned_by()
+                    bottleneck_ddf = node.ddf[node.ddf[binned_by] == bottleneck_bin]
+                    filter_group.set_bins(ddf=bottleneck_ddf, bins=bins)
+                    # Then loop through next bins
+                    for bin_index in range(len(bins) - 1):
+                        # Read bin dataframe
+                        bin_ddf = bottleneck_ddf[bottleneck_ddf[binned_by] == bins[bin_index]]
+                        # Add bin node to analysis queue
+                        nodes.append(filter_group.create_node(ddf=bin_ddf,
+                                                              bin=(bins[bin_index], bins[bin_index + 1]),
+                                                              filter=filter,
+                                                              parent=node))
+            # Check if cross filter analysis specified
+            if not cross_filters:
+                # If not, finish analysis
+                break
+        # Return analyzed node
+        return filter_group_node
 
     def _current_n_workers(self):
         # Get current number of workers
@@ -203,29 +208,6 @@ class Analyzer(object):
                 print(cluster.job_script())
         # Return initialized cluster
         return cluster
-
-    def __compute_stats(self, ddf: DataFrame, io_ddf_read_write: DataFrame):
-        # Init stat tasks
-        stats_tasks = {
-            "Job time": ddf['tend'].max(),
-            "I/O time/p": IOTimeFilter.on(ddf=io_ddf_read_write),
-            "Max duration": DurationFilter.on(io_ddf_read_write),
-            "Max xfer": io_ddf_read_write['size'].max()/1024.0/1024.0,
-            "Mean BW": BandwidthFilter.on(ddf=io_ddf_read_write),
-            "Total ranks": ParallelismFilter.on(ddf=io_ddf_read_write),
-            "Total size": IOSizeFilter.on(ddf=io_ddf_read_write),
-            "Total files": FileFilter.on(ddf=io_ddf_read_write),
-            "Total ops": IOOpsFilter.on(ddf=io_ddf_read_write)
-        }
-        # Compute stats
-        job_time, io_time, max_duration, max_size, mean_bw, total_ranks, total_size, total_files, total_ops = dask.compute(*stats_tasks.values())
-        # Print stats
-        stats = [job_time, io_time, max_duration, max_size, mean_bw, total_ranks, total_size, total_files, total_ops]
-        if self.debug:
-            for index, stat in enumerate(stats_tasks):
-                print(f"{stat}: {SECONDS_FORMAT.format(stats[index])}")
-        # Return stats
-        return job_time, io_time, max_duration, max_size, mean_bw, total_ranks, total_size, total_files, total_ops
 
     async def __keep_workers_alive(self):
         # While the job is still executing

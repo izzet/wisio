@@ -144,9 +144,10 @@ class BinNode(_BinNode, NodeMixin):
 
 class FilterGroupNode(NodeMixin):
 
-    def __init__(self, filter_group: _FilterGroup) -> None:
+    def __init__(self, title: str, filter_group: _FilterGroup) -> None:
         super(FilterGroupNode, self).__init__()
         self.filter_group = filter_group
+        self.title = title
 
 
 class AnalysisNode(NodeMixin):
@@ -160,6 +161,6 @@ class AnalysisNode(NodeMixin):
             if isinstance(node, AnalysisNode):
                 print("%s%s" % (pre, "Analysis"))
             elif isinstance(node, FilterGroupNode):
-                print("%s%s" % (pre, node.filter_group))
+                print("%s%s" % (pre, node.title))
             else:
                 print("%s%s" % (pre, node))
