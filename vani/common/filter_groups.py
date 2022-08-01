@@ -23,7 +23,7 @@ class FilterGroup(_FilterGroup):
 
 class TimelineFilterGroup(FilterGroup):
 
-    def __init__(self, job_time: float, io_time: float, total_size: float, mean_bw: float, max_duration: float, total_ranks: int, total_files: int, total_ops: int, n_bins=2) -> None:
+    def __init__(self, job_time: float, io_time: float, total_size: float, mean_bw: float, max_duration: float, max_size: float, total_ranks: int, total_files: int, total_ops: int, n_bins=2) -> None:
         super().__init__(n_bins)
         assert job_time > 0
         assert mean_bw > 0
@@ -34,6 +34,7 @@ class TimelineFilterGroup(FilterGroup):
         self.io_time = io_time
         self.job_time = job_time
         self.max_duration = max_duration
+        self.max_size = max_size
         self.mean_bw = mean_bw
         self.total_files = total_files
         self.total_ops = total_ops
@@ -47,7 +48,7 @@ class TimelineFilterGroup(FilterGroup):
             FileFilter(min=0, max=self.total_files, n_bins=n_bins),
             BandwidthFilter(min=0, max=self.mean_bw, n_bins=n_bins),
             ParallelismFilter(min=0, max=self.total_ranks, n_bins=n_bins),
-            # TransferSizeFilter(min=0, max=1, n_bins=n_bins)
+            TransferSizeFilter(min=0, max=self.max_size, n_bins=n_bins)
         ]
 
     def filters(self) -> List[_Filter]:

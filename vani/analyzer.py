@@ -62,7 +62,7 @@ class Analyzer(object):
 
         # Compute stats
         print("---------------")
-        job_time, io_time, max_duration, mean_bw, total_ranks, total_size, total_files, total_ops = self.__compute_stats(
+        job_time, io_time, max_duration, max_size, mean_bw, total_ranks, total_size, total_files, total_ops = self.__compute_stats(
             ddf=ddf, io_ddf_read_write=io_ddf_read_write)
         print("---------------")
 
@@ -73,6 +73,7 @@ class Analyzer(object):
                                 total_size=total_size,
                                 mean_bw=mean_bw,
                                 max_duration=max_duration,
+                                max_size=max_size,
                                 total_ranks=total_ranks,
                                 total_files=total_files,
                                 total_ops=total_ops,
@@ -203,8 +204,9 @@ class Analyzer(object):
         # Init stat tasks
         stats_tasks = {
             "Job time": ddf['tend'].max(),
-            "I/O time pp.": IOTimeFilter.on(ddf=io_ddf_read_write),
+            "I/O time/p": IOTimeFilter.on(ddf=io_ddf_read_write),
             "Max duration": DurationFilter.on(io_ddf_read_write),
+            "Max xfer": io_ddf_read_write['size'].max()/1024.0/1024.0,
             "Mean BW": BandwidthFilter.on(ddf=io_ddf_read_write),
             "Total ranks": ParallelismFilter.on(ddf=io_ddf_read_write),
             "Total size": IOSizeFilter.on(ddf=io_ddf_read_write),
@@ -212,14 +214,14 @@ class Analyzer(object):
             "Total ops": IOOpsFilter.on(ddf=io_ddf_read_write)
         }
         # Compute stats
-        job_time, io_time, max_duration, mean_bw, total_ranks, total_size, total_files, total_ops = dask.compute(*stats_tasks.values())
+        job_time, io_time, max_duration, max_size, mean_bw, total_ranks, total_size, total_files, total_ops = dask.compute(*stats_tasks.values())
         # Print stats
-        stats = [job_time, io_time, max_duration, mean_bw, total_ranks, total_size, total_files, total_ops]
+        stats = [job_time, io_time, max_duration, max_size, mean_bw, total_ranks, total_size, total_files, total_ops]
         if self.debug:
             for index, stat in enumerate(stats_tasks):
                 print(f"{stat}: {SECONDS_FORMAT.format(stats[index])}")
         # Return stats
-        return job_time, io_time, max_duration, mean_bw, total_ranks, total_size, total_files, total_ops
+        return job_time, io_time, max_duration, max_size, mean_bw, total_ranks, total_size, total_files, total_ops
 
     async def __keep_workers_alive(self):
         # While the job is still executing
