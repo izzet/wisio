@@ -154,6 +154,10 @@ class Analyzer(object):
         with open(output_path, 'w') as file:
             file.write('\n'.join(lines))
 
+    def shutdown(self) -> None:
+        self.client.close()
+        self.cluster.close()
+
     def _current_n_workers(self):
         # Get current number of workers
         return len(self.client.scheduler_info()['workers'])
