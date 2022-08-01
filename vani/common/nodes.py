@@ -2,8 +2,9 @@ import dask
 import numpy as np
 from anytree import NodeMixin, RenderTree
 from dask.dataframe import DataFrame
+from pandas import Categorical
 from typing import Any, List, Tuple
-from vani.common.constants import PERCENTAGE_FORMAT, SECONDS_FORMAT, VALUE_FORMAT
+from vani.common.constants import PERCENTAGE_FORMAT, SECONDS_FORMAT
 from vani.common.interfaces import _BinNode, _Filter, _FilterGroup
 
 
@@ -35,8 +36,12 @@ class BinNode(_BinNode, NodeMixin):
         self.bottlenecks = self.__detect_filter_bottlenecks(filter_result=filter_result)
         # Make observations for each metric
         self.observations = self.__detect_metric_bottlenecks(metric_results=metric_results)
+        # Calculate score
+        self.score = self.__calculate_score(filter_result=self.filter_result,
+                                            bottlenecks=self.bottlenecks,
+                                            observations=self.observations)
         # Return bottlenecks
-        return self.bottlenecks
+        return self.bottlenecks, self.score
 
     def __apply_filter(self, ddf: DataFrame) -> Any:
         # Let filter prepare data
@@ -57,6 +62,22 @@ class BinNode(_BinNode, NodeMixin):
             metric_tasks.append(metric_task)
         return metric_tasks
 
+    def __calculate_score(self, filter_result: Categorical, bottlenecks: Categorical, observations: Categorical) -> float:
+        filter_labels = []
+        for index in range(len(filter_result)):
+            bin_label = bottlenecks.values[index] if len(bottlenecks) else 1
+            filter_labels.append(bin_label)
+        all_metric_labels = []
+        for index in range(len(self.metrics)):
+            observation = observations[index]
+            metric_labels = []
+            for observation_index in range(len(observation)):
+                bin_label = observation.values[observation_index]
+                metric_labels.append(bin_label)
+            all_metric_labels.extend(metric_labels)
+        score = (np.sum(filter_labels) + np.sum(all_metric_labels))/(len(filter_labels) + len(all_metric_labels))
+        return score / 10.0
+
     def __detect_filter_bottlenecks(self, filter_result: Any) -> Any:
         return self.filter.detect_bottlenecks(results=filter_result, threshold=False)
 
@@ -76,7 +97,6 @@ class BinNode(_BinNode, NodeMixin):
         return " ".join(list(filter(None, line_parts)))
 
     def __render_node_filter_result(self):
-        labels = []
         lines = []
         for index in range(len(self.filter_result)):
             bin = self.filter_result.index.array[index]
@@ -88,17 +108,14 @@ class BinNode(_BinNode, NodeMixin):
             bin_value_fmt = self.filter.format_value(bin_value)
             bin_percent = (bin_value/self.filter.max)*100.0
             bin_percent_fmt = PERCENTAGE_FORMAT.format(bin_percent)
-            labels.append(bin_label)
             lines.append(self.__format_line([bin_label_fmt, bin_value_fmt, bin_percent_fmt]))
-        return self.__format_filter_lines(self.filter.name(), lines), labels
+        return self.__format_filter_lines(self.filter.name(), lines)
 
     def __render_node_metric_results(self):
-        all_labels = []
         all_lines = []
         for index, metric in enumerate(self.metrics):
             metric_result = self.metric_results[index]
             observation = self.observations[index]
-            labels = []
             lines = []
             for observation_index in range(len(observation)):
                 bin = observation.index.array[observation_index]
@@ -110,22 +127,18 @@ class BinNode(_BinNode, NodeMixin):
                 bin_value_fmt = metric.format_value(bin_value)
                 bin_percent = (bin_value / metric.max) * 100.0
                 bin_percent_fmt = PERCENTAGE_FORMAT.format(bin_percent)
-                labels.append(bin_label)
                 lines.append(self.__format_line([bin_label_fmt, bin_value_fmt, bin_percent_fmt]))
-            all_labels.extend(labels)
             all_lines.append(self.__format_filter_lines(metric.name(), lines))
-        return all_lines, all_labels
+        return all_lines
 
     def __repr__(self) -> str:
         bin_name = "-".join([SECONDS_FORMAT.format(bin) for bin in self.bin])
         columns = []
-        filter_result_fmt, labels = self.__render_node_filter_result()
-        metric_results_fmt, all_labels = self.__render_node_metric_results()
+        filter_result_fmt = self.__render_node_filter_result()
+        metric_results_fmt = self.__render_node_metric_results()
         columns.append(filter_result_fmt)
         columns.extend(metric_results_fmt)
-        max_score = 10.0
-        score = (np.sum(labels) + np.sum(all_labels))/(len(labels) + len(all_labels))
-        score_fmt = PERCENTAGE_FORMAT.format((score / max_score) * 100.0)
+        score_fmt = PERCENTAGE_FORMAT.format(self.score * 100.0)
         return f"[{bin_name}] {' | '.join(columns)} | Confidence={score_fmt}"
 
 
