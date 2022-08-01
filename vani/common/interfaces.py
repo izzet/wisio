@@ -13,6 +13,9 @@ class _Filter(object):
     def detect_bottlenecks(self, results: Series, threshold=False, inversed=False) -> Any:
         raise NotImplementedError
 
+    def format_value(self, value: float) -> str:
+        raise NotImplementedError
+
     def is_inversed(self) -> bool:
         raise NotImplementedError
 
@@ -23,6 +26,9 @@ class _Filter(object):
         raise NotImplementedError
 
     def prepare(self, ddf: DataFrame) -> Any:
+        raise NotImplementedError
+
+    def unit(self) -> str:
         raise NotImplementedError
 
 

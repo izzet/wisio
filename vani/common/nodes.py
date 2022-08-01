@@ -1,4 +1,5 @@
 import dask
+import numpy as np
 from anytree import NodeMixin, RenderTree
 from dask.dataframe import DataFrame
 from typing import Any, List, Tuple
@@ -68,50 +69,64 @@ class BinNode(_BinNode, NodeMixin):
             observations.append(observation)
         return observations
 
-    def __format_filter_lines(self, filter_name: str, lines: List[str]):
+    def __format_filter_lines(self, filter_name: str, lines: List[str]) -> str:
         return f"{filter_name}={' '.join(lines)}"
 
+    def __format_line(self, line_parts: List[str]) -> str:
+        return " ".join(list(filter(None, line_parts)))
+
     def __render_node_filter_result(self):
+        labels = []
         lines = []
         for index in range(len(self.filter_result)):
             bin = self.filter_result.index.array[index]
             bins = [bin, bin + self.bin_step]
             bin_name = "-".join([SECONDS_FORMAT.format(bin) for bin in bins])
-            bin_label = str(self.bottlenecks.values[index] if len(self.bottlenecks) else 1)
+            bin_label = self.bottlenecks.values[index] if len(self.bottlenecks) else 1
+            bin_label_fmt = str(bin_label)
             bin_value = self.filter_result.values[index]
-            bin_value_fmt = VALUE_FORMAT.format(bin_value)
+            bin_value_fmt = self.filter.format_value(bin_value)
             bin_percent = (bin_value/self.filter.max)*100.0
             bin_percent_fmt = PERCENTAGE_FORMAT.format(bin_percent)
-            lines.append(" ".join([bin_label, bin_value_fmt, bin_percent_fmt]))
-        return self.__format_filter_lines(self.filter.name(), lines)
+            labels.append(bin_label)
+            lines.append(self.__format_line([bin_label_fmt, bin_value_fmt, bin_percent_fmt]))
+        return self.__format_filter_lines(self.filter.name(), lines), labels
 
     def __render_node_metric_results(self):
+        all_labels = []
         all_lines = []
         for index, metric in enumerate(self.metrics):
             metric_result = self.metric_results[index]
             observation = self.observations[index]
+            labels = []
             lines = []
             for observation_index in range(len(observation)):
                 bin = observation.index.array[observation_index]
                 bins = [bin, bin + self.bin_step]
                 bin_name = "-".join([SECONDS_FORMAT.format(bin) for bin in bins])
-                bin_label = str(observation.values[observation_index])
+                bin_label = observation.values[observation_index]
+                bin_label_fmt = str(bin_label)
                 bin_value = metric_result.values[observation_index]
-                bin_value_fmt = VALUE_FORMAT.format(bin_value)
-                bin_percent = (bin_value/metric.max)*100.0
+                bin_value_fmt = metric.format_value(bin_value)
+                bin_percent = (bin_value / metric.max) * 100.0
                 bin_percent_fmt = PERCENTAGE_FORMAT.format(bin_percent)
-                lines.append(" ".join([bin_label, bin_value_fmt, bin_percent_fmt]))
+                labels.append(bin_label)
+                lines.append(self.__format_line([bin_label_fmt, bin_value_fmt, bin_percent_fmt]))
+            all_labels.extend(labels)
             all_lines.append(self.__format_filter_lines(metric.name(), lines))
-        return all_lines
+        return all_lines, all_labels
 
     def __repr__(self) -> str:
         bin_name = "-".join([SECONDS_FORMAT.format(bin) for bin in self.bin])
         columns = []
-        filter_result_fmt = self.__render_node_filter_result()
-        metric_results_fmt = self.__render_node_metric_results()
+        filter_result_fmt, labels = self.__render_node_filter_result()
+        metric_results_fmt, all_labels = self.__render_node_metric_results()
         columns.append(filter_result_fmt)
         columns.extend(metric_results_fmt)
-        return f"[{bin_name}] {' | '.join(columns)}"
+        max_score = 10.0
+        score = (np.sum(labels) + np.sum(all_labels))/(len(labels) + len(all_labels))
+        score_fmt = PERCENTAGE_FORMAT.format((score / max_score) * 100.0)
+        return f"[{bin_name}] {' | '.join(columns)} | Confidence={score_fmt}"
 
 
 class FilterGroupNode(NodeMixin):
