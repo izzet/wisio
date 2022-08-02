@@ -121,6 +121,9 @@ class IOOpsFilter(Filter):
     def format_value(self, value: float) -> str:
         return str(int(value))
 
+    def is_normally_distributed(self) -> bool:
+        return True
+
     def name(self) -> str:
         return "Ops"
 
@@ -187,10 +190,13 @@ class ParallelismFilter(Filter):
         return ""
 
 
-class TransferSizeFilter(Filter):
+class XferSizeFilter(Filter):
 
     def apply(self, ddf: DataFrame) -> Any:
         return ddf['size'].mean()/1024.0/1024.0
+
+    def is_inversed(self) -> bool:
+        return True
 
     def name(self) -> str:
         return "Xfer"

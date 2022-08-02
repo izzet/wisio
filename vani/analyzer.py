@@ -9,7 +9,7 @@ from dask.distributed import Client, LocalCluster
 from dask_jobqueue import LSFCluster
 from enum import Enum
 from time import perf_counter, sleep
-from vani.common.filter_groups import TimelineFilterGroup
+from vani.common.filter_groups import TimelineMetadataFilterGroup, TimelineReadWriteFilterGroup
 from vani.common.filters import *
 from vani.common.interfaces import _FilterGroup
 from vani.common.nodes import AnalysisNode, BinNode, FilterGroupNode
@@ -60,14 +60,17 @@ class Analyzer(object):
         io_ddf, mpi_ddf, trace_ddf = split_io_mpi_trace(ddf)
         io_ddf_read, io_ddf_write, io_ddf_metadata = split_read_write_metadata(io_ddf)
 
+        self.io_ddf = io_ddf
+
         # Compute stats
         job_time = ddf['tend'].max().compute()
         n_bins = 10
 
         # Define filter groups
         filter_groups = [
-            ("Timeline - Read", TimelineFilterGroup(job_time=job_time, n_bins=n_bins), io_ddf_read),
-            ("Timeline - Write", TimelineFilterGroup(job_time=job_time, n_bins=n_bins), io_ddf_write)
+            ("Timeline - Read", TimelineReadWriteFilterGroup(job_time=job_time, n_bins=n_bins), io_ddf_read),
+            ("Timeline - Write", TimelineReadWriteFilterGroup(job_time=job_time, n_bins=n_bins), io_ddf_write),
+            ("Timeline - Metadata", TimelineMetadataFilterGroup(job_time=job_time, n_bins=n_bins), io_ddf_metadata)
         ]
 
         filter_group_nodes = []
@@ -119,7 +122,7 @@ class Analyzer(object):
         # Create filter group node
         filter_group_node = FilterGroupNode(title=title, filter_group=filter_group)
         # Prepare filter group
-        filter_group.prepare(ddf=ddf, debug=self.debug)
+        filter_group.prepare(ddf=self.io_ddf, debug=self.debug)
         # Get filters
         filters = filter_group.filters()
         # Loop through filters

@@ -23,7 +23,7 @@ class FilterGroup(_FilterGroup):
         return self.name()
 
 
-class TimelineFilterGroup(FilterGroup):
+class TimelineReadWriteFilterGroup(FilterGroup):
 
     def __init__(self, job_time: float, n_bins=2) -> None:
         super().__init__(n_bins)
@@ -45,7 +45,7 @@ class TimelineFilterGroup(FilterGroup):
         return [metric for metric in self.filters() if metric != filter]
 
     def name(self) -> str:
-        return "Timeline Analysis"
+        return "Timeline Read/Write"
 
     def next_bins(self, start: Any, stop: Any) -> _BinInfo:
         # Return linear space between start and stop
@@ -87,7 +87,7 @@ class TimelineFilterGroup(FilterGroup):
             FileFilter(min=0, max=self.total_files, n_bins=self.n_bins),
             BandwidthFilter(min=0, max=self.mean_bw, n_bins=self.n_bins),
             ParallelismFilter(min=0, max=self.total_ranks, n_bins=self.n_bins),
-            TransferSizeFilter(min=0, max=self.max_size, n_bins=self.n_bins)
+            XferSizeFilter(min=0, max=self.max_size, n_bins=self.n_bins)
         ]
 
     def set_bins(self, ddf: DataFrame, bins: ndarray):
@@ -103,3 +103,42 @@ class TimelineFilterGroup(FilterGroup):
             tstart_cond = ddf['tmid'].ge(bin_start)
             tend_cond = ddf['tmid'].lt(bin_stop)
             ddf[binned_by] = ddf[binned_by].mask(tstart_cond & tend_cond, bin_start)
+
+
+class TimelineMetadataFilterGroup(TimelineReadWriteFilterGroup):
+
+    def __init__(self, job_time: float, n_bins=2) -> None:
+        super().__init__(job_time, n_bins)
+
+    def name(self) -> str:
+        return "Timeline Metadata"
+
+    def prepare(self, ddf: DataFrame, debug=False) -> None:
+        # Init stat tasks
+        stats_tasks = {
+            "I/O time/p": IOTimeFilter.on(ddf=ddf),
+            "Max duration": DurationFilter.on(ddf=ddf),
+            "Total ranks": ParallelismFilter.on(ddf=ddf),
+            "Total files": FileFilter.on(ddf=ddf),
+            "Total ops": IOOpsFilter.on(ddf=ddf)
+        }
+        # Compute stats
+        io_time, max_duration, total_ranks, total_files, total_ops = dask.compute(*stats_tasks.values())
+        # Print stats
+        stats = [io_time, max_duration, total_ranks, total_files, total_ops]
+        if debug:
+            for index, stat in enumerate(stats_tasks):
+                print(f"{stat}: {SECONDS_FORMAT.format(stats[index])}")
+        # Set stats
+        self.io_time = io_time
+        self.max_duration = max_duration
+        self.total_files = total_files
+        self.total_ops = total_ops
+        self.total_ranks = total_ranks
+        # Init filters
+        self.filter_instances = [
+            IOTimeFilter(min=0, max=io_time, n_bins=self.n_bins),
+            IOOpsFilter(min=0, max=total_ops, n_bins=self.n_bins),
+            FileFilter(min=0, max=total_files, n_bins=self.n_bins),
+            ParallelismFilter(min=0, max=total_ranks, n_bins=self.n_bins),
+        ]
