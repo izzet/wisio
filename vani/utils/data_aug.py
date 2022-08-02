@@ -19,7 +19,7 @@ def set_filenames(ddf: DataFrame):
     open_condition = ddf['func_id'].str.contains("open")
     mpi_condition = ddf['func_id'].str.contains("MPI")
     fread_condition = ddf['func_id'].isin(["fread"])
-    close_condition = ddf['func_id'].str.contains('close')
+    close_condition = ddf['func_id'].str.contains("close")
     fwrite_condition = ddf['func_id'].isin(["fwrite"])
     readdir_condition = ddf['func_id'].isin(["readdir"])
     # Then set corresponding filenames

@@ -18,6 +18,8 @@ def split_io_mpi_trace(ddf: DataFrame) -> Tuple[DataFrame, DataFrame, DataFrame]
     # Set additional columns
     set_durations(io_ddf)
     set_filenames(io_ddf)
+    set_sizes_counts(io_ddf)
+    set_bandwidths(io_ddf)
     # Return splitted dataframes
     return io_ddf, mpi_ddf, trace_ddf
 
@@ -29,11 +31,6 @@ def split_read_write_metadata(io_ddf: DataFrame, compute=False) -> Tuple[DataFra
     io_ddf_read = io_ddf[read_condition]
     io_ddf_write = io_ddf[write_condition]
     io_ddf_metadata = io_ddf[~read_condition & ~write_condition]
-    # Set additional columns
-    set_sizes_counts(io_ddf_read)
-    set_sizes_counts(io_ddf_write)
-    set_bandwidths(io_ddf_read)
-    set_bandwidths(io_ddf_write)
     # Compute if specified
     if compute:
         io_ddf_read = io_ddf_read.compute()
