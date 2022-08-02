@@ -1,8 +1,11 @@
 anytree
+bokeh
 dask
 dask_jobqueue
 distributed
+fastparquet
 numpy
 pandas
-pyarrow
+# pyarrow
+scipy
 tqdm
