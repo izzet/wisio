@@ -421,36 +421,68 @@
 <text id="matched" x="1090.00" y="133" > </text>
 <g id="frames">
 <g >
-<title>[25.277-33.702] Size=1 59.50781 3.8% | Bandwidth=1 2.70663 87.8% | Parallelism=1 97.00000 7.6% | Files=2 97.00000 7.6% (8 samples, 13.56%)</title><rect x="1021.4" y="53" width="168.6" height="15.0" fill="rgb(245,150,26)" rx="2" ry="2" />
-<text  x="1024.43" y="63.5" >[25.277-33.702] Size=..</text>
+<title>[16.851-33.702] Size=5 737.64062GB 46.7% | Time=2 0.63211s/p 13.6% | Ops=3 11881 16.3% | Files=6 1200 46.8% | Bandwidth=1 2.26202GB/s 209.0% | Parallelism=9 1200 93.8% | Xfer=6 63.57579MB 49.7% | Confidence=45.7% (51 samples, 50.44%)</title><rect x="600.0" y="69" width="590.0" height="15.0" fill="rgb(214,156,24)" rx="2" ry="2" />
+<text  x="603.00" y="79.5" >[16.851-33.702] Size=5 737.64062GB 46.7% | Time=2 0.63211s/p 13.6% | Ops=3 11881 ..</text>
 </g>
 <g >
-<title>[21.064-25.277] Size=1 523.25000 33.1% | Bandwidth=1 2.70645 87.8% | Parallelism=2 842.00000 65.8% | Files=1 842.00000 65.8% (4 samples, 6.78%)</title><rect x="937.1" y="37" width="84.3" height="15.0" fill="rgb(209,6,34)" rx="2" ry="2" />
-<text  x="940.14" y="47.5" >[21.064-2..</text>
+<title>[25.277-33.702] Size=1 52.71875GB 3.3% | Time=2 0.49360s/p 10.6% | Ops=1 849 1.2% | Files=10 97 3.8% | Bandwidth=1 2.23055GB/s 206.1% | Parallelism=10 97 7.6% | Xfer=6 63.58539MB 49.7% | Confidence=44.3% (17 samples, 16.81%)</title><rect x="993.3" y="53" width="196.7" height="15.0" fill="rgb(237,65,20)" rx="2" ry="2" />
+<text  x="996.33" y="63.5" >[25.277-33.702] Size=1 52..</text>
 </g>
 <g >
-<title>[0.000-16.851] Size=1 561.69531 35.6% | Bandwidth=1 3.31496 107.5% | Parallelism=2 839.00000 65.5% | Files=1 839.00000 65.5% (17 samples, 28.82%)</title><rect x="10.0" y="69" width="337.1" height="15.0" fill="rgb(230,224,30)" rx="2" ry="2" />
-<text  x="13.00" y="79.5" >[0.000-16.851] Size=1 561.69531 35.6% | Bandw..</text>
+<title>[16.851-21.064] Size=2 230.07031GB 14.6% | Time=1 0.37272s/p 8.0% | Ops=1 3768 5.2% | Files=8 529 20.6% | Bandwidth=1 2.32863GB/s 215.2% | Parallelism=1 529 41.3% | Xfer=6 62.52442MB 48.8% | Confidence=28.6% (4 samples, 3.96%)</title><rect x="895.0" y="37" width="49.2" height="15.0" fill="rgb(225,168,17)" rx="2" ry="2" />
+<text  x="898.00" y="47.5" >[16...</text>
 </g>
 <g >
-<title>all (59 samples, 100%)</title><rect x="10.0" y="101" width="1180.0" height="15.0" fill="rgb(253,203,2)" rx="2" ry="2" />
+<title>[8.426-12.638] Size=1 8.16406GB 0.5% | Time=1 0.36768s/p 7.9% | Ops=1 145 0.2% | Files=10 40 1.6% | Bandwidth=1 0.99380GB/s 91.8% | Parallelism=10 40 3.1% | Xfer=6 57.65517MB 45.0% | Confidence=42.9% (4 samples, 3.96%)</title><rect x="550.8" y="37" width="49.2" height="15.0" fill="rgb(205,122,35)" rx="2" ry="2" />
+<text  x="553.83" y="47.5" >[8.4..</text>
+</g>
+<g >
+<title>[16.851-25.277] Size=5 684.92188GB 43.3% | Time=2 0.63451s/p 13.6% | Ops=3 11032 15.1% | Files=6 1120 43.7% | Bandwidth=1 2.26444GB/s 209.3% | Parallelism=7 1120 87.5% | Xfer=6 63.57505MB 49.7% | Confidence=42.9% (17 samples, 16.81%)</title><rect x="796.7" y="53" width="196.6" height="15.0" fill="rgb(249,220,28)" rx="2" ry="2" />
+<text  x="799.67" y="63.5" >[16.851-25.277] Size=5 68..</text>
+</g>
+<g >
+<title>[0.000-8.426] Size=1 0.39844GB 0.0% | Time=1 0.00987s/p 0.2% | Ops=1 17 0.0% | Files=10 17 0.7% | Bandwidth=1 2.41608GB/s 223.3% | Parallelism=10 17 1.3% | Xfer=9 24.00000MB 18.8% | Confidence=47.1% (17 samples, 16.81%)</title><rect x="206.7" y="53" width="196.6" height="15.0" fill="rgb(251,141,50)" rx="2" ry="2" />
+<text  x="209.67" y="63.5" >[0.000-8.426] Size=1 0.39..</text>
+</g>
+<g >
+<title>all (101 samples, 100%)</title><rect x="10.0" y="101" width="1180.0" height="15.0" fill="rgb(226,78,8)" rx="2" ry="2" />
 <text  x="13.00" y="111.5" ></text>
 </g>
 <g >
-<title>[0.000-33.702] Size=2 1580.00000 100.0% | Bandwidth=1 3.08268 100.0% | Parallelism=2 1280.00000 100.0% | Files=1 1280.00000 100.0% (59 samples, 100.04%)</title><rect x="10.0" y="85" width="1180.0" height="15.0" fill="rgb(214,69,40)" rx="2" ry="2" />
-<text  x="13.00" y="95.5" >[0.000-33.702] Size=2 1580.00000 100.0% | Bandwidth=1 3.08268 100.0% | Parallelism=2 1280.00000 100.0% | Files=1 1280.00000 100.0%</text>
+<title>[4.213-8.426] Size=1 0.39844GB 0.0% | Time=1 0.00987s/p 0.2% | Ops=1 17 0.0% | Files=10 17 0.7% | Bandwidth=1 2.41608GB/s 223.3% | Parallelism=10 17 1.3% | Xfer=9 24.00000MB 18.8% | Confidence=47.1% (4 samples, 3.96%)</title><rect x="354.2" y="37" width="49.1" height="15.0" fill="rgb(222,2,40)" rx="2" ry="2" />
+<text  x="357.17" y="47.5" >[4.2..</text>
 </g>
 <g >
-<title>[16.851-33.702] Size=2 1018.30469 64.4% | Bandwidth=1 2.95366 95.8% | Parallelism=2 1200.00000 93.8% | Files=1 1200.00000 93.8% (42 samples, 71.21%)</title><rect x="347.1" y="69" width="842.9" height="15.0" fill="rgb(215,40,48)" rx="2" ry="2" />
-<text  x="350.14" y="79.5" >[16.851-33.702] Size=2 1018.30469 64.4% | Bandwidth=1 2.95366 95.8% | Parallelism=2 1200.00000 93.8% | Files=1 1200.0..</text>
+<title>[29.489-33.702] Size=1 24.68750GB 1.6% | Time=2 0.68803s/p 14.8% | Ops=1 400 0.5% | Files=10 40 1.6% | Bandwidth=1 2.02506GB/s 187.1% | Parallelism=10 40 3.1% | Xfer=6 63.20000MB 49.4% | Confidence=44.3% (4 samples, 3.96%)</title><rect x="1140.8" y="37" width="49.2" height="15.0" fill="rgb(220,160,34)" rx="2" ry="2" />
+<text  x="1143.83" y="47.5" >[29...</text>
 </g>
 <g >
-<title>[16.851-21.064] Size=1 435.54688 27.6% | Bandwidth=1 3.28148 106.4% | Parallelism=2 863.00000 67.4% | Files=1 863.00000 67.4% (4 samples, 6.78%)</title><rect x="852.9" y="37" width="84.2" height="15.0" fill="rgb(215,155,46)" rx="2" ry="2" />
-<text  x="855.86" y="47.5" >[16.851-2..</text>
+<title>[21.064-25.277] Size=3 454.85156GB 28.8% | Time=2 0.64916s/p 13.9% | Ops=2 7264 10.0% | Files=7 791 30.9% | Bandwidth=1 2.23115GB/s 206.2% | Parallelism=2 791 61.8% | Xfer=5 64.12004MB 50.1% | Confidence=31.4% (4 samples, 3.96%)</title><rect x="944.2" y="37" width="49.1" height="15.0" fill="rgb(215,46,29)" rx="2" ry="2" />
+<text  x="947.17" y="47.5" >[21...</text>
 </g>
 <g >
-<title>[16.851-25.277] Size=2 958.79688 60.7% | Bandwidth=1 2.96894 96.3% | Parallelism=2 1180.00000 92.2% | Files=1 1180.00000 92.2% (17 samples, 28.82%)</title><rect x="684.3" y="53" width="337.1" height="15.0" fill="rgb(206,227,3)" rx="2" ry="2" />
-<text  x="687.29" y="63.5" >[16.851-25.277] Size=2 958.79688 60.7% | Band..</text>
+<title>[25.277-29.489] Size=1 28.03125GB 1.8% | Time=1 0.35716s/p 7.7% | Ops=1 449 0.6% | Files=10 57 2.2% | Bandwidth=1 2.41361GB/s 223.0% | Parallelism=10 57 4.5% | Xfer=6 63.92873MB 49.9% | Confidence=42.9% (4 samples, 3.96%)</title><rect x="1091.7" y="37" width="49.1" height="15.0" fill="rgb(224,75,32)" rx="2" ry="2" />
+<text  x="1094.67" y="47.5" >[25...</text>
+</g>
+<g >
+<title>[0.000-16.851] Size=1 52.35938GB 3.3% | Time=1 0.32624s/p 7.0% | Ops=1 919 1.3% | Files=10 194 7.6% | Bandwidth=1 1.80099GB/s 166.4% | Parallelism=8 194 15.2% | Xfer=6 58.34168MB 45.6% | Confidence=40.0% (51 samples, 50.44%)</title><rect x="10.0" y="69" width="590.0" height="15.0" fill="rgb(236,130,51)" rx="2" ry="2" />
+<text  x="13.00" y="79.5" >[0.000-16.851] Size=1 52.35938GB 3.3% | Time=1 0.32624s/p 7.0% | Ops=1 919 1.3% |..</text>
+</g>
+<g >
+<title>[12.638-16.851] Size=1 43.79688GB 2.8% | Time=1 0.24956s/p 5.4% | Ops=1 757 1.0% | Files=10 194 7.6% | Bandwidth=1 1.94180GB/s 179.4% | Parallelism=8 194 15.2% | Xfer=6 59.24439MB 46.3% | Confidence=40.0% (4 samples, 3.96%)</title><rect x="501.7" y="37" width="49.1" height="15.0" fill="rgb(212,160,21)" rx="2" ry="2" />
+<text  x="504.67" y="47.5" >[12...</text>
+</g>
+<g >
+<title>[8.426-16.851] Size=1 51.96094GB 3.3% | Time=1 0.32537s/p 7.0% | Ops=1 902 1.2% | Files=10 194 7.6% | Bandwidth=1 1.78940GB/s 165.4% | Parallelism=8 194 15.2% | Xfer=6 58.98891MB 46.1% | Confidence=40.0% (17 samples, 16.81%)</title><rect x="403.3" y="53" width="196.7" height="15.0" fill="rgb(235,227,21)" rx="2" ry="2" />
+<text  x="406.33" y="63.5" >[8.426-16.851] Size=1 51...</text>
+</g>
+<g >
+<title>[0.000-33.702] Size=5 790.00000GB 50.0% | Time=2 0.64205s/p 13.8% | Ops=3 12800 17.6% | Files=6 1280 50.0% | Bandwidth=1 2.22892GB/s 206.0% | Parallelism=10 1280 100.0% | Xfer=6 63.20000MB 49.4% | Confidence=47.1% (101 samples, 99.89%)</title><rect x="10.0" y="85" width="1180.0" height="15.0" fill="rgb(220,29,35)" rx="2" ry="2" />
+<text  x="13.00" y="95.5" >[0.000-33.702] Size=5 790.00000GB 50.0% | Time=2 0.64205s/p 13.8% | Ops=3 12800 17.6% | Files=6 1280 50.0% | Bandwidth=1 2.22892GB/s 206.0% | Parallelism=10 1280 10..</text>
+</g>
+<g >
+<title>[0.000-4.213] Size= | Time= | Ops= | Files= | Bandwidth= | Parallelism= | Xfer= | Confidence=nan% (4 samples, 3.96%)</title><rect x="305.0" y="37" width="49.2" height="15.0" fill="rgb(251,185,51)" rx="2" ry="2" />
+<text  x="308.00" y="47.5" >[0.0..</text>
 </g>
 </g>
 </svg>

@@ -22,7 +22,7 @@ if __name__ == '__main__':
 
     try:
         # Do the analysis
-        analysis = vn.analyze_parquet_logs(log_dir, max_depth=5)
+        analysis = vn.analyze_parquet_logs(log_dir, max_depth=2, persist_stats=True, stats_file_prefix="cm1_")
         analysis.render_tree()
 
     finally:

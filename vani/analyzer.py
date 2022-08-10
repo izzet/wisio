@@ -1,5 +1,4 @@
 import asyncio
-import dask
 import dask.dataframe as dd
 import os
 import socket
@@ -10,7 +9,6 @@ from dask_jobqueue import LSFCluster
 from enum import Enum
 from time import perf_counter, sleep
 from vani.common.filter_groups import TimelineMetadataFilterGroup, TimelineReadWriteFilterGroup
-from vani.common.filters import *
 from vani.common.interfaces import _FilterGroup
 from vani.common.nodes import AnalysisNode, BinNode, FilterGroupNode
 from vani.utils.data_filtering import filter_non_io_traces, split_io_mpi_trace, split_read_write_metadata
@@ -46,7 +44,7 @@ class Analyzer(object):
             self.cluster.scale(n_workers)
             self.__wait_until_workers_alive()
 
-    def analyze_parquet_logs(self, log_dir: str, max_depth=3, cross_filters=False):
+    def analyze_parquet_logs(self, log_dir: str, max_depth=3, persist_stats=True, stats_file_prefix=""):
         # Keep workers alive
         # keep_alive_task = asyncio.create_task(self.__keep_workers_alive())
 
@@ -63,14 +61,15 @@ class Analyzer(object):
         self.io_ddf = io_ddf
 
         # Compute stats
+        # TODO(hari): we can add this part of convertor to calculate the max of tend.
         job_time = ddf['tend'].max().compute()
         n_bins = 10
 
         # Define filter groups
         filter_groups = [
-            ("Timeline - Read", TimelineReadWriteFilterGroup(job_time=job_time, n_bins=n_bins), io_ddf_read),
-            ("Timeline - Write", TimelineReadWriteFilterGroup(job_time=job_time, n_bins=n_bins), io_ddf_write),
-            ("Timeline - Metadata", TimelineMetadataFilterGroup(job_time=job_time, n_bins=n_bins), io_ddf_metadata)
+            ("Timeline - Read", TimelineReadWriteFilterGroup(job_time=job_time, n_bins=n_bins, stats_file_prefix=stats_file_prefix), io_ddf_read),
+            ("Timeline - Write", TimelineReadWriteFilterGroup(job_time=job_time, n_bins=n_bins, stats_file_prefix=stats_file_prefix), io_ddf_write),
+            ("Timeline - Metadata", TimelineMetadataFilterGroup(job_time=job_time, n_bins=n_bins, stats_file_prefix=stats_file_prefix), io_ddf_metadata)
         ]
 
         filter_group_nodes = []
@@ -82,7 +81,7 @@ class Analyzer(object):
                                                            filter_group=filter_group,
                                                            ddf=target_ddf,
                                                            max_depth=max_depth,
-                                                           cross_filters=cross_filters)
+                                                           persist_stats=persist_stats)
             filter_group_nodes.append(filter_group_node)
 
         analysis = AnalysisNode(filter_group_nodes=filter_group_nodes)
@@ -118,11 +117,11 @@ class Analyzer(object):
         self.client.close()
         self.cluster.close()
 
-    def _analyze_filter_group(self, title: str, filter_group: _FilterGroup, ddf: DataFrame, max_depth: int, cross_filters=False) -> FilterGroupNode:
+    def _analyze_filter_group(self, title: str, filter_group: _FilterGroup, ddf: DataFrame, max_depth: int, persist_stats=True) -> FilterGroupNode:
         # Create filter group node
         filter_group_node = FilterGroupNode(title=title, filter_group=filter_group)
         # Prepare filter group
-        filter_group.prepare(ddf=self.io_ddf, debug=self.debug)
+        filter_group.prepare(ddf=self.io_ddf, persist_stats=persist_stats, debug=self.debug)
         # Get filters
         filters = filter_group.filters()
         # Loop through filters
@@ -159,10 +158,8 @@ class Analyzer(object):
                                                               bin=(bins[bin_index], bins[bin_index + 1]),
                                                               filter=filter,
                                                               parent=node))
-            # Check if cross filter analysis specified
-            if not cross_filters:
-                # If not, finish analysis
-                break
+            # Finish analysis
+            break
         # Return analyzed node
         return filter_group_node
 

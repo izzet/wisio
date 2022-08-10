@@ -1,6 +1,6 @@
 from dask.dataframe import DataFrame, Series
 from numpy import ndarray
-from typing import Any, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 _BinInfo = Tuple[ndarray, float]
 
@@ -46,6 +46,9 @@ class _FilterGroup(object):
     def calculate_bins(self, start: Any, stop: Any) -> _BinInfo:
         raise NotImplementedError
 
+    def compute_stats(self, ddf: DataFrame) -> Dict:
+        raise NotImplementedError
+
     def create_node(self, ddf: DataFrame, bin: Tuple[float, float], filter: _Filter, parent=None) -> _BinNode:
         raise NotImplementedError
 
@@ -61,7 +64,7 @@ class _FilterGroup(object):
     def name(self) -> str:
         raise NotImplementedError
 
-    def prepare(self, ddf: DataFrame, debug=False) -> None:
+    def prepare(self, ddf: DataFrame, persist_stats=True, debug=False) -> None:
         raise NotImplementedError
 
     def set_bins(self, ddf: DataFrame, bins: ndarray):

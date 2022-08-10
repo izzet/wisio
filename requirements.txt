@@ -6,6 +6,6 @@ distributed
 fastparquet
 numpy
 pandas
-# pyarrow
+pyyaml
 scipy
 tqdm
