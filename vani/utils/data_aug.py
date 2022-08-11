@@ -53,6 +53,8 @@ def set_sizes_counts(ddf: DataFrame):
     ddf['count'] = ddf['count'].mask(readdir_condition, "1")
     # Set data types
     ddf[['size', 'count']] = ddf[['size', 'count']].astype(float)
+    # Size fix
+    ddf['size'] = ddf['size'] * ddf['count']
 
 
 def _read_write_cond_io_df(ddf: DataFrame):
