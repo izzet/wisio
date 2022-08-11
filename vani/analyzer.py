@@ -47,19 +47,17 @@ class Analyzer(object):
     def analyze_parquet_logs(self, log_dir: str, max_depth=3, persist_stats=True, stats_file_prefix=""):
         # Keep workers alive
         # keep_alive_task = asyncio.create_task(self.__keep_workers_alive())
-
         # Read logs into a dataframe
         ddf = self._read_parquet(log_dir=log_dir)
-
         # Filter non-I/O traces (except for MPI)
         # Split dataframe into I/O, MPI and trace
         # Split io_df into read & write and metadata dataframes
         ddf = filter_non_io_traces(ddf=ddf)
         io_ddf, mpi_ddf, trace_ddf = split_io_mpi_trace(ddf=ddf, fix_columns=False)
         io_ddf_read, io_ddf_write, io_ddf_metadata = split_read_write_metadata(io_ddf=io_ddf)
+        # Keep references
         self.ddf = ddf
         self.io_ddf = io_ddf
-
         # Define filter groups
         n_bins = 10
         filter_groups = [
@@ -67,9 +65,8 @@ class Analyzer(object):
             ("Timeline - Write", TimelineWriteFilterGroup(n_bins=n_bins, stats_file_prefix=stats_file_prefix), io_ddf_write),
             ("Timeline - Metadata", TimelineMetadataFilterGroup(n_bins=n_bins, stats_file_prefix=stats_file_prefix), io_ddf_metadata)
         ]
-
+        # Keep filter group nodes
         filter_group_nodes = []
-
         # Loop through filter groups
         for title, filter_group, target_ddf in filter_groups:
             # Analyze filter group
@@ -79,12 +76,11 @@ class Analyzer(object):
                                                            max_depth=max_depth,
                                                            persist_stats=persist_stats)
             filter_group_nodes.append(filter_group_node)
-
+        # Create analysis tree
         analysis = AnalysisNode(filter_group_nodes=filter_group_nodes)
-
         # Cancel task
         # keep_alive_task.cancel()
-
+        # Return analysis tree
         return analysis
 
     def save_filter_group_node_as_flamegraph(self, filter_group_node: FilterGroupNode, output_path: str):
