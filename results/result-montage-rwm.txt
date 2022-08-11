@@ -1,0 +1,31 @@
+Job time: 29283.227
+I/O time/p: 218.327
+Max duration: 0.172
+Max xfer: 31.391
+Mean BW: 0.496
+Total ranks: 1.000
+Total size: 139.047
+Total files: 17368.000
+Total ops: 11204222.000
+
+Analysis
+├── Timeline - Read
+│   └── [0.000-29283.227] Size= | Time= | Ops= | Files= | Bandwidth= | Parallelism= | Xfer= | Confidence=nan%
+├── Timeline - Write
+│   └── [0.000-29283.227] Size= | Time= | Ops= | Files= | Bandwidth= | Parallelism= | Xfer= | Confidence=nan%
+└── Timeline - Metadata
+    └── [0.000-29283.227] Time=10 218.32697s/p 100.0% | Ops=1 11204222 100.0% | Files=1 17368 100.0% | Parallelism=10 1 100.0% | Confidence=55.0%
+        ├── [0.000-14641.613] Time=10 210.50861s/p 96.4% | Ops=2 10468634 93.4% | Files=1 17160 98.8% | Parallelism=10 1 100.0% | Confidence=57.5%
+        │   ├── [0.000-7320.807] Time=10 205.10187s/p 93.9% | Ops=3 10027805 89.5% | Files=1 16986 97.8% | Parallelism=10 1 100.0% | Confidence=60.0%
+        │   │   ├── [0.000-3660.403] Time=10 202.20294s/p 92.6% | Ops=4 9747553 87.0% | Files=1 16902 97.3% | Parallelism=10 1 100.0% | Confidence=62.5%
+        │   │   └── [3660.403-7320.807] Time=1 2.89893s/p 1.3% | Ops=1 280252 2.5% | Files=10 142 0.8% | Parallelism=10 1 100.0% | Confidence=55.0%
+        │   └── [7320.807-14641.613] Time=1 5.40674s/p 2.5% | Ops=1 440829 3.9% | Files=10 280 1.6% | Parallelism=10 1 100.0% | Confidence=55.0%
+        │       ├── [7320.807-10981.210] Time=1 3.57373s/p 1.6% | Ops=1 260109 2.3% | Files=10 194 1.1% | Parallelism=10 1 100.0% | Confidence=55.0%
+        │       └── [10981.210-14641.613] Time=1 1.83301s/p 0.8% | Ops=1 180720 1.6% | Files=10 92 0.5% | Parallelism=10 1 100.0% | Confidence=55.0%
+        └── [14641.613-29283.227] Time=1 7.81836s/p 3.6% | Ops=1 735588 6.6% | Files=10 350 2.0% | Parallelism=10 1 100.0% | Confidence=55.0%
+            ├── [14641.613-21962.420] Time=1 3.91211s/p 1.8% | Ops=1 362814 3.2% | Files=10 177 1.0% | Parallelism=10 1 100.0% | Confidence=55.0%
+            │   ├── [14641.613-18302.017] Time=1 1.88477s/p 0.9% | Ops=1 183248 1.6% | Files=10 92 0.5% | Parallelism=10 1 100.0% | Confidence=55.0%
+            │   └── [18302.017-21962.420] Time=1 2.02734s/p 0.9% | Ops=1 179566 1.6% | Files=10 87 0.5% | Parallelism=10 1 100.0% | Confidence=55.0%
+            └── [21962.420-29283.227] Time=1 3.90625s/p 1.8% | Ops=1 372774 3.3% | Files=10 175 1.0% | Parallelism=10 1 100.0% | Confidence=55.0%
+                ├── [21962.420-25622.823] Time=1 2.11914s/p 1.0% | Ops=1 196828 1.8% | Files=10 92 0.5% | Parallelism=10 1 100.0% | Confidence=55.0%
+                └── [25622.823-29283.227] Time=1 1.78711s/p 0.8% | Ops=1 175946 1.6% | Files=10 85 0.5% | Parallelism=10 1 100.0% | Confidence=55.0%
