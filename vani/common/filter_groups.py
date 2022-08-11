@@ -33,7 +33,7 @@ class FilterGroup(_FilterGroup):
         with open(self._stats_file_name, 'w') as file:
             yaml.dump(self.stats, file, sort_keys=True)
 
-    def prepare(self, ddf: DataFrame, persist_stats=True, debug=False) -> None:
+    def prepare(self, ddf: DataFrame, all_ddf: DataFrame, persist_stats=True, debug=False) -> None:
         print("---Stats---")
         if persist_stats:
             self.stats = self.load_stats()
@@ -42,7 +42,7 @@ class FilterGroup(_FilterGroup):
         if not self.stats:
             if debug:
                 print("Computing stats...")
-            self.stats = self.compute_stats(ddf=ddf)
+            self.stats = self.compute_stats(ddf=ddf, all_ddf=all_ddf)
         if debug:
             print(self.stats)
         if persist_stats:
@@ -55,18 +55,12 @@ class FilterGroup(_FilterGroup):
 
 class TimelineReadWriteFilterGroupBase(FilterGroup):
 
-    def __init__(self, job_time: float, n_bins=2, stats_file_prefix="") -> None:
-        super().__init__(n_bins, stats_file_prefix)
-        assert job_time > 0
-        self.job_time = job_time
-        self.n_bins = n_bins
-
     def binned_by(self) -> str:
         return 'tbin'
 
     def create_root(self, ddf: DataFrame, filter: _Filter, parent=None) -> _BinNode:
-        self.set_bins(ddf=ddf, bins=[0, self.job_time])
-        return self.create_node(ddf=ddf, bin=(0, self.job_time), filter=filter, parent=parent)
+        self.set_bins(ddf=ddf, bins=[0, self.stats['job_time']])
+        return self.create_node(ddf=ddf, bin=(0, self.stats['job_time']), filter=filter, parent=parent)
 
     def filters(self) -> List[_Filter]:
         return self.filter_instances
@@ -95,12 +89,10 @@ class TimelineReadWriteFilterGroupBase(FilterGroup):
 
 class TimelineReadWriteFilterGroup(TimelineReadWriteFilterGroupBase):
 
-    def __init__(self, job_time: float, n_bins=2, stats_file_prefix="") -> None:
-        super().__init__(job_time, n_bins, stats_file_prefix)
-
-    def compute_stats(self, ddf: DataFrame) -> Dict:
+    def compute_stats(self, ddf: DataFrame, all_ddf: DataFrame) -> Dict:
         # Init stat tasks
         stats_tasks = [
+            all_ddf['tend'].max(),
             IOTimeFilter.on(ddf=ddf),
             DurationFilter.on(ddf=ddf),
             ddf['size'].max()/1024.0/1024.0,
@@ -111,10 +103,11 @@ class TimelineReadWriteFilterGroup(TimelineReadWriteFilterGroupBase):
             IOOpsFilter.on(ddf=ddf)
         ]
         # Compute stats
-        io_time, max_duration, max_size, mean_bw, total_ranks, total_size, total_files, total_ops = dask.compute(*stats_tasks)
+        job_time, io_time, max_duration, max_size, mean_bw, total_ranks, total_size, total_files, total_ops = dask.compute(*stats_tasks)
         # Return stats
         return dict(
             io_time=float(io_time),
+            job_time=float(job_time),
             max_duration=float(max_duration),
             max_size=float(max_size),
             mean_bw=float(mean_bw),
@@ -127,8 +120,8 @@ class TimelineReadWriteFilterGroup(TimelineReadWriteFilterGroupBase):
     def name(self) -> str:
         return "Timeline Read-Write"
 
-    def prepare(self, ddf: DataFrame, persist_stats=True, debug=False) -> None:
-        super().prepare(ddf, persist_stats, debug)
+    def prepare(self, ddf: DataFrame, all_ddf: DataFrame, persist_stats=True, debug=False) -> None:
+        super().prepare(ddf, all_ddf, persist_stats, debug)
         # Init filters
         self.filter_instances = [
             IOSizeFilter(min=0, max=self.stats['total_size'], n_bins=self.n_bins),
@@ -141,14 +134,24 @@ class TimelineReadWriteFilterGroup(TimelineReadWriteFilterGroupBase):
         ]
 
 
+class TimelineReadFilterGroup(TimelineReadWriteFilterGroup):
+
+    def name(self) -> str:
+        return "Timeline Read"
+
+
+class TimelineWriteFilterGroup(TimelineReadWriteFilterGroup):
+
+    def name(self) -> str:
+        return "Timeline Write"
+
+
 class TimelineMetadataFilterGroup(TimelineReadWriteFilterGroupBase):
 
-    def __init__(self, job_time: float, n_bins=2, stats_file_prefix="") -> None:
-        super().__init__(job_time, n_bins, stats_file_prefix)
-
-    def compute_stats(self, ddf: DataFrame) -> Dict:
+    def compute_stats(self, ddf: DataFrame, all_ddf: DataFrame) -> Dict:
         # Init stat tasks
         stats_tasks = [
+            all_ddf['tend'].max(),
             IOTimeFilter.on(ddf=ddf),
             DurationFilter.on(ddf=ddf),
             ParallelismFilter.on(ddf=ddf),
@@ -156,10 +159,11 @@ class TimelineMetadataFilterGroup(TimelineReadWriteFilterGroupBase):
             IOOpsFilter.on(ddf=ddf)
         ]
         # Compute stats
-        io_time, max_duration, total_ranks, total_files, total_ops = dask.compute(*stats_tasks)
+        job_time, io_time, max_duration, total_ranks, total_files, total_ops = dask.compute(*stats_tasks)
         # Return stats
         return dict(
             io_time=float(io_time),
+            job_time=float(job_time),
             max_duration=float(max_duration),
             total_files=int(total_files),
             total_ops=int(total_ops),
@@ -169,8 +173,8 @@ class TimelineMetadataFilterGroup(TimelineReadWriteFilterGroupBase):
     def name(self) -> str:
         return "Timeline Metadata"
 
-    def prepare(self, ddf: DataFrame, persist_stats=True, debug=False) -> None:
-        super().prepare(ddf, persist_stats, debug)
+    def prepare(self, ddf: DataFrame, all_ddf: DataFrame, persist_stats=True, debug=False) -> None:
+        super().prepare(ddf, all_ddf, persist_stats, debug)
         # Init filters
         self.filter_instances = [
             IOTimeFilter(min=0, max=self.stats['io_time'], n_bins=self.n_bins),

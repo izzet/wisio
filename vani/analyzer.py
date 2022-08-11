@@ -8,7 +8,7 @@ from dask.distributed import Client, LocalCluster
 from dask_jobqueue import LSFCluster
 from enum import Enum
 from time import perf_counter, sleep
-from vani.common.filter_groups import TimelineMetadataFilterGroup, TimelineReadWriteFilterGroup
+from vani.common.filter_groups import *
 from vani.common.interfaces import _FilterGroup
 from vani.common.nodes import AnalysisNode, BinNode, FilterGroupNode
 from vani.utils.data_filtering import filter_non_io_traces, split_io_mpi_trace, split_read_write_metadata
@@ -57,19 +57,15 @@ class Analyzer(object):
         ddf = filter_non_io_traces(ddf)
         io_ddf, mpi_ddf, trace_ddf = split_io_mpi_trace(ddf)
         io_ddf_read, io_ddf_write, io_ddf_metadata = split_read_write_metadata(io_ddf)
-
+        self.ddf = ddf
         self.io_ddf = io_ddf
 
-        # Compute stats
-        # TODO(hari): we can add this part of convertor to calculate the max of tend.
-        job_time = ddf['tend'].max().compute()
-        n_bins = 10
-
         # Define filter groups
+        n_bins = 10
         filter_groups = [
-            ("Timeline - Read", TimelineReadWriteFilterGroup(job_time=job_time, n_bins=n_bins, stats_file_prefix=stats_file_prefix), io_ddf_read),
-            ("Timeline - Write", TimelineReadWriteFilterGroup(job_time=job_time, n_bins=n_bins, stats_file_prefix=stats_file_prefix), io_ddf_write),
-            ("Timeline - Metadata", TimelineMetadataFilterGroup(job_time=job_time, n_bins=n_bins, stats_file_prefix=stats_file_prefix), io_ddf_metadata)
+            ("Timeline - Read", TimelineReadFilterGroup(n_bins=n_bins, stats_file_prefix=stats_file_prefix), io_ddf_read),
+            ("Timeline - Write", TimelineWriteFilterGroup(n_bins=n_bins, stats_file_prefix=stats_file_prefix), io_ddf_write),
+            ("Timeline - Metadata", TimelineMetadataFilterGroup(n_bins=n_bins, stats_file_prefix=stats_file_prefix), io_ddf_metadata)
         ]
 
         filter_group_nodes = []
@@ -121,7 +117,7 @@ class Analyzer(object):
         # Create filter group node
         filter_group_node = FilterGroupNode(title=title, filter_group=filter_group)
         # Prepare filter group
-        filter_group.prepare(ddf=self.io_ddf, persist_stats=persist_stats, debug=self.debug)
+        filter_group.prepare(ddf=self.io_ddf, all_ddf=self.ddf, persist_stats=persist_stats, debug=self.debug)
         # Get filters
         filters = filter_group.filters()
         # Loop through filters
