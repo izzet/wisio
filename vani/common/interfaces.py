@@ -5,7 +5,13 @@ from typing import Any, Dict, List, Tuple
 _BinInfo = Tuple[ndarray, float]
 
 
-class _Filter(object):
+class _DescribesObservation(object):
+
+    def observation_desc(self, label: int = None, value: Any = None, score: float = None) -> str:
+        raise NotImplementedError
+
+
+class _Filter(_DescribesObservation):
 
     def apply(self, ddf: DataFrame) -> Any:
         raise NotImplementedError
@@ -32,13 +38,13 @@ class _Filter(object):
         raise NotImplementedError
 
 
-class _BinNode(object):
+class _BinNode(_DescribesObservation):
 
     def analyze(self) -> Any:
         raise NotImplementedError
 
 
-class _FilterGroup(object):
+class _FilterGroup(_DescribesObservation):
 
     def binned_by(self) -> str:
         raise NotImplementedError

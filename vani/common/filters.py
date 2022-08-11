@@ -3,7 +3,7 @@ import pandas as pd
 from dask.dataframe import DataFrame, Series
 from scipy import stats
 from typing import Any
-from vani.common.constants import VALUE_FORMAT
+from vani.common.constants import PERCENTAGE_FORMAT, VALUE_FORMAT
 from vani.common.interfaces import _Filter
 
 
@@ -70,6 +70,12 @@ class BandwidthFilter(Filter):
     def name(self) -> str:
         return "Bandwidth"
 
+    def observation_desc(self, label: int = None, value: Any = None, score: float = None) -> str:
+        # achieves a low bandwidth of {} / high bandwidth of {} per process -- > 1GB/s
+        if label == 1:
+            return f"achieves a high bandwidth of {self.format_value(value)} per process"
+        return f"achieves a low bandwidth of {self.format_value(value)} per process"
+
     def prepare(self, ddf: DataFrame) -> Any:
         return ddf.groupby('tbin')
 
@@ -106,6 +112,12 @@ class FileFilter(Filter):
     def name(self) -> str:
         return "Files"
 
+    def observation_desc(self, label: int = None, value: Any = None, score: float = None) -> str:
+        # accesses a lot of files / only {} files -- > 50%
+        if score > 0.5:
+            return "accesses a lot of files"
+        return f"accesses only {value} ({PERCENTAGE_FORMAT.format(score * 100)}) files"
+
     def prepare(self, ddf: DataFrame) -> Any:
         return ddf.groupby('tbin')
 
@@ -127,6 +139,9 @@ class IOOpsFilter(Filter):
     def name(self) -> str:
         return "Ops"
 
+    def observation_desc(self, label: int = None, value: Any = None, score: float = None) -> str:
+        return f"doing {PERCENTAGE_FORMAT.format(score * 100)} of total I/O ops"
+
     def prepare(self, ddf: DataFrame) -> Any:
         return ddf.groupby('tbin')
 
@@ -141,6 +156,9 @@ class IOSizeFilter(Filter):
 
     def name(self) -> str:
         return "Size"
+
+    def observation_desc(self, label: int = None, value: Any = None, score: float = None) -> str:
+        return f"does {PERCENTAGE_FORMAT.format(score * 100)} of total I/O"
 
     def prepare(self, ddf: DataFrame) -> Any:
         return ddf.groupby('tbin')
@@ -158,6 +176,12 @@ class IOTimeFilter(Filter):
 
     def name(self) -> str:
         return "Time"
+
+    def observation_desc(self, label: int = None, value: Any = None, score: float = None) -> str:
+        # spends a minimal amount of time / a lot of time -- > 50%
+        if label < 5:
+            return f"spends a minimal amount of time during I/O operations"
+        return f"spends a lot of time during I/O operations"
 
     def prepare(self, ddf: DataFrame) -> Any:
         return ddf.groupby('tbin')
@@ -183,6 +207,12 @@ class ParallelismFilter(Filter):
     def name(self) -> str:
         return "Parallelism"
 
+    def observation_desc(self, label: int = None, value: Any = None, score: float = None) -> str:
+        # has a lot of concurrent operations performed by {} ranks / does not have a lot of concurrent operations performed only by {} ranks
+        if score < 0.5:
+            return f"does not have a lot of concurrent operations performed only by {value} ({PERCENTAGE_FORMAT.format(score * 100)}) ranks"
+        return f"has a lot of concurrent operations performed by {value} ({PERCENTAGE_FORMAT.format(score * 100)}) ranks"
+
     def prepare(self, ddf: DataFrame) -> Any:
         return ddf.groupby('tbin')
 
@@ -200,6 +230,12 @@ class XferSizeFilter(Filter):
 
     def name(self) -> str:
         return "Xfer"
+
+    def observation_desc(self, label: int = None, value: Any = None, score: float = None) -> str:
+        # has a big/small transfer of {}
+        if label == 1:
+            return f"has a big transfer size of {self.format_value(value)}"
+        return f"has a small transfer size of {self.format_value(value)}"
 
     def prepare(self, ddf: DataFrame) -> Any:
         return ddf.groupby('tbin')

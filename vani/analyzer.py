@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import dask.dataframe as dd
 import os
 import socket
@@ -8,6 +9,7 @@ from dask.distributed import Client, LocalCluster
 from dask_jobqueue import LSFCluster
 from enum import Enum
 from time import perf_counter, sleep
+from tqdm import tqdm
 from vani.common.filter_groups import *
 from vani.common.interfaces import _FilterGroup
 from vani.common.nodes import AnalysisNode, BinNode, FilterGroupNode
@@ -61,27 +63,35 @@ class Analyzer(object):
         # Define filter groups
         n_bins = 10
         filter_groups = [
-            ("Timeline - Read", TimelineReadFilterGroup(n_bins=n_bins, stats_file_prefix=stats_file_prefix), io_ddf_read),
-            ("Timeline - Write", TimelineWriteFilterGroup(n_bins=n_bins, stats_file_prefix=stats_file_prefix), io_ddf_write),
-            ("Timeline - Metadata", TimelineMetadataFilterGroup(n_bins=n_bins, stats_file_prefix=stats_file_prefix), io_ddf_metadata)
+            ("Time-based > Read", TimelineReadFilterGroup(n_bins=n_bins, stats_file_prefix=stats_file_prefix), io_ddf_read),
+            ("Time-based > Write", TimelineWriteFilterGroup(n_bins=n_bins, stats_file_prefix=stats_file_prefix), io_ddf_write),
+            ("Time-based > Metadata", TimelineMetadataFilterGroup(n_bins=n_bins, stats_file_prefix=stats_file_prefix), io_ddf_metadata)
         ]
         # Keep filter group nodes
         filter_group_nodes = []
         # Loop through filter groups
+        pbar = tqdm(total=len(filter_groups))
         for title, filter_group, target_ddf in filter_groups:
             # Analyze filter group
+            pbar.set_description(f'Doing "{title}" analysis')
             filter_group_node = self._analyze_filter_group(title=title,
                                                            filter_group=filter_group,
                                                            ddf=target_ddf,
                                                            max_depth=max_depth,
                                                            persist_stats=persist_stats)
             filter_group_nodes.append(filter_group_node)
+            pbar.update()
         # Create analysis tree
         analysis = AnalysisNode(filter_group_nodes=filter_group_nodes)
+        pbar.set_description("Analysis completed")
         # Cancel task
         # keep_alive_task.cancel()
         # Return analysis tree
         return analysis
+
+    def generate_hypotheses(analysis: AnalysisNode):
+        # Get all filter groups
+        return analysis.generate_hypotheses()
 
     def save_filter_group_node_as_flamegraph(self, filter_group_node: FilterGroupNode, output_path: str):
         # Init lines
@@ -177,7 +187,8 @@ class Analyzer(object):
             user = os.environ.get('USER')
             local_directory = os.environ.get('BBPATH', f"/tmp/{user}/vani-analysis-tool")
             cluster = LocalCluster(n_workers=8,
-                                   local_directory=local_directory)
+                                   local_directory=local_directory,
+                                   silence_logs=logging.DEBUG if self.debug else logging.CRITICAL)
         elif (cluster_options.cluster_type is ClusterType.LSF):
             # Initialize cluster
             cluster = LSFCluster(cores=cores,

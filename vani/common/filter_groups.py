@@ -141,11 +141,17 @@ class TimelineReadFilterGroup(TimelineReadWriteFilterGroup):
     def name(self) -> str:
         return "Timeline Read"
 
+    def observation_desc(self, label: int = None, value: Any = None, score: float = None) -> str:
+        return "I/O read operations"
+
 
 class TimelineWriteFilterGroup(TimelineReadWriteFilterGroup):
 
     def name(self) -> str:
         return "Timeline Write"
+
+    def observation_desc(self, label: int = None, value: Any = None, score: float = None) -> str:
+        return "I/O write operations"
 
 
 class TimelineMetadataFilterGroup(TimelineReadWriteFilterGroupBase):
@@ -174,6 +180,9 @@ class TimelineMetadataFilterGroup(TimelineReadWriteFilterGroupBase):
 
     def name(self) -> str:
         return "Timeline Metadata"
+
+    def observation_desc(self, label: int = None, value: Any = None, score: float = None) -> str:
+        return "I/O metadata operations"
 
     def prepare(self, ddf: DataFrame, all_ddf: DataFrame, persist_stats=True, debug=False) -> None:
         super().prepare(ddf, all_ddf, persist_stats, debug)
