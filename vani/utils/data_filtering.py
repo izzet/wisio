@@ -10,16 +10,17 @@ def filter_non_io_traces(ddf: DataFrame) -> DataFrame:
     return ddf
 
 
-def split_io_mpi_trace(ddf: DataFrame) -> Tuple[DataFrame, DataFrame, DataFrame]:
+def split_io_mpi_trace(ddf: DataFrame, fix_columns=False) -> Tuple[DataFrame, DataFrame, DataFrame]:
     # Split dataframe into I/O, MPI and trace
     io_ddf = ddf[ddf['cat'].isin([0, 1, 3])]
     mpi_ddf = ddf[ddf['cat'] == 2]
     trace_ddf = ddf[ddf['cat'] == 4]
     # Set additional columns
-    set_durations(io_ddf)
-    set_filenames(io_ddf)
-    set_sizes_counts(io_ddf)
-    set_bandwidths(io_ddf)
+    if fix_columns:
+        set_durations(io_ddf)
+        set_filenames(io_ddf)
+        set_sizes_counts(io_ddf)
+        set_bandwidths(io_ddf)
     # Return splitted dataframes
     return io_ddf, mpi_ddf, trace_ddf
 

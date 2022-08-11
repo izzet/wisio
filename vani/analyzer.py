@@ -54,9 +54,9 @@ class Analyzer(object):
         # Filter non-I/O traces (except for MPI)
         # Split dataframe into I/O, MPI and trace
         # Split io_df into read & write and metadata dataframes
-        ddf = filter_non_io_traces(ddf)
-        io_ddf, mpi_ddf, trace_ddf = split_io_mpi_trace(ddf)
-        io_ddf_read, io_ddf_write, io_ddf_metadata = split_read_write_metadata(io_ddf)
+        ddf = filter_non_io_traces(ddf=ddf)
+        io_ddf, mpi_ddf, trace_ddf = split_io_mpi_trace(ddf=ddf, fix_columns=False)
+        io_ddf_read, io_ddf_write, io_ddf_metadata = split_read_write_metadata(io_ddf=io_ddf)
         self.ddf = ddf
         self.io_ddf = io_ddf
 
