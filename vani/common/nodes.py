@@ -75,7 +75,9 @@ class BinNode(_BinNode, NodeMixin):
                 bin_label = observation.values[observation_index]
                 metric_labels.append(bin_label)
             all_metric_labels.extend(metric_labels)
-        score = (np.sum(filter_labels) + np.sum(all_metric_labels))/(len(filter_labels) + len(all_metric_labels))
+        score = 0
+        if filter_labels and all_metric_labels:
+            score = (np.sum(filter_labels) + np.sum(all_metric_labels))/(len(filter_labels) + len(all_metric_labels))
         return score / 10.0
 
     def __detect_filter_bottlenecks(self, filter_result: Any) -> Any:
