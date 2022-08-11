@@ -34,7 +34,8 @@ class FilterGroup(_FilterGroup):
             yaml.dump(self.stats, file, sort_keys=True)
 
     def prepare(self, ddf: DataFrame, all_ddf: DataFrame, persist_stats=True, debug=False) -> None:
-        print("---Stats---")
+        if debug:
+            print("---Stats---")
         if persist_stats:
             self.stats = self.load_stats()
             if debug and self.stats:
@@ -47,7 +48,8 @@ class FilterGroup(_FilterGroup):
             print(self.stats)
         if persist_stats:
             self.persist_stats()
-        print("-----------")
+        if debug:
+            print("-----------")
 
     def __repr__(self) -> str:
         return self.name()
