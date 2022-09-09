@@ -1,6 +1,6 @@
 from dask.dataframe import DataFrame
 from typing import Tuple
-from vani.utils.data_aug import set_durations, set_filenames, set_sizes_counts, set_bandwidths, _read_write_cond_io_df
+from vani.utils.data_aug import set_durations, set_filenames, set_sizes_counts, set_bandwidths, _read_write_cond_io_df_ext
 
 
 def filter_non_io_traces(ddf: DataFrame) -> DataFrame:
@@ -27,11 +27,11 @@ def split_io_mpi_trace(ddf: DataFrame, fix_columns=False) -> Tuple[DataFrame, Da
 
 def split_read_write_metadata(io_ddf: DataFrame, compute=False) -> Tuple[DataFrame, DataFrame, DataFrame]:
     # Prepare conditions
-    read_condition, write_condition = _read_write_cond_io_df(io_ddf)
+    read_condition, fread_condition, write_condition, fwrite_condition = _read_write_cond_io_df_ext(io_ddf)
     # Then compute read & write and metadata dataframes
-    io_ddf_read = io_ddf[read_condition]
-    io_ddf_write = io_ddf[write_condition]
-    io_ddf_metadata = io_ddf[~read_condition & ~write_condition]
+    io_ddf_read = io_ddf[read_condition | fread_condition]
+    io_ddf_write = io_ddf[write_condition | write_condition]
+    io_ddf_metadata = io_ddf[~read_condition & ~fread_condition & ~write_condition & ~fwrite_condition]
     # Compute if specified
     if compute:
         io_ddf_read = io_ddf_read.compute()

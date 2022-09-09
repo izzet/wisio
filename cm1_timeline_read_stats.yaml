@@ -1,0 +1,9 @@
+io_time: 3.0934764072299e-05
+job_time: 778.5035400390625
+max_duration: 0.0019809999503195286
+max_size: 16.0
+mean_bw: 1581.1293876755071
+total_files: 2
+total_ops: 1282
+total_ranks: 1280
+total_size: 20.03125

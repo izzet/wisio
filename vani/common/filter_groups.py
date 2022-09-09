@@ -1,54 +1,46 @@
 import dask
 import numpy as np
-import yaml
 from dask.dataframe import DataFrame
 from numpy import ndarray
-from os.path import isfile
+
 from typing import Any, Dict, List, Tuple
 from vani.common.filters import *
-from vani.common.interfaces import _BinInfo, _BinNode, _Filter, _FilterGroup
+from vani.common.interfaces import _Bin, _BinInfo, _BinNode, _Filter, _FilterGroup
 from vani.common.nodes import BinNode
 from vani.utils.string_utils import to_snake_case
-
-_NUM_NEXT_BINS = 3
+from vani.utils.yaml_utils import load_persisted
 
 
 class FilterGroup(_FilterGroup):
 
     def __init__(self, n_bins=2, stats_file_prefix="") -> None:
+        self.filter_instances = []
         self.n_bins = n_bins
         self.stats = dict()
         self._stats_file_name = f"{stats_file_prefix}{to_snake_case(self.name())}_stats.yaml"
 
-    def create_node(self, ddf: DataFrame, bin: Tuple[float, float], filter: _Filter, parent=None) -> _BinNode:
+    def create_node(self, ddf: DataFrame, bin: _Bin, filter: _Filter, parent=None) -> _BinNode:
         return BinNode(ddf=ddf, bin=bin, filter_group=self, filter=filter, parent=parent)
 
-    def load_stats(self) -> Dict:
-        if not isfile(self._stats_file_name):
-            return dict()
-        with open(self._stats_file_name, 'r') as file:
-            return yaml.safe_load(file)
+    def filters(self) -> List[_Filter]:
+        return self.filter_instances
 
-    def persist_stats(self) -> None:
-        with open(self._stats_file_name, 'w') as file:
-            yaml.dump(self.stats, file, sort_keys=True)
+    def main_filter(self) -> _Filter:
+        return self.filters()[0]
 
-    def prepare(self, ddf: DataFrame, all_ddf: DataFrame, persist_stats=True, debug=False) -> None:
+    def metrics_of(self, filter: _Filter) -> List[_Filter]:
+        return [metric for metric in self.filters() if metric != filter]
+
+    def prepare(self, ddf: DataFrame, global_stats: Dict, persist_stats=True, debug=False) -> None:
         if debug:
-            print("---Stats---")
-        if persist_stats:
-            self.stats = self.load_stats()
-            if debug and self.stats:
-                print("Stats loaded from file")
-        if not self.stats:
+            print(f"---{self.name()} Stats---")
+        def compute_stats():
             if debug:
                 print("Computing stats...")
-            self.stats = self.compute_stats(ddf=ddf, all_ddf=all_ddf)
+            return self.compute_stats(ddf=ddf, global_stats=global_stats)
+        self.stats = load_persisted(path=self._stats_file_name, fallback=compute_stats, persist=persist_stats)
         if debug:
             print(self.stats)
-        if persist_stats:
-            self.persist_stats()
-        if debug:
             print("-----------")
 
     def __repr__(self) -> str:
@@ -60,19 +52,18 @@ class TimelineReadWriteFilterGroupBase(FilterGroup):
     def binned_by(self) -> str:
         return 'tbin'
 
+    def calculate_bins(self, global_stats: Dict, n_bins: int) -> _BinInfo:
+        bins, bin_step = np.linspace(0, global_stats['job_time'], num=n_bins+1, retstep=True)
+        self.bins = bins
+        self.bin_step = bin_step
+        return bins, bin_step
+
     def create_root(self, ddf: DataFrame, filter: _Filter, parent=None) -> _BinNode:
         self.set_bins(ddf=ddf, bins=[0, self.stats['job_time']])
         return self.create_node(ddf=ddf, bin=(0, self.stats['job_time']), filter=filter, parent=parent)
 
-    def filters(self) -> List[_Filter]:
-        return self.filter_instances
-
-    def metrics_of(self, filter: _Filter) -> List[_Filter]:
-        return [metric for metric in self.filters() if metric != filter]
-
-    def next_bins(self, start: Any, stop: Any) -> _BinInfo:
-        # Return linear space between start and stop
-        return np.linspace(start, stop, num=_NUM_NEXT_BINS, retstep=True)
+    def get_bins(self) -> _BinInfo:
+        return self.bins, self.bin_step
 
     def set_bins(self, ddf: DataFrame, bins: ndarray):
         # Clear tbin values first
@@ -91,10 +82,9 @@ class TimelineReadWriteFilterGroupBase(FilterGroup):
 
 class TimelineReadWriteFilterGroup(TimelineReadWriteFilterGroupBase):
 
-    def compute_stats(self, ddf: DataFrame, all_ddf: DataFrame) -> Dict:
+    def compute_stats(self, ddf: DataFrame, global_stats: Dict) -> Dict:
         # Init stat tasks
         stats_tasks = [
-            all_ddf['tend'].max(),
             IOTimeFilter.on(ddf=ddf),
             DurationFilter.on(ddf=ddf),
             ddf['size'].max()/1024.0/1024.0,
@@ -105,11 +95,11 @@ class TimelineReadWriteFilterGroup(TimelineReadWriteFilterGroupBase):
             IOOpsFilter.on(ddf=ddf)
         ]
         # Compute stats
-        job_time, io_time, max_duration, max_size, mean_bw, total_ranks, total_size, total_files, total_ops = dask.compute(*stats_tasks)
+        io_time, max_duration, max_size, mean_bw, total_ranks, total_size, total_files, total_ops = dask.compute(*stats_tasks)
         # Return stats
         return dict(
             io_time=float(io_time),
-            job_time=float(job_time),
+            job_time=float(global_stats['job_time']),
             max_duration=float(max_duration),
             max_size=float(max_size),
             mean_bw=float(mean_bw),
@@ -122,8 +112,8 @@ class TimelineReadWriteFilterGroup(TimelineReadWriteFilterGroupBase):
     def name(self) -> str:
         return "Timeline Read-Write"
 
-    def prepare(self, ddf: DataFrame, all_ddf: DataFrame, persist_stats=True, debug=False) -> None:
-        super().prepare(ddf, all_ddf, persist_stats, debug)
+    def prepare(self, ddf: DataFrame, global_stats: Dict, persist_stats=True, debug=False) -> None:
+        super().prepare(ddf, global_stats, persist_stats, debug)
         # Init filters
         self.filter_instances = [
             IOSizeFilter(min=0, max=self.stats['total_size'], n_bins=self.n_bins),
@@ -156,10 +146,9 @@ class TimelineWriteFilterGroup(TimelineReadWriteFilterGroup):
 
 class TimelineMetadataFilterGroup(TimelineReadWriteFilterGroupBase):
 
-    def compute_stats(self, ddf: DataFrame, all_ddf: DataFrame) -> Dict:
+    def compute_stats(self, ddf: DataFrame, global_stats: Dict) -> Dict:
         # Init stat tasks
         stats_tasks = [
-            all_ddf['tend'].max(),
             IOTimeFilter.on(ddf=ddf),
             DurationFilter.on(ddf=ddf),
             ParallelismFilter.on(ddf=ddf),
@@ -167,11 +156,11 @@ class TimelineMetadataFilterGroup(TimelineReadWriteFilterGroupBase):
             IOOpsFilter.on(ddf=ddf)
         ]
         # Compute stats
-        job_time, io_time, max_duration, total_ranks, total_files, total_ops = dask.compute(*stats_tasks)
+        io_time, max_duration, total_ranks, total_files, total_ops = dask.compute(*stats_tasks)
         # Return stats
         return dict(
             io_time=float(io_time),
-            job_time=float(job_time),
+            job_time=float(global_stats['job_time']),
             max_duration=float(max_duration),
             total_files=int(total_files),
             total_ops=int(total_ops),
@@ -184,8 +173,8 @@ class TimelineMetadataFilterGroup(TimelineReadWriteFilterGroupBase):
     def observation_desc(self, label: int = None, value: Any = None, score: float = None) -> str:
         return "I/O metadata operations"
 
-    def prepare(self, ddf: DataFrame, all_ddf: DataFrame, persist_stats=True, debug=False) -> None:
-        super().prepare(ddf, all_ddf, persist_stats, debug)
+    def prepare(self, ddf: DataFrame, global_stats: Dict, persist_stats=True, debug=False) -> None:
+        super().prepare(ddf, global_stats, persist_stats, debug)
         # Init filters
         self.filter_instances = [
             IOTimeFilter(min=0, max=self.stats['io_time'], n_bins=self.n_bins),

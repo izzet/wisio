@@ -4,5 +4,6 @@ __pycache__
 .vscode
 /vani-env*
 /vani-venv*
+/venv*
 dask-worker-space
 nohup.out

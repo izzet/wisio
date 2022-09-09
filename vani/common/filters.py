@@ -4,7 +4,7 @@ from dask.dataframe import DataFrame, Series
 from scipy import stats
 from typing import Any
 from vani.common.constants import PERCENTAGE_FORMAT, VALUE_FORMAT
-from vani.common.interfaces import _Filter
+from vani.common.interfaces import _Bin, _Filter
 
 
 class Filter(_Filter):
@@ -30,7 +30,7 @@ class Filter(_Filter):
             min_max_values = list(reversed(min_max_values))
         # Add zeroed bin to fix labeling, this has no effect if there's already 0-indexed bins
         min_max_bins = pd.Series(min_max_values, index=min_max_indices)
-        fixed_results = results.add(min_max_bins, fill_value=0).sort_values(ascending=False)
+        fixed_results = self.fix_results(results=results, min_max_bins=min_max_bins)
         # Check if the filter is normally distributed
         if self.is_normally_distributed():
             normalized_results = stats.norm.pdf(fixed_results, loc=self.max/2, scale=np.std(fixed_results))
@@ -42,10 +42,18 @@ class Filter(_Filter):
             del labeled_results[min_max_index]
         # Flag >50% problematic or all depending on threshold
         if self.is_inversed():
-            return labeled_results[labeled_results < int(self.n_bins / 2)] if threshold else labeled_results
-        return labeled_results[labeled_results > int(self.n_bins / 2)] if threshold else labeled_results
+            return labeled_results[labeled_results < int(self.n_bins/2)] if threshold else labeled_results
+        return labeled_results[labeled_results > int(self.n_bins/2)] if threshold else labeled_results
 
-    def format_value(self, value: float) -> str:
+    def fix_results(self, results: Series, min_max_bins: Series) -> Series:
+        fixed_results = results.copy()
+        if fixed_results.dtype.kind == 'O':
+            for index, result in enumerate(fixed_results):
+                fixed_results[fixed_results.index.values[index]] = self.numeric_value(result)
+        fixed_results = fixed_results.add(min_max_bins, fill_value=0).sort_values(ascending=False)
+        return fixed_results.astype(float)
+
+    def format_value(self, value: Any) -> str:
         return VALUE_FORMAT.format(value) + self.unit()
 
     def is_inversed(self) -> bool:
@@ -53,6 +61,13 @@ class Filter(_Filter):
 
     def is_normally_distributed(self) -> bool:
         return False
+
+    def numeric_value(self, value: Any) -> float:
+        return float(value)
+
+    def prepare(self, ddf: DataFrame, bin: _Bin) -> Any:
+        start, end = bin
+        return ddf[(ddf['tmid'] == start)]
 
     @classmethod
     def on(cls, ddf: DataFrame) -> Any:
@@ -76,9 +91,6 @@ class BandwidthFilter(Filter):
             return f"achieves a high bandwidth of {self.format_value(value)} per process"
         return f"achieves a low bandwidth of {self.format_value(value)} per process"
 
-    def prepare(self, ddf: DataFrame) -> Any:
-        return ddf.groupby('tbin')
-
     def unit(self) -> str:
         return "GB/s"
 
@@ -101,10 +113,11 @@ class DurationFilter(Filter):
 class FileFilter(Filter):
 
     def apply(self, ddf: DataFrame) -> Any:
-        return ddf['filename'].nunique()
+        # TODO(hari): This is expensive and can be calculted as a part of preprocessing.
+        return ddf['filename'].unique()
 
-    def format_value(self, value: float) -> str:
-        return str(int(value))
+    def format_value(self, value: Any) -> str:
+        return str(len(np.unique(value)))
 
     def is_inversed(self) -> bool:
         return True
@@ -112,14 +125,14 @@ class FileFilter(Filter):
     def name(self) -> str:
         return "Files"
 
+    def numeric_value(self, value: Any) -> float:
+        return float(len(np.unique(value)))
+
     def observation_desc(self, label: int = None, value: Any = None, score: float = None) -> str:
         # accesses a lot of files / only {} files -- > 50%
         if score > 0.5:
             return "accesses a lot of files"
         return f"accesses only {value} ({PERCENTAGE_FORMAT.format(score * 100)}) files"
-
-    def prepare(self, ddf: DataFrame) -> Any:
-        return ddf.groupby('tbin')
 
     def unit(self) -> str:
         return ""
@@ -130,7 +143,7 @@ class IOOpsFilter(Filter):
     def apply(self, ddf: DataFrame) -> Any:
         return ddf['index'].count()
 
-    def format_value(self, value: float) -> str:
+    def format_value(self, value: Any) -> str:
         return str(int(value))
 
     def is_normally_distributed(self) -> bool:
@@ -141,9 +154,6 @@ class IOOpsFilter(Filter):
 
     def observation_desc(self, label: int = None, value: Any = None, score: float = None) -> str:
         return f"doing {PERCENTAGE_FORMAT.format(score * 100)} of total I/O ops"
-
-    def prepare(self, ddf: DataFrame) -> Any:
-        return ddf.groupby('tbin')
 
     def unit(self) -> str:
         return ""
@@ -159,9 +169,6 @@ class IOSizeFilter(Filter):
 
     def observation_desc(self, label: int = None, value: Any = None, score: float = None) -> str:
         return f"does {PERCENTAGE_FORMAT.format(score * 100)} of total I/O"
-
-    def prepare(self, ddf: DataFrame) -> Any:
-        return ddf.groupby('tbin')
 
     def unit(self) -> str:
         return "GB"
@@ -183,9 +190,6 @@ class IOTimeFilter(Filter):
             return f"spends a minimal amount of time during I/O operations"
         return f"spends a lot of time during I/O operations"
 
-    def prepare(self, ddf: DataFrame) -> Any:
-        return ddf.groupby('tbin')
-
     def unit(self) -> str:
         return "s/p"
 
@@ -193,10 +197,10 @@ class IOTimeFilter(Filter):
 class ParallelismFilter(Filter):
 
     def apply(self, ddf: DataFrame) -> Any:
-        return ddf['rank'].nunique()
+        return ddf['rank'].unique()
 
-    def format_value(self, value: float) -> str:
-        return str(int(value))
+    def format_value(self, value: Any) -> str:
+        return str(len(np.unique(value)))
 
     def is_inversed(self) -> bool:
         return True
@@ -207,14 +211,14 @@ class ParallelismFilter(Filter):
     def name(self) -> str:
         return "Parallelism"
 
+    def numeric_value(self, value: Any) -> float:
+        return float(len(np.unique(value)))
+
     def observation_desc(self, label: int = None, value: Any = None, score: float = None) -> str:
         # has a lot of concurrent operations performed by {} ranks / does not have a lot of concurrent operations performed only by {} ranks
         if score < 0.5:
             return f"does not have a lot of concurrent operations performed only by {value} ({PERCENTAGE_FORMAT.format(score * 100)}) ranks"
         return f"has a lot of concurrent operations performed by {value} ({PERCENTAGE_FORMAT.format(score * 100)}) ranks"
-
-    def prepare(self, ddf: DataFrame) -> Any:
-        return ddf.groupby('tbin')
 
     def unit(self) -> str:
         return ""
@@ -236,9 +240,6 @@ class XferSizeFilter(Filter):
         if label == 1:
             return f"has a big transfer size of {self.format_value(value)}"
         return f"has a small transfer size of {self.format_value(value)}"
-
-    def prepare(self, ddf: DataFrame) -> Any:
-        return ddf.groupby('tbin')
 
     def unit(self) -> str:
         return "MB"
