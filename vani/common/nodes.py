@@ -12,38 +12,37 @@ from vani.common.observations import Observation
 
 class BinNode(_BinNode, NodeMixin):
 
-    def __init__(self, ddf: DataFrame, bin: _Bin, filter_group: _FilterGroup, filter: _Filter, parent=None) -> None:
+    def __init__(self, ddf: DataFrame, bin: _Bin, filter_group: _FilterGroup, parent=None) -> None:
         super(BinNode, self).__init__()
         start, stop = bin
         self.bin = bin
         self.bin_step = stop - start
         self.ddf = ddf
-        self.filter = filter
         self.filter_group = filter_group
-        self.metrics = filter_group.metrics_of(filter=filter)
+        self.filters = filter_group.filters()
         self.parent = parent
         self.score = 0
 
-    def analyze(self):
-        # Get tasks
-        tasks = self.get_tasks()
-        filter_task = tasks[0]
-        metric_tasks = tasks[1:]
-        # Compute tasks
-        filter_result, *metric_results = dask.compute(filter_task, *metric_tasks)
-        # Keep results
-        self.filter_result = filter_result
-        self.metric_results = metric_results
-        # Detect bottlenecks
-        self.filter_labels = self.__detect_filter_bottlenecks(filter_result=filter_result)
-        # Make observations for each metric
-        self.all_metric_labels = self.__detect_metric_bottlenecks(metric_results=metric_results)
-        # Generate observations
-        self.observations = self.__generate_observations()
-        # Calculate score
-        self.score = self.__calculate_score()
-        # Return bottlenecks
-        return self.filter_labels, self.score
+    # def analyze(self):
+    #     # Get tasks
+    #     tasks = self.get_tasks()
+    #     filter_task = tasks[0]
+    #     metric_tasks = tasks[1:]
+    #     # Compute tasks
+    #     filter_result, *metric_results = dask.compute(filter_task, *metric_tasks)
+    #     # Keep results
+    #     self.filter_result = filter_result
+    #     self.metric_results = metric_results
+    #     # Detect bottlenecks
+    #     self.filter_labels = self.__detect_filter_bottlenecks(filter_result=filter_result)
+    #     # Make observations for each metric
+    #     self.all_metric_labels = self.__detect_metric_bottlenecks(metric_results=metric_results)
+    #     # Generate observations
+    #     self.observations = self.__generate_observations()
+    #     # Calculate score
+    #     self.score = self.__calculate_score()
+    #     # Return bottlenecks
+    #     return self.filter_labels, self.score
 
     def forward(self, results: Tuple) -> Tuple[Any, float]:
         # Compute tasks

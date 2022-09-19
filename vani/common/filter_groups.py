@@ -19,17 +19,11 @@ class FilterGroup(_FilterGroup):
         self.stats = dict()
         self._stats_file_name = f"{stats_file_prefix}{to_snake_case(self.name())}_stats.yaml"
 
-    def create_node(self, ddf: DataFrame, bin: _Bin, filter: _Filter, parent=None) -> _BinNode:
-        return BinNode(ddf=ddf, bin=bin, filter_group=self, filter=filter, parent=parent)
+    def create_node(self, ddf: DataFrame, bin: _Bin, parent=None) -> _BinNode:
+        return BinNode(ddf=ddf, bin=bin, filter_group=self, parent=parent)
 
     def filters(self) -> List[_Filter]:
         return self.filter_instances
-
-    def main_filter(self) -> _Filter:
-        return self.filters()[0]
-
-    def metrics_of(self, filter: _Filter) -> List[_Filter]:
-        return [metric for metric in self.filters() if metric != filter]
 
     def prepare(self, ddf: DataFrame, global_stats: Dict, persist_stats=True, debug=False) -> None:
         if debug:
@@ -57,10 +51,6 @@ class TimelineReadWriteFilterGroupBase(FilterGroup):
         self.bins = bins
         self.bin_step = bin_step
         return bins, bin_step
-
-    def create_root(self, ddf: DataFrame, filter: _Filter, parent=None) -> _BinNode:
-        self.set_bins(ddf=ddf, bins=[0, self.stats['job_time']])
-        return self.create_node(ddf=ddf, bin=(0, self.stats['job_time']), filter=filter, parent=parent)
 
     def get_bins(self) -> _BinInfo:
         return self.bins, self.bin_step

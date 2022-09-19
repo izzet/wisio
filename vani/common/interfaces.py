@@ -59,9 +59,6 @@ class _BinNode(_DescribesObservation):
 
 class _FilterGroup(_DescribesObservation):
 
-    def backward(self, bins: Tuple[_BinNode, _BinNode]) -> _BinNode:
-        raise NotImplementedError
-
     def binned_by(self) -> str:
         raise NotImplementedError
 
@@ -71,22 +68,13 @@ class _FilterGroup(_DescribesObservation):
     def compute_stats(self, ddf: DataFrame, global_stats: Dict) -> Dict:
         raise NotImplementedError
 
-    def create_node(self, ddf: DataFrame, bin: _Bin, filter: _Filter, parent=None) -> _BinNode:
-        raise NotImplementedError
-
-    def create_root(self, ddf: DataFrame, filter: _Filter, parent=None) -> _BinNode:
+    def create_node(self, ddf: DataFrame, bin: _Bin, parent=None) -> _BinNode:
         raise NotImplementedError
 
     def filters(self) -> List[_Filter]:
         raise NotImplementedError
 
     def get_bins(self) -> _BinInfo:
-        raise NotImplementedError
-
-    def main_filter(self) -> _Filter:
-        raise NotImplementedError
-
-    def metrics_of(self, filter: _Filter) -> List[_Filter]:
         raise NotImplementedError
 
     def name(self) -> str:

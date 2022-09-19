@@ -1,5 +1,6 @@
 anytree
 bokeh
+click==8.0.4
 dask
 dask_jobqueue
 distributed
