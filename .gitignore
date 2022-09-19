@@ -5,4 +5,4 @@ __pycache__
 /vani-venv*
 /venv*
 dask-worker-space
-nohup.out
+*.out
