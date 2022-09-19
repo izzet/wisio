@@ -55,14 +55,14 @@ class Analyzer(object):
         files = self.__ensure_logs_partitioned(log_dir=log_dir)
         # TODO Json keys & columns
         json_keys = dict(tmid='tmid', proc_id='processes', file_id='filenames')
-        columns = dict(tmid='proc_id', proc_id='file_id', file_id='proc_id')
         # Run analysis tasks
         with ThreadPoolExecutor(max_workers=len(self.filter_group_indices)) as executor:
             # Submit tasks
             analysis_tasks = {
                 executor.submit(
-                    self._analyze_filter_group, log_dir, filter_group_index, json_keys[filter_group_index],
-                    columns[filter_group_index]): filter_group_index for filter_group_index in self.filter_group_indices
+                    self._analyze_filter_group, log_dir, filter_group_index,
+                    json_keys[filter_group_index]): filter_group_index for filter_group_index in
+                self.filter_group_indices
             }
             # Wait until completion
             for analysis_task in as_completed(analysis_tasks):
@@ -74,189 +74,6 @@ class Analyzer(object):
                     print(f'Created index for ')
 
         return
-        # Keep workers alive
-        # keep_alive_task = asyncio.create_task(self.__keep_workers_alive())
-        # Read logs into a dataframe
-        self.ddf = self._read_parquet(log_dir=log_dir)
-
-        total_size = self.total_size_of_logs(log_dir)
-        v_mem = psutil.virtual_memory()
-
-        is_computed = False
-
-        if total_size < v_mem[1]:
-            self.ddf = self.ddf.compute()
-            is_computed = True
-        else:
-            self.ddf = self.ddf.persist()
-
-            persist_start = perf_counter()
-            wait(self.ddf)
-            persist_end = perf_counter()
-            persist_elapsed = persist_end - persist_start
-
-        # Filter non-I/O traces (except for MPI)
-        # Split dataframe into I/O, MPI and trace
-        # Split io_df into read & write and metadata dataframes
-        self.ddf = filter_non_io_traces(ddf=self.ddf)
-        io_ddf, mpi_ddf, trace_ddf = split_io_mpi_trace(ddf=self.ddf)
-        io_ddf_read, io_ddf_write, io_ddf_metadata = split_read_write_metadata(io_ddf=io_ddf)
-        # Compute global stats
-        # self.global_stats = load_persisted(path=f"{stats_file_prefix}global_stats.yaml", fallback=self._compute_global_stats)
-        # job_time = self.global_stats['job_time']
-
-        json_file = open(f"{log_dir}/global.json")
-        json_content = json.load(json_file)
-
-        job_time = 289629  # json_content['max_tend']
-
-        ddf = io_ddf_read
-
-        # ddf = ddf.persist()
-        #
-        # persist_start = perf_counter()
-        # wait(ddf)
-        # persist_end = perf_counter()
-        # persist_elapsed = persist_end - persist_start
-
-        def filter(start, end):
-
-            # io_ddf, mpi_ddf, trace_ddf = split_io_mpi_trace(ddf)
-            # io_ddf_read, io_ddf_write, io_ddf_metadata = split_read_write_metadata(io_ddf=io_ddf)
-
-            filtered_ddf = ddf[(ddf['tstart'] >= start) & (ddf['tend'] < end)]
-            # filtered_ddf = filtered_ddf.compute()
-            if is_computed:
-                uniq_ranks, agg_dur, total_io_size, uniq_filenames, bw_sum, ops = (filtered_ddf['rank'].unique(),
-                                                                                   filtered_ddf['duration'].sum(),
-                                                                                   filtered_ddf['size'].sum(),
-                                                                                   filtered_ddf['filename'].unique(),
-                                                                                   filtered_ddf['bandwidth'].sum(),
-                                                                                   filtered_ddf['index'].count()
-                                                                                   )
-            else:
-                uniq_ranks, agg_dur, total_io_size, uniq_filenames, bw_sum, ops = dask.compute(
-                    filtered_ddf['rank'].unique(),
-                    filtered_ddf['duration'].sum(),
-                    filtered_ddf['size'].sum(),
-                    filtered_ddf['filename'].unique(),
-                    filtered_ddf['bandwidth'].sum(),
-                    filtered_ddf['index'].count(),
-                )
-            return {
-                'uniq_ranks': uniq_ranks,
-                'agg_dur': agg_dur,
-                'total_io_size': total_io_size,
-                'uniq_filenames': uniq_filenames,
-                'bw_sum': bw_sum,
-                'ops': ops,
-            }
-            # return ddf[(ddf['tstart']>= start) & (ddf['tend']< end)]['rank'].unique()
-
-        def merge(x, y):
-            return {
-                'uniq_ranks': np.union1d(x['uniq_ranks'], y['uniq_ranks']),
-                'agg_dur': x['agg_dur'] + y['agg_dur'],
-                'total_io_size': x['total_io_size'] + y['total_io_size'],
-                'uniq_filenames': np.union1d(x['uniq_filenames'], y['uniq_filenames']),
-                'bw_sum': x['bw_sum'] + y['bw_sum'],
-                'ops': x['ops'] + y['ops'],
-            }
-            # return np.union1d(x, y)
-
-        MAX_DEPTH = 10
-        depth = list(range(0, MAX_DEPTH + 1))
-        depth.reverse()
-        tstart = 0
-        tend = job_time
-        pieces = 2 ** MAX_DEPTH
-        interval = math.floor((tend - tstart) * 1.0 / pieces)
-        print(depth, pieces)
-        output = [0] * (MAX_DEPTH + 1)
-        print(output)
-        for x in depth:
-            depth_ret = []
-            if (x == MAX_DEPTH):
-                for i in range(tstart, math.floor(tend - interval), interval):
-                    depth_ret.append(dask.delayed(filter)(tstart, tstart + interval))
-            else:
-                pieces_in_next_level = 2 ** (x + 1)
-                for i in range(0, pieces_in_next_level, 2):
-                    depth_ret.append(dask.delayed(merge)(output[x + 1][i], output[x + 1][i + 1]))
-            output[x] = depth_ret
-
-        compute_start = perf_counter()
-        values = dask.compute(output)
-        compute_end = perf_counter()
-        compute_elapsed = compute_end - compute_start
-
-        # Define filter groups
-        n_bins = 10
-        filter_groups = [
-            ("Time-based > Read", TimelineReadFilterGroup(n_bins=n_bins, stats_file_prefix=stats_file_prefix),
-             io_ddf_read),
-            ("Time-based > Write", TimelineWriteFilterGroup(n_bins=n_bins, stats_file_prefix=stats_file_prefix),
-             io_ddf_write),
-            ("Time-based > Metadata", TimelineMetadataFilterGroup(n_bins=n_bins, stats_file_prefix=stats_file_prefix),
-             io_ddf_metadata)
-        ]
-        # Keep filter group nodes
-        filter_group_nodes = []
-        tasks = {}
-        # Persist filter group bins
-        # bin_ddfs_per_filter_group = self.__persist_filter_group_bins(filter_groups=filter_groups, depth=depth, should_wait=False)
-        # Prepare filter groups
-        # for _, filter_group, target_ddf in filter_groups:
-        #     start_persist_target_ddf = perf_counter()
-        #     target_ddf = target_ddf.persist()
-        #     wait(target_ddf)
-        #     elapsed_persist_target_ddf = perf_counter() - start_persist_target_ddf
-        #     filter_group.prepare(ddf=target_ddf, global_stats=self.global_stats, persist_stats=persist_stats, debug=self.debug)
-        # Loop through filter groups
-        for index in range(len(filter_groups)):
-            # Get filter group and main filter
-            _, filter_group, target_ddf = filter_groups[index]
-            # Calculate bins
-            bins, _ = filter_group.calculate_bins(global_stats=self.global_stats, n_bins=(2 ** depth))
-
-            start_set_bins = perf_counter()
-            filter_group.set_bins(target_ddf, bins)
-            elapsed_set_bins = perf_counter() - start_set_bins
-            # Persist
-            start_persist_target_ddf = perf_counter()
-            target_ddf = target_ddf.persist()
-            wait(target_ddf)
-            elapsed_persist_target_ddf = perf_counter() - start_persist_target_ddf
-            # Prepare
-            filter_group.prepare(ddf=target_ddf, global_stats=self.global_stats, persist_stats=persist_stats,
-                                 debug=self.debug)
-            # Get main filter
-            main_filter = filter_group.main_filter()
-            # Get filter group bin ddf
-            # bin_ddfs = bin_ddfs_per_filter_group[index]
-
-            # Loop through bins
-            for bin_index in range(len(bins) - 1):
-                # Find bin ddf
-                # bin_ddf = bin_ddfs[bin_index]
-                # Get tasks for bin
-                node = filter_group.create_node(ddf=target_ddf, bin=(bins[bin_index], bins[bin_index + 1]),
-                                                filter=main_filter)
-                node_tasks = node.get_tasks()
-                # Append tasks to task list
-                tasks[node] = node_tasks
-        # Compute all tasks
-        counter_start = perf_counter()
-        results = dask.compute(*tasks.values())
-        counter_end = perf_counter()
-        elapsed_time = counter_end - counter_start
-
-        # TODO
-
-        for index, node in enumerate(tasks.keys()):
-            node_results = results[index]
-            node.forward(node_results)
-            print(index)
 
         analysis = AnalysisNode(filter_group_nodes=filter_group_nodes)
         # Cancel task
@@ -264,7 +81,7 @@ class Analyzer(object):
         # Return analysis tree
         return analysis
 
-    def _analyze_filter_group(self, log_dir: str, filter_group_index: str, json_key: str, column: str):
+    def _analyze_filter_group(self, log_dir: str, filter_group_index: str, json_key: str):
         # Keep workers alive
         # keep_alive_task = asyncio.create_task(self.__keep_workers_alive(filter_group_index=filter_group_index,
         #                                                                 cluster=cluster,
@@ -289,14 +106,15 @@ class Analyzer(object):
         # Analyze dataframe
         metrics = self.__compute_metrics(client=client,
                                          ddf=indexed_ddf,
-                                         column=column,
+                                         filter_group_index=filter_group_index,
                                          min_val=min_val,
                                          max_val=max_val)
 
         x = 1
-
+        print(metrics[0][0])
         # Cancel keep workers alive
         # keep_alive_task.cancel()
+        return
 
     def __indexed_ddf(self, client: Client, log_dir: str, filter_group_index: str):
         with client.as_current():
@@ -306,91 +124,172 @@ class Analyzer(object):
                 indexed_ddf = ddf.set_index([filter_group_index])
         with ElapsedTimeLogger(logger=self.logger, message="Logs persisted", caller=filter_group_index):
             indexed_ddf = client.persist(indexed_ddf)
+            # TODO: reduces the pressure on the cluster.
+            result = wait(indexed_ddf)
+            # TODO: cache the index dataset for future use. Utilize md5 hash on logs folder to see if anything is
+            #  changed if not use cache if present
         return indexed_ddf
 
-    def __compute_metrics(self, client: Client, ddf: DataFrame, column: str, min_val: int, max_val: int):
-        def filter(start: int, stop: int):
-
-            # io_ddf, mpi_ddf, trace_ddf = split_io_mpi_trace(ddf)
-            # io_ddf_read, io_ddf_write, io_ddf_metadata = split_read_write_metadata(io_ddf=io_ddf)
-
-            # filtered_ddf = ddf[(ddf['tstart'] >= start) & (ddf['tend'] < end)]
-            # filtered_ddf = filtered_ddf.compute()
-
+    def __compute_metrics(self, client: Client, ddf: DataFrame, filter_group_index: str, min_val: int, max_val: int):
+        def filter(start: int, stop: int, filter_group_index: str):
+            # Select dataframes
             target_ddf = ddf.loc[start:stop]
-
-            # if is_computed:
-            #     uniq_ranks, agg_dur, total_io_size, uniq_filenames, bw_sum, ops = (filtered_ddf['rank'].unique(),
-            #                                                                        filtered_ddf['duration'].sum(),
-            #                                                                        filtered_ddf['size'].sum(),
-            #                                                                        filtered_ddf['filename'].unique(),
-            #                                                                        filtered_ddf['bandwidth'].sum(),
-            #                                                                        filtered_ddf['index'].count()
-            #                                                                        )
-            # else:
             read_ddf = target_ddf[(target_ddf['io_cat'] == 1)]
             write_ddf = target_ddf[(target_ddf['io_cat'] == 2)]
             metadata_ddf = target_ddf[(target_ddf['io_cat'] == 3)]
-            uniq_ranks, agg_dur, total_io_size, uniq_filenames, bw_sum, ops = dask.compute(
-                read_ddf['rank'].unique(),
+            # TODO: on same compute run for all ddf.
+            # Create tasks
+            read_tasks = [
+                read_ddf.index.unique() if filter_group_index == 'proc_id' else read_ddf['proc_id'].unique(),
                 read_ddf['duration'].sum(),
                 read_ddf['size'].sum(),
-                read_ddf['filename'].unique(),
+                read_ddf.index.unique() if filter_group_index == 'file_id' else read_ddf['file_id'].unique(),
                 read_ddf['bandwidth'].sum(),
                 read_ddf['index'].count(),
-            )
-            return {
-                'uniq_ranks': uniq_ranks,
-                'agg_dur': agg_dur,
-                'total_io_size': total_io_size,
-                'uniq_filenames': uniq_filenames,
-                'bw_sum': bw_sum,
-                'ops': ops,
+            ]
+            write_tasks = [
+                write_ddf.index.unique() if filter_group_index == 'proc_id' else write_ddf['proc_id'].unique(),
+                write_ddf['duration'].sum(),
+                write_ddf['size'].sum(),
+                write_ddf.index.unique() if filter_group_index == 'file_id' else write_ddf['file_id'].unique(),
+                write_ddf['bandwidth'].sum(),
+                write_ddf['index'].count(),
+            ]
+            metadata_tasks = [
+                metadata_ddf.index.unique() if filter_group_index == 'proc_id' else metadata_ddf['proc_id'].unique(),
+                metadata_ddf['duration'].sum(),
+                metadata_ddf.index.unique() if filter_group_index == 'file_id' else metadata_ddf['file_id'].unique(),
+                metadata_ddf['index'].count(),
+            ]
+            filter_tasks = []
+            filter_tasks.extend(read_tasks)
+            filter_tasks.extend(write_tasks)
+            filter_tasks.extend(metadata_tasks)
+            # Compute all
+            filter_results = dask.compute(*filter_tasks)
+            # Clear dataframes
+            del read_ddf
+            del write_ddf
+            del metadata_ddf
+            del target_ddf
+            # Arrange results
+            read_start, read_end = 0, len(read_tasks)
+            write_start, write_end = len(read_tasks), len(read_tasks) + len(write_tasks)
+            metadata_start, metadata_end = len(read_tasks) + len(write_tasks), 0
+            filter_result = {
+                'read': {
+                    'uniq_ranks': filter_results[:read_end][0],
+                    'agg_dur': filter_results[:read_end][1],
+                    'total_io_size': filter_results[:read_end][2],
+                    'uniq_filenames': filter_results[:read_end][3],
+                    'bw_sum': filter_results[:read_end][4],
+                    'ops': filter_results[:read_end][5],
+                },
+                'write': {
+                    'uniq_ranks': filter_results[write_start:write_end][0],
+                    'agg_dur': filter_results[write_start:write_end][1],
+                    'total_io_size': filter_results[write_start:write_end][2],
+                    'uniq_filenames': filter_results[write_start:write_end][3],
+                    'bw_sum': filter_results[write_start:write_end][4],
+                    'ops': filter_results[write_start:write_end][5],
+                },
+                'metadata': {
+                    'uniq_ranks': filter_results[metadata_start:][0],
+                    'agg_dur': filter_results[metadata_start:][1],
+                    'uniq_filenames': filter_results[metadata_start:][2],
+                    'ops': filter_results[metadata_start:][3],
+                }
             }
+            # Return results
+            return filter_result
 
         def merge(x: Dict, y: Dict):
             return {
-                'uniq_ranks': np.union1d(x['uniq_ranks'], y['uniq_ranks']),
-                'agg_dur': x['agg_dur'] + y['agg_dur'],
-                'total_io_size': x['total_io_size'] + y['total_io_size'],
-                'uniq_filenames': np.union1d(x['uniq_filenames'], y['uniq_filenames']),
-                'bw_sum': x['bw_sum'] + y['bw_sum'],
-                'ops': x['ops'] + y['ops'],
+                'read': {
+                    'uniq_ranks': np.union1d(x['read']['uniq_ranks'], y['read']['uniq_ranks']),
+                    'agg_dur': x['read']['agg_dur'] + y['read']['agg_dur'],
+                    'total_io_size': x['read']['total_io_size'] + y['read']['total_io_size'],
+                    'uniq_filenames': np.union1d(x['read']['uniq_filenames'], y['read']['uniq_filenames']),
+                    'bw_sum': x['read']['bw_sum'] + y['read']['bw_sum'],
+                    'ops': x['read']['ops'] + y['read']['ops'],
+                },
+                'write': {
+                    'uniq_ranks': np.union1d(x['write']['uniq_ranks'], y['write']['uniq_ranks']),
+                    'agg_dur': x['write']['agg_dur'] + y['write']['agg_dur'],
+                    'total_io_size': x['write']['total_io_size'] + y['write']['total_io_size'],
+                    'uniq_filenames': np.union1d(x['write']['uniq_filenames'], y['write']['uniq_filenames']),
+                    'bw_sum': x['write']['bw_sum'] + y['write']['bw_sum'],
+                    'ops': x['write']['ops'] + y['write']['ops'],
+                },
+                'metadata': {
+                    'uniq_ranks': np.union1d(x['metadata']['uniq_ranks'], y['metadata']['uniq_ranks']),
+                    'agg_dur': x['metadata']['agg_dur'] + y['metadata']['agg_dur'],
+                    'uniq_filenames': np.union1d(x['metadata']['uniq_filenames'], y['metadata']['uniq_filenames']),
+                    'ops': x['metadata']['ops'] + y['metadata']['ops'],
+                }
             }
 
         depth = 10
-        with client.as_current():
-            next_tasks = 2 ** depth
-            interval = math.floor(max_val * 1.0 / next_tasks)
-            iterations = list(range(0, depth + 1))
-            iterations.reverse()
-            all_tasks = [0] * (depth + 1)
-            time_range = np.arange(min_val, max_val, interval)
-            for i in iterations:
-                tasks = []
-                if i == depth:
-                    for start in time_range:
-                        stop = start + interval
-                        tasks.append(dask.delayed(filter)(start, stop))
-                else:
-                    next_tasks = len(all_tasks[i + 1])
-                    if next_tasks % 2 == 1:
-                        next_tasks = next_tasks - 1
-                    for t in range(0, next_tasks, 2):
-                        tasks.append(dask.delayed(merge)(all_tasks[i + 1][t], all_tasks[i + 1][t + 1]))
-                    next_tasks = len(all_tasks[i + 1])
-                    if next_tasks % 2 == 1:
-                        tasks.append(all_tasks[i + 1][next_tasks - 1])
-                    for t, next_tasks in enumerate(all_tasks[i + 1]):
-                        all_tasks[i + 1][t] = dask.delayed(self.__len)(next_tasks)
-                all_tasks[i] = tasks
-            with ElapsedTimeLogger(logger=self.logger, message="Metrics computed", caller=column):
-                metrics = client.compute(all_tasks)
+        next_tasks = 2 ** depth
+        interval = math.floor(max_val * 1.0 / next_tasks)
+        iterations = list(range(0, depth + 1))
+        iterations.reverse()
+        all_tasks = [0] * (depth + 1)
+        time_range = np.arange(min_val, max_val, interval)
+        for i in iterations:
+            tasks = []
+            if i == depth:
+                for start in time_range:
+                    stop = start + interval
+                    tasks.append(dask.delayed(filter)(start, stop, filter_group_index))
+            else:
+                next_tasks = len(all_tasks[i + 1])
+                if next_tasks % 2 == 1:
+                    next_tasks = next_tasks - 1
+                for t in range(0, next_tasks, 2):
+                    tasks.append(dask.delayed(merge)(all_tasks[i + 1][t], all_tasks[i + 1][t + 1]))
+                next_tasks = len(all_tasks[i + 1])
+                if next_tasks % 2 == 1:
+                    tasks.append(all_tasks[i + 1][next_tasks - 1])
+                # TODO why are we calling len on everything?
+                for t, next_tasks in enumerate(all_tasks[i + 1]):
+                    all_tasks[i + 1][t] = dask.delayed(self.__len)(next_tasks)
+            all_tasks[i] = tasks
+        for t, next_tasks in enumerate(all_tasks[0]):
+            all_tasks[0][t] = dask.delayed(self.__len)(next_tasks)
+
+        with ElapsedTimeLogger(logger=self.logger, message="Metrics computed", caller=filter_group_index):
+            metrics_futures = client.compute(all_tasks)
+            result = wait(metrics_futures)
+            metrics = client.gather(metrics_futures)
         return metrics
 
     @staticmethod
-    def __len(x):
-        return len(x)
+    def __len(x: Dict):
+        return {
+            'read': {
+                'uniq_ranks': len(x['read']['uniq_ranks']),
+                'agg_dur': x['read']['agg_dur'],
+                'total_io_size': x['read']['total_io_size'],
+                'uniq_filenames': len(x['read']['uniq_filenames']),
+                'bw_sum': x['read']['bw_sum'],
+                'ops': x['read']['ops'],
+            },
+            'write': {
+                'uniq_ranks': len(x['write']['uniq_ranks']),
+                'agg_dur': x['write']['agg_dur'],
+                'total_io_size': x['write']['total_io_size'],
+                'uniq_filenames': len(x['write']['uniq_filenames']),
+                'bw_sum': x['write']['bw_sum'],
+                'ops': x['write']['ops'],
+            },
+            'metadata': {
+                'uniq_ranks': len(x['metadata']['uniq_ranks']),
+                'agg_dur': x['metadata']['agg_dur'],
+                'uniq_filenames': len(x['metadata']['uniq_filenames']),
+                'ops': x['metadata']['ops']
+            }
+        }
 
     def __compute_min_max(self, client: Client, log_dir: str, json_key: str) -> Tuple[int, int]:
         # Define functions
@@ -553,7 +452,7 @@ class Analyzer(object):
     def __initialize_clusters(self, filter_group_indices: [str], cluster_settings: Dict[str, Any]):
         # Read required config
         dashboard_port = cluster_settings.get('dashboard_port')
-        local_directory = "/p/gpfs1/izzet/temp"  # cluster_settings.get('local_directory')
+        local_directory = cluster_settings.get('local_directory')
         log_file = cluster_settings.get('log_file')
         # Read optional config
         cores = cluster_settings.get('cores', DEFAULT_N_WORKERS_PER_NODE)
@@ -576,6 +475,8 @@ class Analyzer(object):
         # Create distributed clusters
         for index, filter_group_index in enumerate(filter_group_indices):
             # Create LSF cluster
+            # TODO do not set -o -e then the workers will have log on their own jobid.out additionally the job id is
+            #  stored on a env variable which can be written to our log.
             clusters[filter_group_index] = LSFCluster(cores=cores * processes,
                                                       death_timeout=worker_time * 60,
                                                       header_skip=['-n', '-R', '-M', '-P', '-W 00:30'],
@@ -583,8 +484,9 @@ class Analyzer(object):
                                                                  '-G asccasc',
                                                                  '-q {}'.format(worker_queue),
                                                                  '-W {}'.format(worker_time),
-                                                                 '-o {}'.format(log_file),
-                                                                 '-e {}'.format(log_file)],
+                                                                 # '-o {}'.format(log_file),
+                                                                 # '-e {}'.format(log_file)
+                                                                 ],
                                                       local_directory=f"{local_directory}/{filter_group_index}",
                                                       memory=f"{memory}GB",
                                                       processes=cores,

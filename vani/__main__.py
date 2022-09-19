@@ -5,7 +5,7 @@ if __name__ == '__main__':
     # Initialize analyzer
     cluster_settings = dict(
         dashboard_port=3446,
-        local_directory="/p/gpfs1/iopp/temp/",
+        local_directory="/var/tmp/dask",
         log_file="digio.worker.log"
     )
     vn = Analyzer(debug=True, cluster_settings=cluster_settings)
