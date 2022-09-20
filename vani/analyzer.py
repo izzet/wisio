@@ -1,4 +1,6 @@
 import asyncio
+
+import dask
 import dask.dataframe as dd
 import functools
 import glob
@@ -10,9 +12,11 @@ import psutil
 import socket
 from anytree import PostOrderIter
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dask.distributed import Client, LocalCluster, wait
+from dask.distributed import Client, LocalCluster, get_task_stream, progress, wait
+from distributed.diagnostics.plugin import SchedulerPlugin
 from dask_jobqueue import LSFCluster
 from time import perf_counter, sleep
+from tqdm.auto import tqdm
 from typing import Union
 from vani.common.filter_groups import *
 from vani.common.interfaces import *
@@ -27,6 +31,70 @@ DEFAULT_WORKER_QUEUE = 'pdebug'
 DEFAULT_WORKER_TIME = 120
 PARTITION_FOLDER = "partitioned"
 WORKER_CHECK_INTERVAL = 5.0
+
+
+class Counter(SchedulerPlugin):
+
+    def __init__(self):
+        self.tasks_fingerprints = {}
+
+    async def start(self, scheduler):
+        self.scheduler = scheduler
+
+    def transition(self, key, start, finish, *args, **kwargs):
+        ts = self.scheduler.tasks[key]
+        if finish in ['memory', 'released']:
+            if ts.prefix_key not in self.tasks_fingerprints:
+                self.tasks_fingerprints[ts.prefix_key] = {
+                    'sum_dur': 0,
+                    'n_tasks': 0
+                }
+            self.tasks_fingerprints[ts.prefix_key] = {
+                'sum_dur': self.tasks_fingerprints[ts.prefix_key]['sum_dur'] + self.scheduler.get_task_duration(ts),
+                'n_tasks': self.tasks_fingerprints[ts.prefix_key]['n_tasks'] + 1
+            }
+
+class ProgressBarPlugin(SchedulerPlugin):
+    def __init__(self):
+        self.tqdm_map = {}
+        self.ts_count = {}
+        self.ts_done = {}
+
+    def start(self, scheduler):
+        self.scheduler = scheduler
+
+    def initialize(self, futures):
+        self.tqdm_map = {}
+        dask_graph = futures.__dask_graph__()
+        self.ts_count = {}
+        self.ts_done = {}
+        for key, value in dask_graph.layers.items():
+            node = key.split("-")[0]
+            if node not in self.ts_count:
+                self.ts_count[node] = 0
+            self.ts_count[node] = self.ts_count[node] + 1
+        for key, count in self.ts_count.items():
+            if key not in self.tqdm_map:
+                self.tqdm_map[key] = tqdm(total=self.ts_count[key], desc=f"{key}")
+                self.ts_done[key] = 0
+
+    def transition(self, key, start, finish, *args, **kwargs):
+        ts = self.scheduler.tasks[key]
+        if finish in ["memory","released"]:
+            self.tqdm_map[ts.prefix_key].update(1)
+            self.ts_done[ts.prefix_key] = ts.prefix_key + 1
+
+    def finalize(self):
+        for key, count in self.ts_count.items():
+            self.tqdm_map[key].update(self.ts_count[key] - self.ts_done[key])
+            sleep(0.1)
+            self.tqdm_map[key].close()
+        self.tqdm_map = {}
+        self.ts_count = {}
+        self.ts_done = {}
+
+    def restart(self, scheduler):
+        self.tqdm_map = {}
 
 
 class Analyzer(object):
@@ -61,8 +129,9 @@ class Analyzer(object):
             analysis_tasks = {
                 executor.submit(
                     self._analyze_filter_group, log_dir, filter_group_index,
-                    json_keys[filter_group_index]): filter_group_index for filter_group_index in
-                self.filter_group_indices
+                    json_keys[filter_group_index], thread_index): (thread_index, filter_group_index) for
+                thread_index, filter_group_index in
+                enumerate(self.filter_group_indices)
             }
             # Wait until completion
             for analysis_task in as_completed(analysis_tasks):
@@ -81,7 +150,7 @@ class Analyzer(object):
         # Return analysis tree
         return analysis
 
-    def _analyze_filter_group(self, log_dir: str, filter_group_index: str, json_key: str):
+    def _analyze_filter_group(self, log_dir: str, filter_group_index: str, json_key: str, thread_index: int):
         # Keep workers alive
         # keep_alive_task = asyncio.create_task(self.__keep_workers_alive(filter_group_index=filter_group_index,
         #                                                                 cluster=cluster,
@@ -98,7 +167,9 @@ class Analyzer(object):
         # Compute min & max of given JSON key
         min_val, max_val = self.__compute_min_max(client=client,
                                                   json_key=json_key,
-                                                  log_dir=log_dir)
+                                                  log_dir=log_dir,
+                                                  thread_index=thread_index)
+        return
         # Get indexed dataframe
         indexed_ddf = self.__indexed_ddf(client=client,
                                          filter_group_index=filter_group_index,
@@ -109,6 +180,8 @@ class Analyzer(object):
                                          filter_group_index=filter_group_index,
                                          min_val=min_val,
                                          max_val=max_val)
+        # Track task fingerprints
+        self.logger.debug(client.cluster.scheduler.plugins['counter'].tasks_fingerprints)
 
         x = 1
         print(metrics[0][0])
@@ -123,9 +196,10 @@ class Analyzer(object):
             with ElapsedTimeLogger(logger=self.logger, message="Logs indexed", caller=filter_group_index):
                 indexed_ddf = ddf.set_index([filter_group_index])
         with ElapsedTimeLogger(logger=self.logger, message="Logs persisted", caller=filter_group_index):
-            indexed_ddf = client.persist(indexed_ddf)
-            # TODO: reduces the pressure on the cluster.
-            result = wait(indexed_ddf)
+            with get_task_stream(client, plot='save', filename=f'{filter_group_index}-index-ddf.html') as ts:
+                indexed_ddf = client.persist(indexed_ddf)
+                # TODO: reduces the pressure on the cluster.
+                result = wait(indexed_ddf)
             # TODO: cache the index dataset for future use. Utilize md5 hash on logs folder to see if anything is
             #  changed if not use cache if present
         return indexed_ddf
@@ -259,9 +333,11 @@ class Analyzer(object):
             all_tasks[0][t] = dask.delayed(self.__len)(next_tasks)
 
         with ElapsedTimeLogger(logger=self.logger, message="Metrics computed", caller=filter_group_index):
-            metrics_futures = client.compute(all_tasks)
-            result = wait(metrics_futures)
-            metrics = client.gather(metrics_futures)
+            with get_task_stream(client, plot='save', filename=f'{filter_group_index}-metrics.html') as ts:
+                metrics_futures = client.compute(all_tasks)
+                result = wait(metrics_futures)
+                metrics = client.gather(metrics_futures)
+
         return metrics
 
     @staticmethod
@@ -291,7 +367,7 @@ class Analyzer(object):
             }
         }
 
-    def __compute_min_max(self, client: Client, log_dir: str, json_key: str) -> Tuple[int, int]:
+    def __compute_min_max(self, client: Client, log_dir: str, json_key: str, thread_index: int) -> Tuple[int, int]:
         # Define functions
         def min_max_of_array(arr: List):
             return functools.reduce(lambda x, y: (min(x[0], y), max(x[1], y)), arr, (arr[0], arr[0],))
@@ -346,8 +422,14 @@ class Analyzer(object):
                         tasks.append(all_tasks[i + 1][next_tasks - 1])
                     all_tasks[i + 1] = 0
                 all_tasks[i] = tasks
-            # with ElapsedTimeLogger(logger=self.logger, message="Min-max tasks completed", caller=json_key):
-            values = dask.compute(all_tasks)
+            with ElapsedTimeLogger(logger=self.logger, message="Min-max tasks completed", caller=json_key):
+                with get_task_stream(client, plot='save', filename=f'{json_key}-min-max.html') as ts:
+                        # dask.visualize(all_tasks, filename=f'{json_key}-min-max.svg')
+                    to_be_vis = dask.delayed(all_tasks)()
+                    to_be_vis.dask.visualize(filename=f'{json_key}-min-max.svg')
+                    client.cluster.scheduler.plugins['progress'].initialize(to_be_vis)
+                    values = dask.compute(all_tasks)
+                    client.cluster.scheduler.plugins['progress'].finalize()
         min_val, max_val = values[0][0][0][0], values[0][0][0][1]
         self.logger.debug(format_log(json_key, f"Min-max of {json_key}: {min_val}-{max_val}"))
         return min_val, max_val
@@ -436,12 +518,18 @@ class Analyzer(object):
     def __initialize_clients(self, clusters: Dict[str, Union[LocalCluster, LSFCluster]]):
         # Initialize clients
         clients = {}
+        self.counters = {}
         # Loop through clusters
         for cluster_key in clusters.keys():
             # Get cluster instance
             cluster = clusters[cluster_key]
             # Create a client & set it as default if it is a local cluster
             clients[cluster_key] = Client(cluster, set_as_default=isinstance(cluster, LocalCluster))
+            self.counters[cluster_key] = Counter()
+            clients[cluster_key].register_scheduler_plugin(self.counters[cluster_key], "counter")
+            progress = ProgressBarPlugin()
+            clients[cluster_key].register_scheduler_plugin(progress, "progress")
+            # clients[cluster_key].scheduler.add_plugin(Counter)
             self.logger.debug(format_log(cluster_key, "Client initialized"))
             # Print client information
             if self.debug:
