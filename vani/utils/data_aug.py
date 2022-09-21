@@ -1,3 +1,4 @@
+import numpy as np
 from dask.dataframe import DataFrame
 
 
@@ -21,6 +22,8 @@ def set_filenames(ddf: DataFrame):
     fread_condition = ddf['func_id'].isin(["fread"])
     close_condition = ddf['func_id'].str.contains("close")
     fwrite_condition = ddf['func_id'].isin(["fwrite"])
+    # TODO(hari): your missing HDF5 APIs
+    #  https://github.com/hariharan-devarajan/Recorder/blob/pilgrim/include/recorder.h#L182
     readdir_condition = ddf['func_id'].isin(["readdir"])
     # Then set corresponding filenames
     ddf['filename'] = ""
@@ -38,6 +41,8 @@ def set_filenames(ddf: DataFrame):
 def set_sizes_counts(ddf: DataFrame):
     # Prepare conditions
     read_condition, fread_condition, write_condition, fwrite_condition = _read_write_cond_io_df_ext(ddf)
+    # TODO(hari): your missing HDF5 APIs
+    #  https://github.com/hariharan-devarajan/Recorder/blob/pilgrim/include/recorder.h#L182
     readdir_condition = ddf['func_id'].isin(["readdir"])
     # Then set corresponding sizes & counts
     ddf['size'] = 0
@@ -55,6 +60,12 @@ def set_sizes_counts(ddf: DataFrame):
     ddf[['size', 'count']] = ddf[['size', 'count']].astype(float)
     # Size fix
     ddf['size'] = ddf['size'] * ddf['count']
+
+
+def set_xfer_sizes(ddf: DataFrame):
+    xfer_sizes = np.multiply([0, 4, 16, 64, 256, 1024, 4*1024, 16*1024], 1024.0)
+    
+    ddf['xfer_size'] = ""
 
 
 def _read_write_cond_io_df(ddf: DataFrame):

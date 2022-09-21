@@ -6,31 +6,47 @@ from dask.dataframe import DataFrame
 from typing import Any, List, Tuple
 from vani.common.constants import PERCENTAGE_FORMAT, SECONDS_FORMAT
 from vani.common.hypotheses import Hypothesis
-from vani.common.interfaces import _BinNode, _DescribesObservation, _Filter, _FilterGroup
+from vani.common.interfaces import _Bin, _BinNode, _DescribesObservation, _Filter, _FilterGroup
 from vani.common.observations import Observation
 
 
 class BinNode(_BinNode, NodeMixin):
 
-    def __init__(self, ddf: DataFrame, bin: Tuple[float, float], filter_group: _FilterGroup, filter: _Filter, parent=None) -> None:
+    def __init__(self, ddf: DataFrame, bin: _Bin, filter_group: _FilterGroup, parent=None) -> None:
         super(BinNode, self).__init__()
         start, stop = bin
         self.bin = bin
         self.bin_step = stop - start
         self.ddf = ddf
-        self.filter = filter
         self.filter_group = filter_group
-        self.metrics = filter_group.metrics_of(filter)
+        self.filters = filter_group.filters()
         self.parent = parent
         self.score = 0
 
-    def analyze(self):
-        # Apply filter first
-        filter_task = self.__apply_filter(ddf=self.ddf)
-        # Then apply metrics
-        metric_tasks = self.__apply_metrics(ddf=self.ddf)
+    # def analyze(self):
+    #     # Get tasks
+    #     tasks = self.get_tasks()
+    #     filter_task = tasks[0]
+    #     metric_tasks = tasks[1:]
+    #     # Compute tasks
+    #     filter_result, *metric_results = dask.compute(filter_task, *metric_tasks)
+    #     # Keep results
+    #     self.filter_result = filter_result
+    #     self.metric_results = metric_results
+    #     # Detect bottlenecks
+    #     self.filter_labels = self.__detect_filter_bottlenecks(filter_result=filter_result)
+    #     # Make observations for each metric
+    #     self.all_metric_labels = self.__detect_metric_bottlenecks(metric_results=metric_results)
+    #     # Generate observations
+    #     self.observations = self.__generate_observations()
+    #     # Calculate score
+    #     self.score = self.__calculate_score()
+    #     # Return bottlenecks
+    #     return self.filter_labels, self.score
+
+    def forward(self, results: Tuple) -> Tuple[Any, float]:
         # Compute tasks
-        filter_result, *metric_results = dask.compute(filter_task, *metric_tasks)
+        filter_result, *metric_results = results
         # Keep results
         self.filter_result = filter_result
         self.metric_results = metric_results
@@ -48,9 +64,19 @@ class BinNode(_BinNode, NodeMixin):
     def observation_desc(self, label: int = None, value: Any = None, score: float = None) -> str:
         return self.__bin_name()
 
+    def get_tasks(self) -> Tuple:
+        # Init tasks
+        tasks = []
+        # Apply filter first
+        tasks.append(self.__apply_filter(ddf=self.ddf))
+        # Then apply metrics
+        tasks.extend(self.__apply_metrics(ddf=self.ddf))
+        # Return tasks
+        return tasks
+
     def __apply_filter(self, ddf: DataFrame) -> Any:
         # Let filter prepare data
-        prepared_ddf = self.filter.prepare(ddf)
+        prepared_ddf = self.filter.prepare(ddf, bin=self.bin)
         # Apply filter first
         return self.filter.apply(prepared_ddf)
 
@@ -60,7 +86,7 @@ class BinNode(_BinNode, NodeMixin):
         # Prepare metric tasks
         for metric in self.metrics:
             # Prepare data first
-            prepared_ddf = metric.prepare(ddf)
+            prepared_ddf = metric.prepare(ddf, bin=self.bin)
             # Apply filter first
             metric_task = metric.apply(prepared_ddf)
             # Add it to tasks
@@ -97,11 +123,12 @@ class BinNode(_BinNode, NodeMixin):
             label = self.filter_labels.values[index] if len(self.filter_labels) else 1
             value = self.filter_result.values[index]
             formatted_value = self.filter.format_value(value)
+            numeric_value = self.filter.numeric_value(value)
             score = value / self.filter.max
             observations.append(Observation(name=self.filter.name(),
                                             desc=self.filter.observation_desc(label=label, value=value, score=score),
                                             label=label,
-                                            value=value,
+                                            value=numeric_value,
                                             score=score,
                                             formatted_value=formatted_value))
         for index, metric in enumerate(self.metrics):
@@ -111,11 +138,12 @@ class BinNode(_BinNode, NodeMixin):
                 label = metric_labels.values[observation_index]
                 value = metric_result.values[observation_index]
                 formatted_value = metric.format_value(value)
-                score = value / metric.max
+                numeric_value = metric.numeric_value(value)
+                score = numeric_value / metric.max
                 observations.append(Observation(name=metric.name(),
                                                 desc=metric.observation_desc(label=label, value=value, score=score),
                                                 label=label,
-                                                value=value,
+                                                value=numeric_value,
                                                 score=score,
                                                 formatted_value=formatted_value))
         return observations

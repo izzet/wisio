@@ -1,11 +1,15 @@
 anytree
 bokeh
+click==8.0.4
 dask
 dask_jobqueue
 distributed
+#durable_rules
 fastparquet
+graphviz
 numpy
 pandas
+#pyarrow
 pyyaml
 scipy
 tqdm
