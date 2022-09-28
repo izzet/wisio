@@ -8,9 +8,10 @@ fi
 
 CONVERTER_BIN=$iopp/software/recorder-hari-pilgrim/build/bin
 
-rm -r $2/_parquet
+rm -rf $2/_parquet
 
 mpirun -n $1 $CONVERTER_BIN/recorder2parquet-workflow-vani $2
 
+# /p/gpfs1/iopp/recorder_app_logs/genome_pegasus/nodes-32
 # /p/gpfs1/iopp/recorder_app_logs/cm1/nodes-32/workflow-4
 # /p/gpfs1/iopp/recorder_app_logs/hacc/nodes-32/workflow-0
