@@ -1,17 +1,17 @@
 import asyncio
+import dask.dataframe as dd
 import glob
 import json
-import dask
-import dask.dataframe as dd
 import math
-import numpy as np
 import os
 import time
 from dask import delayed
+from dask.dataframe import DataFrame
 from dask.distributed import wait
 from hashlib import md5
 from logging import Logger
-from typing import Dict, List, Tuple
+from vani.core.metrics import filter, merge, summary
+from vani.core.scores import min_max, score
 from vani.utils.file_utils import dir_hash, ensure_dir
 from vani.utils.logger import ElapsedTimeLogger, format_log
 
@@ -20,292 +20,125 @@ METRIC_DIR = "metric"
 PARTITION_DIR = "partitioned"
 
 
+def compute_min_max(log_dir: str, fg_index: str, depth: int):
+    with open(f"{log_dir}/global.json") as file:
+        global_metrics = json.load(file)
+        min_val, max_val = global_metrics[fg_index][0], global_metrics[fg_index][1]
+        next_tasks = 2 ** depth
+        interval = math.ceil((max_val - min_val) * 1.0 / next_tasks)
+        time_range = range(min_val, max_val, interval)
+        return time_range, interval
+
+
+@delayed
+def persist_ddf(ddf: DataFrame):
+    return ddf.persist()
+
+
+@delayed
+def placeholder(x):
+    return x
+
+
+@delayed
+def read_parquet_to_ddf(log_dir: str):
+    return dd.read_parquet(f"{log_dir}/*.parquet", index=False)
+
+
+@delayed
+def set_ddf_index(ddf: DataFrame, fg_index: str):
+    return ddf.set_index([fg_index])
+
+
+@delayed
+def target_ddf(ddf: DataFrame, start: int, stop: int):
+    return ddf.loc[start:stop].reset_index().compute()
+
+
+@delayed
+def wait_ddf(ddf: DataFrame):
+    wait(ddf)
+    return ddf
+
+
 class Analysis(object):
 
-    def __init__(self, working_dir: str, fg_indices: List[str], n_workers_per_node: int, logger: Logger, debug=False) -> None:
+    def __init__(self, log_dir: str, working_dir: str, n_workers_per_node: int, logger: Logger,
+                 debug=False) -> None:
         self.id = math.floor(time.time())
         self.debug = debug
-        self.fg_ddfs = {}
-        self.fg_indices = fg_indices
-        self.fg_metrics = {}
-        self.fg_min_max_values = {}
+        self.depth = 10
+        self.log_dir = log_dir
         self.logger = logger
         self.n_workers_per_node = n_workers_per_node
         self.working_dir = working_dir
 
-    @staticmethod
-    def compute_min_max(log_dir: str, fg_index: str, depth: int):
-        with open(f"{log_dir}/global.json") as file:
-            global_metrics = json.load(file)
-            min_val, max_val = global_metrics[fg_index][0], global_metrics[fg_index][1]
-            next_tasks = 2 ** depth
-            interval = math.ceil((max_val - min_val) * 1.0 / next_tasks)
-            time_range = range(min_val, max_val, interval)
-            return time_range, interval
-
-    
-
-
-
-
-
-    def __compute_metrics(self, fg_index: str):
-
-        fg_ddf = self.fg_ddfs[fg_index]
-        min_val, max_val = self.fg_min_max_values[fg_index]
-
-        # noinspection PyShadowingNames,PyShadowingBuiltins
-        def filter(start: int, stop: int):
-            # Select dataframes
-            target_ddf = fg_ddf.loc[start:stop]
-            read_ddf = target_ddf[(target_ddf['io_cat'] == 1)]
-            write_ddf = target_ddf[(target_ddf['io_cat'] == 2)]
-            metadata_ddf = target_ddf[(target_ddf['io_cat'] == 3)]
-            # Create tasks
-            read_tasks = [
-                read_ddf.index.unique() if fg_index == 'proc_id' else read_ddf['proc_id'].unique(),
-                read_ddf['duration'].sum(),
-                read_ddf['size'].sum(),
-                read_ddf.index.unique() if fg_index == 'file_id' else read_ddf['file_id'].unique(),
-                read_ddf['bandwidth'].sum(),
-                read_ddf['index'].count(),
-            ]
-            write_tasks = [
-                write_ddf.index.unique() if fg_index == 'proc_id' else write_ddf['proc_id'].unique(),
-                write_ddf['duration'].sum(),
-                write_ddf['size'].sum(),
-                write_ddf.index.unique() if fg_index == 'file_id' else write_ddf['file_id'].unique(),
-                write_ddf['bandwidth'].sum(),
-                write_ddf['index'].count(),
-            ]
-            metadata_tasks = [
-                metadata_ddf.index.unique() if fg_index == 'proc_id' else metadata_ddf['proc_id'].unique(),
-                metadata_ddf['duration'].sum(),
-                metadata_ddf.index.unique() if fg_index == 'file_id' else metadata_ddf['file_id'].unique(),
-                metadata_ddf['index'].count(),
-            ]
-            filter_tasks = []
-            filter_tasks.extend(read_tasks)
-            filter_tasks.extend(write_tasks)
-            filter_tasks.extend(metadata_tasks)
-            # Compute all
-            filter_results = dask.compute(*filter_tasks)
-            # Clear dataframes
-            del read_ddf
-            del write_ddf
-            del metadata_ddf
-            del target_ddf
-            # Arrange results
-            read_start, read_end = 0, len(read_tasks)
-            write_start, write_end = len(read_tasks), len(read_tasks) + len(write_tasks)
-            metadata_start, metadata_end = len(read_tasks) + len(write_tasks), 0
-            filter_result = {
-                'start': start,
-                'stop': stop,
-                'read': {
-                    'uniq_ranks': filter_results[:read_end][0],
-                    'agg_dur': filter_results[:read_end][1],
-                    'total_io_size': filter_results[:read_end][2],
-                    'uniq_filenames': filter_results[:read_end][3],
-                    'bw_sum': filter_results[:read_end][4],
-                    'ops': filter_results[:read_end][5],
-                },
-                'write': {
-                    'uniq_ranks': filter_results[write_start:write_end][0],
-                    'agg_dur': filter_results[write_start:write_end][1],
-                    'total_io_size': filter_results[write_start:write_end][2],
-                    'uniq_filenames': filter_results[write_start:write_end][3],
-                    'bw_sum': filter_results[write_start:write_end][4],
-                    'ops': filter_results[write_start:write_end][5],
-                },
-                'metadata': {
-                    'uniq_ranks': filter_results[metadata_start:][0],
-                    'agg_dur': filter_results[metadata_start:][1],
-                    'uniq_filenames': filter_results[metadata_start:][2],
-                    'ops': filter_results[metadata_start:][3],
-                }
-            }
-            # Return results
-            return filter_result
-
-        def merge(x: Dict, y: Dict):
-            return {
-                'start': min(x['start'], y['start']),
-                'stop': max(x['stop'], y['stop']),
-                'read': {
-                    'uniq_ranks': np.union1d(x['read']['uniq_ranks'], y['read']['uniq_ranks']),
-                    'agg_dur': x['read']['agg_dur'] + y['read']['agg_dur'],
-                    'total_io_size': x['read']['total_io_size'] + y['read']['total_io_size'],
-                    'uniq_filenames': np.union1d(x['read']['uniq_filenames'], y['read']['uniq_filenames']),
-                    'bw_sum': x['read']['bw_sum'] + y['read']['bw_sum'],
-                    'ops': x['read']['ops'] + y['read']['ops'],
-                },
-                'write': {
-                    'uniq_ranks': np.union1d(x['write']['uniq_ranks'], y['write']['uniq_ranks']),
-                    'agg_dur': x['write']['agg_dur'] + y['write']['agg_dur'],
-                    'total_io_size': x['write']['total_io_size'] + y['write']['total_io_size'],
-                    'uniq_filenames': np.union1d(x['write']['uniq_filenames'], y['write']['uniq_filenames']),
-                    'bw_sum': x['write']['bw_sum'] + y['write']['bw_sum'],
-                    'ops': x['write']['ops'] + y['write']['ops'],
-                },
-                'metadata': {
-                    'uniq_ranks': np.union1d(x['metadata']['uniq_ranks'], y['metadata']['uniq_ranks']),
-                    'agg_dur': x['metadata']['agg_dur'] + y['metadata']['agg_dur'],
-                    'uniq_filenames': np.union1d(x['metadata']['uniq_filenames'], y['metadata']['uniq_filenames']),
-                    'ops': x['metadata']['ops'] + y['metadata']['ops'],
-                }
-            }
-
-        depth = 10
-        next_tasks = 2 ** depth
-        interval = math.floor(max_val * 1.0 / next_tasks)
-        iterations = list(range(0, depth + 1))
+    def compute_metrics(self, ddf: DataFrame, fg_index: str, fg_range: range, interval: int):
+        iterations = list(range(0, self.depth + 1))
         iterations.reverse()
-        all_tasks = [0] * (depth + 1)
-        time_range = np.arange(min_val, max_val, interval)
+        all_tasks = [0] * (self.depth + 1)
         for i in iterations:
             tasks = []
-            if i == depth:
-                for start in time_range:
-                    stop = start + interval
-                    tasks.append(dask.delayed(filter)(start, stop))
+            if i == self.depth:
+                for start in fg_range:
+                    stop = start + interval - 1
+                    target_ddf_delayed = target_ddf(ddf=ddf, start=start, stop=stop,
+                                                    dask_key_name=f"target_ddf_{fg_index}_{start}_{stop}")
+                    filter_delayed = filter(ddf=target_ddf_delayed, fg_index=fg_index, start=start, stop=stop,
+                                            dask_key_name=f"filter_{fg_index}_{start}_{stop}")
+                    tasks.append(filter_delayed)
             else:
                 next_tasks = len(all_tasks[i + 1])
                 if next_tasks % 2 == 1:
                     next_tasks = next_tasks - 1
                 for t in range(0, next_tasks, 2):
-                    tasks.append(dask.delayed(merge)(all_tasks[i + 1][t], all_tasks[i + 1][t + 1]))
+                    merge_delayed = merge(all_tasks[i + 1][t], all_tasks[i + 1][t + 1],
+                                          dask_key_name=f"merge_{fg_index}_{i}_{t}_{t + 1}")
+                    tasks.append(merge_delayed)
                 next_tasks = len(all_tasks[i + 1])
                 if next_tasks % 2 == 1:
                     tasks.append(all_tasks[i + 1][next_tasks - 1])
-                # TODO why are we calling len on everything?
                 for t, next_tasks in enumerate(all_tasks[i + 1]):
-                    all_tasks[i + 1][t] = dask.delayed(self.__digest)(next_tasks)
+                    all_tasks[i + 1][t] = summary(next_tasks, dask_key_name=f"summary_{fg_index}_{i + 1}_{t}")
             all_tasks[i] = tasks
         # noinspection PyTypeChecker
         for t, next_tasks in enumerate(all_tasks[0]):
-            # noinspection PyUnresolvedReferences
-            all_tasks[0][t] = dask.delayed(self.__digest)(next_tasks)
+            all_tasks[0][t] = summary(next_tasks, dask_key_name=f"summary_{fg_index}_0_{t}")
+        high_level_tasks = []
+        all_tasks.reverse()
+        for i, tasks in enumerate(all_tasks):
+            high_level_tasks.append(placeholder(tasks, dask_key_name=f"metrics_{fg_index}_{len(all_tasks) - i - 1}"))
+        return high_level_tasks
 
-        # with ElapsedTimeLogger(logger=self.logger, message="Metrics computed", caller=fg_index):
-        #     with get_task_stream(client=self.clients[fg_index],
-        #                          filename=self.__path_with_id(f"{fg_index}-metrics.html"),
-        #                          plot='save'):
-        #         metrics_futures = self.clients[fg_index].compute(all_tasks)
-        #         result = wait(metrics_futures)
-        #         metrics = self.clients[fg_index].gather(metrics_futures)
+    def compute_observations(self):
+        pass
 
-        metrics = []
-        return metrics
+    def compute_scores(self, metrics, fg_index: str):
+        metrics.reverse()
+        root_metric = metrics[0][0]
+        min_max_delayed = min_max(metric=root_metric, dask_key_name=f"min_max_{fg_index}")
+        iterations = list(range(0, self.depth + 1))
+        iterations.reverse()
+        all_tasks = [0] * (self.depth + 1)
+        for i in iterations:
+            tasks = []
+            for t in range(2 ** i):
+                tasks.append(
+                    score(metric=metrics[i][t], min_max_values=min_max_delayed,
+                          dask_key_name=f"score_{fg_index}_{i}_{t}"))
+            all_tasks[i] = tasks
+        high_level_tasks = []
+        all_tasks.reverse()
+        for i, tasks in enumerate(all_tasks):
+            high_level_tasks.append(placeholder(tasks, dask_key_name=f"scores_{fg_index}_{len(all_tasks) - i - 1}"))
+        return high_level_tasks
 
-    def __compute_min_max(self, fg_index: str, log_dir: str) -> Tuple[int, int]:
-        # Find json key
-        # json_key = JSON_KEYS[fg_index]
-
-        # Define functions
-        def min_max_of_array(arr: List):
-            return arr
-            # return functools.reduce(lambda x, y: (min(x[0], y), max(x[1], y)), arr, (arr[0], arr[0],))
-
-        def min_max_of_global_metric():
-            with open(f"{log_dir}/global.json") as global_metrics_file:
-                global_metrics = json.load(global_metrics_file)
-                return 0, math.ceil(global_metrics[fg_index])
-
-        def min_max_of_json_values(json_file_path: str):
-            with open(json_file_path) as json_file:
-                json_data = json.load(json_file)
-                return min_max_of_array(json_data[fg_index])
-
-        # If JSON key is tmid, then compute min & max through global metrics
-        if fg_index == 'tmid':
-            min_val, max_val = min_max_of_global_metric()
-            self.logger.debug(format_log(fg_index, f"Min-max of {fg_index}: {min_val}-{max_val}"))
-            return min_val, max_val
-
-        # Read rank files
-        rank_files = glob.glob(f"{log_dir}/rank_*.json", recursive=True)
-        n_rank_files = len(rank_files)
-
-        # Do not run distributed tasks if there is only a single rank
-        if n_rank_files == 1:
-            min_val, max_val = min_max_of_json_values(json_file_path=rank_files[0])
-            self.logger.debug(format_log(fg_index, f"Min-max of {fg_index}: {min_val}-{max_val}"))
-            return min_val, max_val
-
-        # Otherwise run it distributed
-        with self.clients[fg_index].as_current():
-            depth = math.ceil(math.sqrt(n_rank_files))
-            iterations = list(range(0, depth + 1))
-            iterations.reverse()
-            all_tasks = [0] * (depth + 1)
-            with ElapsedTimeLogger(logger=self.logger, message="Min-max tasks arranged", caller=fg_index):
-                for i in iterations:
-                    tasks = []
-                    if i == depth:
-                        for rank_file in rank_files:
-                            tasks.append(dask.delayed(min_max_of_json_values)(rank_file))
-                    else:
-                        next_tasks = len(all_tasks[i + 1])
-                        n_next_tasks = next_tasks
-                        if next_tasks % 2 == 1:
-                            n_next_tasks = n_next_tasks - 1
-                        for t in range(0, n_next_tasks, 2):
-                            # noinspection PyUnresolvedReferences
-                            tasks.append([dask.delayed(min)(all_tasks[i + 1][t][0], all_tasks[i + 1][t + 1][0]),
-                                          dask.delayed(max)(all_tasks[i + 1][t][1], all_tasks[i + 1][t + 1][1])])
-                        if next_tasks % 2 == 1:
-                            tasks.append(all_tasks[i + 1][next_tasks - 1])
-                        all_tasks[i + 1] = 0
-                    all_tasks[i] = tasks
-            # with get_task_stream(client=self.clients[fg_index],
-            #                      filename=self.__path_with_id(f"{json_key}-min-max.html"),
-            #                      plot='save'):
-            #     to_be_vis = dask.delayed(all_tasks)()
-            #     to_be_vis.dask.visualize(filename=self.__path_with_id(f"{json_key}-min-max.svg"))
-            #     # self.clients[filter_group_index].cluster.scheduler.plugins['progress'].initialize(to_be_vis)
-            #     with ElapsedTimeLogger(logger=self.logger,
-            #                            message="Min-max tasks completed",
-            #                            caller=fg_index):
-            #         values = dask.compute(all_tasks)
-                # self.clients[filter_group_index].cluster.scheduler.plugins['progress'].finalize()
-
-        # Find min max values
-        values = []
-        min_val, max_val = values[0][0][0][0], values[0][0][0][1]
-        self.logger.debug(format_log(fg_index, f"Min-max of {fg_index}: {min_val}-{max_val}"))
-
-        # Return min max values
-        return min_val, max_val
-
-    @staticmethod
-    def __digest(x: Dict):
-        return {
-            'start': x['start'],
-            'stop': x['stop'],
-            'read': {
-                'uniq_ranks': len(x['read']['uniq_ranks']),
-                'agg_dur': x['read']['agg_dur'],
-                'total_io_size': x['read']['total_io_size'],
-                'uniq_filenames': len(x['read']['uniq_filenames']),
-                'bw_sum': x['read']['bw_sum'],
-                'ops': x['read']['ops'],
-            },
-            'write': {
-                'uniq_ranks': len(x['write']['uniq_ranks']),
-                'agg_dur': x['write']['agg_dur'],
-                'total_io_size': x['write']['total_io_size'],
-                'uniq_filenames': len(x['write']['uniq_filenames']),
-                'bw_sum': x['write']['bw_sum'],
-                'ops': x['write']['ops'],
-            },
-            'metadata': {
-                'uniq_ranks': len(x['metadata']['uniq_ranks']),
-                'agg_dur': x['metadata']['agg_dur'],
-                'uniq_filenames': len(x['metadata']['uniq_filenames']),
-                'ops': x['metadata']['ops']
-            }
-        }
+    def read_index_logs(self, fg_index: str):
+        ddf_delayed = read_parquet_to_ddf(log_dir=self.log_dir, dask_key_name=f"read_parquet_{fg_index}")
+        indexed_ddf_delayed = set_ddf_index(ddf=ddf_delayed, fg_index=fg_index, dask_key_name=f"set_index_{fg_index}")
+        persisted_ddf_delayed = persist_ddf(ddf=indexed_ddf_delayed, dask_key_name=f"persist_ddf_{fg_index}")
+        wait_ddf_delayed = wait_ddf(ddf=persisted_ddf_delayed, dask_key_name=f"wait_ddf_{fg_index}")
+        return [ddf_delayed, indexed_ddf_delayed, persisted_ddf_delayed, wait_ddf_delayed]
 
     @staticmethod
     def __ensure_asyncio_loop():
