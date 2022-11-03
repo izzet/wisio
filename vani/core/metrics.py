@@ -3,6 +3,7 @@ import pandas as pd
 from dask import delayed
 from dask.dataframe import DataFrame
 
+
 @delayed
 def filter(ddf: DataFrame, fg_index: str, start: int, stop: int):
     empty = {
@@ -22,17 +23,39 @@ def filter(ddf: DataFrame, fg_index: str, start: int, stop: int):
             'metadata': empty
         }
 
+    # def g(x):
+    #
+    #     d = {}
+    #     d['duration'] = x['duration'].sum()
+    #     d['size'] = x['size'].sum()
+    #     d['bandwidth'] = x['bandwidth'].sum()
+    #     d['index'] = x['index'].count()
+    #
+    #     return pd.Series(d, index=['duration', 'size', 'bandwidth', 'index'])
+
+
     def f(x):
+
+        # proc_df = x.groupby('proc_id').apply(g)
+        # proc_df_desc = proc_df.describe()
+
         d = {}
+        # d['duration'] = proc_df_desc.loc['max']['duration'] # x['duration'].sum()
         d['duration'] = x['duration'].sum()
         d['size'] = x['size'].sum()
         d['bandwidth'] = x['bandwidth'].sum()
         d['index'] = x['index'].count()
-        d['proc_id'] = x['proc_id'].unique()
-        d['file_id'] = x['file_id'].unique()
+        d['proc_id'] = [0] # x['proc_id'].unique() #TODO
+        d['file_id'] = [0] # x['file_id'].unique() #TODO
+
+        # High-level filter without uniques to understand focus areas
+        # Low-level filter to explore details
+        # apply to aggregate (10x faster)
+
         return pd.Series(d, index=['duration', 'size', 'bandwidth', 'index', 'proc_id', 'file_id'])
 
     aggregated_values = ddf.groupby('io_cat').apply(f)
+    # aggregated_values = ddf.groupby(['io_cat', 'proc_id']).apply(f)
 
     del ddf
 
@@ -136,3 +159,25 @@ def summary(x):
             'ops': x['metadata']['ops']
         }
     }
+
+
+@delayed
+def hostname_ids_delayed(ddf: DataFrame):
+    proc_id_list = ddf.index.unique()
+    print("proc_id_list", proc_id_list)
+    mask = (2 ** 15 - 1) << 48
+    # print("{0:b}".format(mask))
+    hostname_id_set = set()
+    for proc in proc_id_list:
+        hostname_id_set.add(proc & mask)
+    hostname_id_list = list(hostname_id_set)
+    hostname_id_list.sort()
+    print("hostname_id_list", hostname_id_list)
+    return hostname_id_list
+
+
+@delayed
+def unique_processes_delayed(ddf: DataFrame):
+    res = ddf.groupby(ddf.index)['hostname', 'rank', 'thread_id'].min().compute()
+    print("unique_processes", res)
+    return res

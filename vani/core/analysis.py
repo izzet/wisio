@@ -1,4 +1,6 @@
 import asyncio
+import dask
+import dask.bag as db
 import dask.dataframe as dd
 import glob
 import json
@@ -10,7 +12,7 @@ from dask.dataframe import DataFrame
 from dask.distributed import wait
 from hashlib import md5
 from logging import Logger
-from vani.core.metrics import filter, merge, summary
+from vani.core.metrics import filter, merge, summary, hostname_ids_delayed, unique_processes_delayed
 from vani.core.scores import min_max, score
 from vani.utils.file_utils import dir_hash, ensure_dir
 from vani.utils.logger import ElapsedTimeLogger, format_log
@@ -20,125 +22,193 @@ METRIC_DIR = "metric"
 PARTITION_DIR = "partitioned"
 
 
-def compute_min_max(log_dir: str, fg_index: str, depth: int):
-    with open(f"{log_dir}/global.json") as file:
-        global_metrics = json.load(file)
-        min_val, max_val = global_metrics[fg_index][0], global_metrics[fg_index][1]
-        next_tasks = 2 ** depth
-        interval = math.ceil((max_val - min_val) * 1.0 / next_tasks)
-        time_range = range(min_val, max_val, interval)
-        return time_range, interval
-
-
-@delayed
-def persist_ddf(ddf: DataFrame):
-    return ddf.persist()
-
-
-@delayed
-def placeholder(x):
-    return x
-
-
-@delayed
-def read_parquet_to_ddf(log_dir: str):
-    return dd.read_parquet(f"{log_dir}/*.parquet", index=False)
-
-
-@delayed
-def set_ddf_index(ddf: DataFrame, fg_index: str):
-    return ddf.set_index([fg_index])
-
-
-@delayed
-def target_ddf(ddf: DataFrame, start: int, stop: int):
-    return ddf.loc[start:stop].reset_index().compute()
-
-
-@delayed
-def wait_ddf(ddf: DataFrame):
-    wait(ddf)
-    return ddf
-
-
 class Analysis(object):
 
     def __init__(self, log_dir: str, working_dir: str, n_workers_per_node: int, logger: Logger,
-                 debug=False) -> None:
+                 depth=10, debug=False) -> None:
         self.id = math.floor(time.time())
         self.debug = debug
-        self.depth = 10
+        self.depth = depth
+        self.fg_index = None
+        self.fg_range = None
+        self.fg_range_interval = 0
         self.log_dir = log_dir
         self.logger = logger
         self.n_workers_per_node = n_workers_per_node
         self.working_dir = working_dir
 
-    def compute_metrics(self, ddf: DataFrame, fg_index: str, fg_range: range, interval: int):
+    def compute_metrics_proc_id(self, ddf: DataFrame):
+        unique_processes_d = unique_processes_delayed(ddf=ddf, dask_key_name=f"unique-processes-{self.fg_index}")
+        hostname_ids_d = hostname_ids_delayed(ddf=unique_processes_d, dask_key_name=f"hostname-ids-{self.fg_index}")
+        metrics_d = self.compute_metrics_proc_id_delayed(fg_index=self.fg_index, ddf=ddf, hostname_ids=hostname_ids_d,
+                                                         dask_key_name=f"metrics-{self.fg_index}")
+        return [unique_processes_d, hostname_ids_d, metrics_d]
+
+    @staticmethod
+    @delayed
+    def compute_metrics_proc_id_delayed(fg_index: str, ddf: DataFrame, hostname_ids: list):
+        print("///compute_metrics_proc_id///")
+        print("hostname_ids", hostname_ids)
+        depth = math.ceil(math.sqrt(len(hostname_ids)))
+        print("depth", depth)
+        iterations = list(range(0, depth + 1))
+        print("iterations", iterations)
+        iterations.reverse()
+        all_tasks = [0] * (depth + 1)
+        for i in iterations:
+            tasks = []
+            if i == depth:
+                for index, start in enumerate(hostname_ids):
+                    if index < len(hostname_ids) - 1:
+                        stop = hostname_ids[index + 1] - 1
+                    else:
+                        stop = -1
+                    target_ddf_d = Analysis.target_ddf_delayed(ddf=ddf, start=start, stop=stop,
+                                                               dask_key_name=f"target-ddf-{fg_index}-{start}-{stop}")
+                    filter_delayed = filter(ddf=target_ddf_d, fg_index=fg_index, start=start, stop=stop,
+                                            dask_key_name=f"filter-{fg_index}-{start}-{stop}")
+                    tasks.append(filter_delayed)
+            else:
+                Analysis.__arrange_merge_tasks(fg_index, all_tasks, tasks, i)
+            all_tasks[i] = tasks
+        Analysis.__arrange_root_tasks(fg_index, all_tasks)
+        print(len(all_tasks))
+        metrics = dask.compute(*all_tasks)
+        print(metrics)
+        print(type(metrics))
+        print(metrics[0])
+        print(type(metrics[0]))
+        return [metrics[0]]
+
+    def compute_metrics_tmid(self, ddf: DataFrame):
         iterations = list(range(0, self.depth + 1))
         iterations.reverse()
         all_tasks = [0] * (self.depth + 1)
         for i in iterations:
             tasks = []
             if i == self.depth:
-                for start in fg_range:
-                    stop = start + interval - 1
-                    target_ddf_delayed = target_ddf(ddf=ddf, start=start, stop=stop,
-                                                    dask_key_name=f"target_ddf_{fg_index}_{start}_{stop}")
-                    filter_delayed = filter(ddf=target_ddf_delayed, fg_index=fg_index, start=start, stop=stop,
-                                            dask_key_name=f"filter_{fg_index}_{start}_{stop}")
+                for start in self.fg_range:
+                    stop = start + self.fg_range_interval - 1
+                    target_ddf_d = self.target_ddf_delayed(ddf=ddf, start=start, stop=stop,
+                                                           dask_key_name=f"target-ddf-{self.fg_index}-{start}-{stop}")
+                    filter_delayed = filter(ddf=target_ddf_d, fg_index=self.fg_index, start=start, stop=stop,
+                                            dask_key_name=f"filter-{self.fg_index}-{start}-{stop}")
                     tasks.append(filter_delayed)
             else:
-                next_tasks = len(all_tasks[i + 1])
-                if next_tasks % 2 == 1:
-                    next_tasks = next_tasks - 1
-                for t in range(0, next_tasks, 2):
-                    merge_delayed = merge(all_tasks[i + 1][t], all_tasks[i + 1][t + 1],
-                                          dask_key_name=f"merge_{fg_index}_{i}_{t}_{t + 1}")
-                    tasks.append(merge_delayed)
-                next_tasks = len(all_tasks[i + 1])
-                if next_tasks % 2 == 1:
-                    tasks.append(all_tasks[i + 1][next_tasks - 1])
-                for t, next_tasks in enumerate(all_tasks[i + 1]):
-                    all_tasks[i + 1][t] = summary(next_tasks, dask_key_name=f"summary_{fg_index}_{i + 1}_{t}")
+                Analysis.__arrange_merge_tasks(self.fg_index, all_tasks, tasks, i)
             all_tasks[i] = tasks
-        # noinspection PyTypeChecker
-        for t, next_tasks in enumerate(all_tasks[0]):
-            all_tasks[0][t] = summary(next_tasks, dask_key_name=f"summary_{fg_index}_0_{t}")
-        high_level_tasks = []
-        all_tasks.reverse()
-        for i, tasks in enumerate(all_tasks):
-            high_level_tasks.append(placeholder(tasks, dask_key_name=f"metrics_{fg_index}_{len(all_tasks) - i - 1}"))
-        return high_level_tasks
+        return Analysis.__arrange_high_level_tasks(self.fg_index, all_tasks)
+
+    def compute_min_max(self):
+        with open(f"{self.log_dir}/global.json") as file:
+            global_metrics = json.load(file)
+            min_val, max_val = global_metrics[self.fg_index][0], global_metrics[self.fg_index][1]
+            next_tasks = 2 ** self.depth
+            interval = math.ceil((max_val - min_val) * 1.0 / next_tasks)
+            time_range = range(min_val, max_val, interval)
+            self.fg_range = time_range
+            self.fg_range_interval = interval
+            return time_range, interval
 
     def compute_observations(self):
         pass
 
-    def compute_scores(self, metrics, fg_index: str):
+    def compute_scores(self, metrics: list):
+        print("---compute_scores---")
+        self.logger.debug(metrics)
+        print(metrics)
         metrics.reverse()
         root_metric = metrics[0][0]
-        min_max_delayed = min_max(metric=root_metric, dask_key_name=f"min_max_{fg_index}")
-        iterations = list(range(0, self.depth + 1))
-        iterations.reverse()
-        all_tasks = [0] * (self.depth + 1)
-        for i in iterations:
-            tasks = []
-            for t in range(2 ** i):
-                tasks.append(
-                    score(metric=metrics[i][t], min_max_values=min_max_delayed,
-                          dask_key_name=f"score_{fg_index}_{i}_{t}"))
-            all_tasks[i] = tasks
+        print(root_metric)
+        min_max_d = min_max(metric=root_metric, metrics=metrics, dask_key_name=f"min-max-{self.fg_index}")
+        metrics_bag = db.from_delayed(metrics)
+        score.__name__ = f"scores-{self.fg_index}"
+        scores_map = metrics_bag.map(score, min_max_d)
+        return scores_map.to_delayed()
+
+    def read_and_index_logs(self):
+        ddf_d = self.read_parquet_delayed(log_dir=self.log_dir, dask_key_name=f"read-parquet-{self.fg_index}")
+        indexed_ddf_d = self.set_ddf_index_delayed(ddf=ddf_d, fg_index=self.fg_index,
+                                                   dask_key_name=f"set-index-{self.fg_index}")
+        persisted_ddf_d = self.persist_ddf_delayed(ddf=indexed_ddf_d, dask_key_name=f"persist-ddf-{self.fg_index}")
+        # wait_ddf_d = self.wait_ddf_delayed(ddf=persisted_ddf_d, dask_key_name=f"wait-ddf-{self.fg_index}")
+        #TODO write it down
+        #TODO generate the cache first > cancel previous tasks > run metrics on generated ddf
+        return [ddf_d, indexed_ddf_d, persisted_ddf_d]
+
+    def set_filter_group(self, fg_index: str):
+        self.fg_index = fg_index
+
+    @staticmethod
+    @delayed
+    def persist_ddf_delayed(ddf: DataFrame):
+        ddf = ddf.persist()
+        wait(ddf)
+        return ddf
+
+    @staticmethod
+    @delayed
+    def placeholder_delayed(x):
+        return x
+
+    @staticmethod
+    @delayed
+    def read_parquet_delayed(log_dir: str):
+        return dd.read_parquet(f"{log_dir}/*.parquet", index=False)
+
+    @staticmethod
+    @delayed
+    def set_ddf_index_delayed(ddf: DataFrame, fg_index: str):
+        return ddf.set_index([fg_index])
+
+    @staticmethod
+    @delayed
+    def target_ddf_delayed(ddf: DataFrame, start: int, stop: int):
+        if hasattr(ddf, 'compute'):
+            if stop == -1:
+                return ddf.loc[start:].reset_index().compute()
+            return ddf.loc[start:stop].reset_index().compute()
+        if stop == -1:
+            return ddf.loc[start:].reset_index()
+        return ddf.loc[start:stop].reset_index()
+
+    @staticmethod
+    @delayed
+    def wait_ddf_delayed(ddf: DataFrame):
+        wait(ddf)
+        return 1
+
+    @staticmethod
+    def __arrange_high_level_tasks(fg_index: str, all_tasks: list):
+        Analysis.__arrange_root_tasks(fg_index, all_tasks)
+        # for t, next_tasks in enumerate(all_tasks[0]):
+        #     all_tasks[0][t] = summary(next_tasks, dask_key_name=f"summary_{fg_index}_0_{t}")
         high_level_tasks = []
         all_tasks.reverse()
         for i, tasks in enumerate(all_tasks):
-            high_level_tasks.append(placeholder(tasks, dask_key_name=f"scores_{fg_index}_{len(all_tasks) - i - 1}"))
+            high_level_tasks.append(
+                Analysis.placeholder_delayed(tasks, dask_key_name=f"metrics-{fg_index}-{len(all_tasks) - i - 1}"))
         return high_level_tasks
 
-    def read_index_logs(self, fg_index: str):
-        ddf_delayed = read_parquet_to_ddf(log_dir=self.log_dir, dask_key_name=f"read_parquet_{fg_index}")
-        indexed_ddf_delayed = set_ddf_index(ddf=ddf_delayed, fg_index=fg_index, dask_key_name=f"set_index_{fg_index}")
-        persisted_ddf_delayed = persist_ddf(ddf=indexed_ddf_delayed, dask_key_name=f"persist_ddf_{fg_index}")
-        wait_ddf_delayed = wait_ddf(ddf=persisted_ddf_delayed, dask_key_name=f"wait_ddf_{fg_index}")
-        return [ddf_delayed, indexed_ddf_delayed, persisted_ddf_delayed, wait_ddf_delayed]
+    @staticmethod
+    def __arrange_merge_tasks(fg_index: str, all_tasks: list, tasks: list, i: int):
+        next_tasks = len(all_tasks[i + 1])
+        if next_tasks % 2 == 1:
+            next_tasks = next_tasks - 1
+        for t in range(0, next_tasks, 2):
+            merge_delayed = merge(all_tasks[i + 1][t], all_tasks[i + 1][t + 1],
+                                  dask_key_name=f"merge-{fg_index}-{i}-{t}-{t + 1}")
+            tasks.append(merge_delayed)
+        next_tasks = len(all_tasks[i + 1])
+        if next_tasks % 2 == 1:
+            tasks.append(all_tasks[i + 1][next_tasks - 1])
+        for t, next_tasks in enumerate(all_tasks[i + 1]):
+            all_tasks[i + 1][t] = summary(next_tasks, dask_key_name=f"summary-{fg_index}-{i + 1}-{t}")
+
+    @staticmethod
+    def __arrange_root_tasks(fg_index: str, all_tasks: list):
+        for t, next_tasks in enumerate(all_tasks[0]):
+            all_tasks[0][t] = summary(next_tasks, dask_key_name=f"summary-{fg_index}-0-{t}")
 
     @staticmethod
     def __ensure_asyncio_loop():

@@ -40,6 +40,25 @@ class DaskManager(object):
             cluster.close()
         self.logger.debug(format_log('dask_mgr', "Clusters closed"))
 
+    def initialize_client_urls(self, client_urls: Dict[str, str]):
+        # Initialize clients
+        clients = {}
+        # Loop through clusters
+        for cluster_key in client_urls:
+            # Get client url
+            client_url = client_urls[cluster_key]
+            # Create a client & set it as default if it is a local cluster
+            clients[cluster_key] = Client(address=client_url, set_as_default=cluster_key == 'local')
+            self.logger.debug(format_log(cluster_key, "Client initialized"))
+            # Print client information
+            if self.debug:
+                print(clients[cluster_key])
+
+        self.clients = clients
+        # Return clients
+        return clients
+
+
     def initialize_clients(self, clusters: Dict[str, Union[LocalCluster, LSFCluster]]):
         # Initialize clients
         clients = {}
@@ -117,13 +136,13 @@ class DaskManager(object):
         # Return clusters
         return clusters
 
-    async def keep_workers_alive(self, fg_index: str):
+    async def keep_workers_alive(self, fg_index: str, n_workers: int):
         # While the job is still executing
         while True:
             # Wait a second
             await asyncio.sleep(WORKER_CHECK_INTERVAL)
             # Check workers
-            self.wait_until_workers_alive(fg_index=fg_index)
+            self.wait_until_workers_alive(fg_index=fg_index, n_workers=n_workers)
 
     def scale_clusters(self, clusters: Dict[str, Union[LocalCluster, LSFCluster]], n_workers: int):
         for cluster_key in clusters.keys():

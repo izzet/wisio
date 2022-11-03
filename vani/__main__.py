@@ -15,6 +15,7 @@ if __name__ == '__main__':
     # log_dir = "/p/gpfs1/iopp/recorder_app_logs/hacc/nodes-32/workflow-0/_parquet"
     log_dir = "/p/gpfs1/iopp/recorder_app_logs/cm1/nodes-32/workflow-4/_parquet"
     # log_dir = "/p/gpfs1/iopp/recorder_app_logs/lbann-jag/nodes-32/_parquet"
+    # log_dir = "/p/gpfs1/iopp/recorder_app_logs/montage/nodes-32/_parquet"
 
     try:
         # Do the analysis
