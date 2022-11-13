@@ -58,7 +58,6 @@ class DaskManager(object):
         # Return clients
         return clients
 
-
     def initialize_clients(self, clusters: Dict[str, Union[LocalCluster, LSFCluster]]):
         # Initialize clients
         clients = {}

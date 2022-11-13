@@ -28,7 +28,7 @@ class Analyzer(object):
         # Keep values
         self.cluster_settings = cluster_settings
         self.debug = debug
-        self.fg_indices = ['tmid', 'proc_id']  # 'tmid', 'proc_id', 'file_id']
+        self.fg_indices = ['tmid', 'proc_id', 'file_id']  # 'tmid', 'proc_id', 'file_id']
         self.n_workers_per_node = cluster_settings.get('cores', DEFAULT_N_WORKERS_PER_NODE)
         self.working_dir = working_dir
         # Boot Dask clusters & clients
@@ -48,16 +48,17 @@ class Analyzer(object):
                             logger=self.logger,
                             depth=depth,
                             debug=self.debug)
+        # Load min max
+        analysis.load_global_min_max()
         # Initialize futures
         fg_delayed_tasks = {}
         # For all filter group indices
         for fg_index in self.fg_indices:
             # Set filter group
             analysis.set_filter_group(fg_index=fg_index)
-            # Calculate min max
-            fg_range, fg_range_interval = analysis.compute_min_max()
             # Create delayed tasks
             delayed_tasks = []
+            # Read & index logs
             logs_d = analysis.read_and_index_logs()
             delayed_tasks.extend(logs_d)
             if fg_index == 'tmid':
@@ -67,24 +68,22 @@ class Analyzer(object):
                 proc_id_metrics_d = analysis.compute_metrics_proc_id(ddf=logs_d[-1])
                 metrics_d = proc_id_metrics_d[-1]
                 delayed_tasks.extend(proc_id_metrics_d)
+            elif fg_index == 'file_id':
+                file_id_metrics_d = analysis.compute_metrics_file_id(ddf=logs_d[-1])
+                metrics_d = file_id_metrics_d[-1]
+                delayed_tasks.extend(file_id_metrics_d)
             else:
                 raise
-            # Keep delayed tasks
             scores_d = analysis.compute_scores(metrics=metrics_d)
             delayed_tasks.extend(scores_d)
 
-            print(fg_index, fg_range, fg_range_interval)
+            # Keep delayed tasks
             fg_delayed_tasks[fg_index] = delayed_tasks
             # break
 
         for fg_index in self.fg_indices:
-
-            save_graph(dask.delayed(fg_delayed_tasks[fg_index]), filename=f"task_graph_{fg_index}")
-
-
-            # dask.delayed(fg_delayed_tasks[fg_index]).visualize(filename=f"task_graph_{fg_index}")
-
-
+            save_graph(dask.delayed(fg_delayed_tasks[fg_index])(dask_key_name=f"save-graph-{fg_index}"),
+                       filename=f"{self.working_dir}/{analysis.id}/task-graph-{fg_index}")
 
         fg_futures = {}
         for fg_index in self.fg_indices:
@@ -104,7 +103,7 @@ class Analyzer(object):
             for future in fg_futures[fg_index]:
                 key_name = f"{future.key[0]}-{future.key[1]}" if isinstance(future.key, tuple) else future.key
                 # if key_name.startswith(f"metrics_{fg_index}_") or key_name.startswith(f"scores_{fg_index}_"):
-                if key_name.startswith("metrics-") or key_name.startswith("scores-"):
+                if key_name.startswith("metrics-") or key_name.startswith("scores-") or key_name.startswith("repartition-"):
                     json_result = future.result()
                     with open(f"{self.working_dir}/{analysis.id}/{key_name}.json", "w+") as file:
                         json.dump(json_result, file, cls=NpEncoder)

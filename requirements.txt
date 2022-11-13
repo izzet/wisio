@@ -10,7 +10,9 @@ graphviz
 networkx
 numpy
 pandas
+portion
 #pyarrow
 pyyaml
 scipy
+seaborn
 tqdm
