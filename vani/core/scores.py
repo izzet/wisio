@@ -53,6 +53,17 @@ def min_max_delayed(metric: Dict, global_min_max: Dict):
     }
 
 
+def min_max_of_file_id(metrics: list):
+    bw = 0
+    size = 0
+    uniq_files = len(metrics)
+    for metric in metrics:
+        bw = bw + ((metric['read']['bw_sum'] + metric['write']['bw_sum']) / 1024.0 / 1024.0)
+        size = size + ((metric['read']['total_io_size'] + metric['write']['total_io_size']) / 1024.0 / 1024.0 / 1024.0)
+
+    pass
+
+
 def score(metric, min_max_values: Dict):
     all_scores = {
         'start': metric['start'],

@@ -9,11 +9,13 @@ import os
 import time
 from dask import delayed
 from dask.dataframe import DataFrame
-from dask.distributed import wait
+from dask.distributed import wait, worker_client
 from hashlib import md5
 from logging import Logger
 from typing import Dict
-from vani.core.metrics import filter_delayed, flatten_delayed, merge_delayed
+
+from vani.core.characteristics import low_level_char_delayed
+from vani.core.metrics import filter_asymptote_delayed, filter_delayed, flatten_delayed, merge_delayed, sort_delayed
 from vani.core.scores import min_max_delayed, score
 from vani.utils.file_utils import dir_hash, ensure_dir
 from vani.utils.json_encoders import NpEncoder
@@ -38,22 +40,69 @@ class Analysis(object):
         self.n_workers_per_node = n_workers_per_node
         self.working_dir = working_dir
 
+    def compute_low_level_char(self, ddf: DataFrame, leveled_metrics: list):
+        tasks_d = []
+        for index, metrics in enumerate(leveled_metrics):
+            sorted_metrics_d = sort_delayed(metrics=metrics, dask_key_name=f"ll-sort-{self.fg_index}-{index}")
+            filtered_metrics_d = filter_asymptote_delayed(sorted_metrics=sorted_metrics_d, by_metric='agg_dur',
+                                                          dask_key_name=f"ll-filter-{self.fg_index}-{index}")
+            low_level_char_d = self.compute_low_level_char_delayed(ddf=ddf, fg_index=self.fg_index,
+                                                                   filtered_metrics=filtered_metrics_d)
+            tasks_d.append(low_level_char_d)
+        return delayed(lambda x: x)(tasks_d, dask_key_name=f"ll-all-{self.fg_index}")
+
+    @staticmethod
+    @delayed
+    def compute_low_level_char_delayed(ddf: DataFrame, fg_index: str, filtered_metrics: list):
+        tasks = []
+        for metric in filtered_metrics:
+            start, stop = metric['start'], metric['stop']
+            target_ddf_d = Analysis.target_ddf_delayed(ddf=ddf, start=start, stop=stop,
+                                                       dask_key_name=f"ll-target-ddf-{fg_index}-{start}-{stop}")
+            agg = {
+                'filename': 'unique',
+                'func_id': 'unique',
+                'rank': 'unique',
+            }
+            low_level_char_d = low_level_char_delayed(ddf=target_ddf_d, metric=metric, agg=agg,
+                                                      dask_key_name=f"ll-char-{fg_index}-{start}-{stop}")
+            tasks.append(low_level_char_d)
+        # client = dask.distributed.get_client()
+        # characteristics_future = client.compute(delayed_tasks)
+        # characteristics = client.gather(characteristics_future)
+        with worker_client() as client:
+            characteristics_f = client.compute(tasks)
+            characteristics = client.gather(characteristics_f)
+        # characteristics = dask.compute(delayed_tasks)
+        print(characteristics)
+        return characteristics
+
+    def compute_metrics(self, ddf: DataFrame):
+        if self.fg_index == 'tmid':
+            metrics_d = self.compute_metrics_tmid(ddf=ddf)
+        elif self.fg_index == 'proc_id':
+            metrics_d = self.compute_metrics_proc_id(ddf=ddf)
+        elif self.fg_index == 'file_id':
+            metrics_d = self.compute_metrics_file_id(ddf=ddf)
+        else:
+            raise
+        return metrics_d
+
     def compute_metrics_file_id(self, ddf: DataFrame):
-        unique_filenames_d = self.unique_filenames_delayed(ddf=ddf, log_dir=self.log_dir,
-                                                           dask_key_name=f"unique-filenames-{self.fg_index}")
-        save_filenames_d = self.save_filenames_delayed(filenames=unique_filenames_d, log_dir=self.log_dir,
+        unique_filenames = self.unique_filenames_delayed(ddf=ddf, log_dir=self.log_dir,
+                                                         dask_key_name=f"unique-filenames-{self.fg_index}").compute()
+        save_filenames_d = self.save_filenames_delayed(filenames=unique_filenames, log_dir=self.log_dir,
                                                        dask_key_name=f"save-filenames-{self.fg_index}")
-        metrics_d = self.metrics_filenames_delayed(ddf=ddf, filenames=unique_filenames_d,
-                                                   dask_key_name=f"metrics-{self.fg_index}")
-        return [unique_filenames_d, save_filenames_d, metrics_d]
+        metrics_d = self.metrics_filenames_delayed(ddf=ddf, filenames=unique_filenames)
+        return [metrics_d]
 
     def compute_metrics_proc_id(self, ddf: DataFrame):
-        unique_processes_d = self.unique_processes_delayed(ddf=ddf, dask_key_name=f"unique-processes-{self.fg_index}")
+        unique_processes = self.unique_processes_delayed(ddf=ddf,
+                                                         dask_key_name=f"unique-processes-{self.fg_index}").compute()
         # hostname_ids_d = self.hostname_ids_delayed(ddf=unique_processes_d,
         #                                            dask_key_name=f"hostname-ids-{self.fg_index}")
-        metrics_d = self.metrics_proc_id_delayed(ddf=ddf, processes=unique_processes_d,
-                                                 dask_key_name=f"metrics-{self.fg_index}")
-        return [unique_processes_d, metrics_d]
+        metrics_d = self.metrics_proc_id_delayed(ddf=ddf, processes=unique_processes)
+        return [metrics_d]
 
     def compute_metrics_tmid(self, ddf: DataFrame):
         min_val, max_val = tuple(self.global_min_max[self.fg_index])
@@ -76,7 +125,8 @@ class Analysis(object):
             else:
                 Analysis.__arrange_merge_tasks(self.fg_index, all_tasks, tasks, i)
             all_tasks[i] = tasks
-        return Analysis.__arrange_high_level_tasks(self.fg_index, all_tasks)
+        # return Analysis.__arrange_high_level_tasks(self.fg_index, all_tasks)
+        return all_tasks
 
     def compute_observations(self):
         pass
@@ -130,7 +180,7 @@ class Analysis(object):
     @delayed
     def hostname_ids_delayed(ddf: DataFrame):
         proc_id_list = ddf.index.unique()
-        print("proc_id_list", proc_id_list)
+        # print("proc_id_list", proc_id_list)
         mask = (2 ** 15 - 1) << 48
         # print("{0:b}".format(mask))
         hostname_id_set = set()
@@ -138,86 +188,102 @@ class Analysis(object):
             hostname_id_set.add(proc & mask)
         hostname_id_list = list(hostname_id_set)
         hostname_id_list.sort()
-        print("hostname_id_list", hostname_id_list)
+        # print("hostname_id_list", hostname_id_list)
         return hostname_id_list
 
-    @staticmethod
-    @delayed
-    def metrics_filenames_delayed(ddf: DataFrame, filenames: list, fg_index='file_id'):
-        print("///metrics_file_id_delayed///")
-        print("filenames", filenames)
-        depth = math.ceil(math.sqrt(len(filenames)))
-        print("depth", depth)
-        iterations = list(range(0, depth + 1))
-        print("iterations", iterations)
-        iterations.reverse()
-        all_tasks = [0] * (depth + 1)
-        for i in iterations:
-            tasks = []
-            if i == depth:
-                for index, start in enumerate(filenames):
-                    if index < len(filenames) - 1:
-                        stop = filenames[index + 1] - 1
-                    else:
-                        stop = filenames[-1]
-                    target_ddf_d = Analysis.target_ddf_delayed(ddf=ddf, start=start, stop=stop,
-                                                               dask_key_name=f"target-ddf-{fg_index}-{start}-{stop}")
-                    filter_d = filter_delayed(ddf=target_ddf_d, fg_index=fg_index, start=start, stop=stop,
-                                              dask_key_name=f"filter-{fg_index}-{start}-{stop}")
-                    tasks.append(filter_d)
-            else:
-                Analysis.__arrange_merge_tasks(fg_index, all_tasks, tasks, i)
-            all_tasks[i] = tasks
-        metric_tasks = Analysis.__arrange_high_level_tasks(fg_index, all_tasks)
+    # noinspection PyMethodMayBeStatic
+    def metrics_filenames_delayed(self, ddf: DataFrame, filenames: list, fg_index='file_id'):
+        # print("///metrics_file_id_delayed///")
+        # print("filenames", filenames)
+        # depth = math.ceil(math.sqrt(len(filenames)))
+        # print("depth", depth)
+        # iterations = list(range(0, depth + 1))
+        # print("iterations", iterations)
+        # iterations.reverse()
+        # all_tasks = [0] * (depth + 1)
+        # for i in iterations:
+        #     tasks = []
+        #     if i == depth:
+        #         for index, start in enumerate(filenames):
+        #             if index < len(filenames) - 1:
+        #                 stop = filenames[index + 1] - 1
+        #             else:
+        #                 stop = filenames[-1]
+        #             target_ddf_d = Analysis.target_ddf_delayed(ddf=ddf, start=start, stop=stop,
+        #                                                        dask_key_name=f"target-ddf-{fg_index}-{start}-{stop}")
+        #             filter_d = filter_delayed(ddf=target_ddf_d, fg_index=fg_index, start=start, stop=stop,
+        #                                       dask_key_name=f"filter-{fg_index}-{start}-{stop}")
+        #             tasks.append(filter_d)
+        #     else:
+        #         Analysis.__arrange_merge_tasks(fg_index, all_tasks, tasks, i)
+        #     all_tasks[i] = tasks
+        # metric_tasks = Analysis.__arrange_high_level_tasks(fg_index, all_tasks)
         # Analysis.__arrange_root_tasks(fg_index, all_tasks)
         # print('all_tasks len', len(all_tasks))
         # print('all_tasks', all_tasks)
-        metrics = dask.compute(*metric_tasks)
-        # print(type(metrics))
-        # print(metrics)
-        # print(list(metrics))
-        # print(metrics[0])
-        # print(type(metrics[0]))
-        return list(metrics)
+        metric_tasks = []
+        for filename in filenames:
+            target_ddf_d = Analysis.target_ddf_delayed(ddf=ddf, start=filename, stop=filename,
+                                                       dask_key_name=f"target-ddf-{fg_index}-{filename}")
+            filter_d = filter_delayed(ddf=target_ddf_d, fg_index=fg_index, start=filename, stop=filename,
+                                      dask_key_name=f"filter-{fg_index}-{filename}")
+            flatten_d = flatten_delayed(filter_d, dask_key_name=f"flatten-{fg_index}-{filename}")
+            metric_tasks.append(flatten_d)
 
-    @staticmethod
-    @delayed
-    def metrics_proc_id_delayed(ddf: DataFrame, processes: list, fg_index='proc_id'):
-        print("///compute_metrics_proc_id///")
-        # print("processes", processes)
-        depth = math.ceil(math.sqrt(len(processes)))
-        print("depth", depth)
-        iterations = list(range(0, depth + 1))
-        print("iterations", iterations)
-        iterations.reverse()
-        all_tasks = [0] * (depth + 1)
-        for i in iterations:
-            tasks = []
-            if i == depth:
-                for index, start in enumerate(processes):
-                    if index < len(processes) - 1:
-                        stop = processes[index + 1] - 1
-                    else:
-                        stop = processes[-1]
-                    target_ddf_d = Analysis.target_ddf_delayed(ddf=ddf, start=start, stop=stop,
-                                                               dask_key_name=f"target-ddf-{fg_index}-{start}-{stop}")
-                    filter_d = filter_delayed(ddf=target_ddf_d, fg_index=fg_index, start=start, stop=stop,
-                                              dask_key_name=f"filter-{fg_index}-{start}-{stop}")
-                    tasks.append(filter_d)
-            else:
-                Analysis.__arrange_merge_tasks(fg_index, all_tasks, tasks, i)
-            all_tasks[i] = tasks
-        metric_tasks = Analysis.__arrange_high_level_tasks(fg_index, all_tasks)
-        # Analysis.__arrange_root_tasks(fg_index, all_tasks)
-        # print('all_tasks len', len(all_tasks))
-        # print('all_tasks', all_tasks)
-        metrics = dask.compute(*metric_tasks)
+        # metrics = dask.compute(*metric_tasks)
         # print(type(metrics))
         # print(metrics)
         # print(list(metrics))
         # print(metrics[0])
         # print(type(metrics[0]))
-        return list(metrics)
+        return metric_tasks
+
+    # noinspection PyMethodMayBeStatic
+    def metrics_proc_id_delayed(self, ddf: DataFrame, processes: list, fg_index='proc_id'):
+        # print("///compute_metrics_proc_id///")
+        # print("processes", processes)
+        # depth = math.ceil(math.sqrt(len(processes)))
+        # print("depth", depth)
+        # iterations = list(range(0, depth + 1))
+        # print("iterations", iterations)
+        # iterations.reverse()
+        # all_tasks = [0] * (depth + 1)
+        # for i in iterations:
+        #     tasks = []
+        #     if i == depth:
+        #         for index, start in enumerate(processes):
+        #             if index < len(processes) - 1:
+        #                 stop = processes[index + 1] - 1
+        #             else:
+        #                 stop = processes[-1]
+        #             target_ddf_d = Analysis.target_ddf_delayed(ddf=ddf, start=start, stop=stop,
+        #                                                        dask_key_name=f"target-ddf-{fg_index}-{start}-{stop}")
+        #             filter_d = filter_delayed(ddf=target_ddf_d, fg_index=fg_index, start=start, stop=stop,
+        #                                       dask_key_name=f"filter-{fg_index}-{start}-{stop}")
+        #             tasks.append(filter_d)
+        #     else:
+        #         Analysis.__arrange_merge_tasks(fg_index, all_tasks, tasks, i)
+        #     all_tasks[i] = tasks
+        # metric_tasks = Analysis.__arrange_high_level_tasks(fg_index, all_tasks)
+        # Analysis.__arrange_root_tasks(fg_index, all_tasks)
+        # print('all_tasks len', len(all_tasks))
+        # print('all_tasks', all_tasks)
+        metric_tasks = []
+        for process in processes:
+            target_ddf_d = Analysis.target_ddf_delayed(ddf=ddf, start=process, stop=process,
+                                                       dask_key_name=f"target-ddf-{fg_index}-{process}")
+            filter_d = filter_delayed(ddf=target_ddf_d, fg_index=fg_index, start=process, stop=process,
+                                      dask_key_name=f"filter-{fg_index}-{process}")
+            flatten_d = flatten_delayed(filter_d, dask_key_name=f"flatten-{fg_index}-{process}")
+            metric_tasks.append(flatten_d)
+
+        # metrics = dask.compute(*metric_tasks)
+        # print(type(metrics))
+        # print(metrics)
+        # print(list(metrics))
+        # print(metrics[0])
+        # print(type(metrics[0]))
+        return metric_tasks
 
     @staticmethod
     @delayed
@@ -282,7 +348,7 @@ class Analysis(object):
                 unique_filenames = json.load(file)
         else:
             unique_filenames = ddf.index.unique().compute()
-        print("unique_filenames", unique_filenames)
+        # print("unique_filenames", unique_filenames)
         return unique_filenames
 
     @staticmethod
@@ -290,7 +356,7 @@ class Analysis(object):
     def unique_processes_delayed(ddf: DataFrame):
         unique_processes_ddf = ddf.groupby(ddf.index)['hostname', 'rank', 'thread_id'].min().compute()
         unique_processes = list(unique_processes_ddf.index.unique())
-        print("unique_processes", unique_processes)
+        # print("unique_processes", unique_processes)
         return unique_processes
 
     @staticmethod
