@@ -22,6 +22,8 @@ class DaskManager(object):
 
     def __init__(self, working_dir: str, fg_indices: List[str], logger: Logger, debug=False) -> None:
         self.debug = debug
+        self.clusters = {}
+        self.clients = {}
         self.fg_indices = fg_indices
         self.logger = logger
         self.working_dir = working_dir
@@ -73,6 +75,9 @@ class DaskManager(object):
                 print(clients[cluster_key])
         # Return clients
         return clients
+
+    def get_client(self, cluster_key: str):
+        return self.clients[cluster_key]
 
     def initialize_clusters(self, cluster_settings: Dict[str, Any]) -> Dict[str, Union[LocalCluster, LSFCluster]]:
         # Read required config
