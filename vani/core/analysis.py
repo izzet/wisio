@@ -5,6 +5,7 @@ import dask.dataframe as dd
 import glob
 import json
 import math
+import numpy as np
 import os
 import time
 from dask import delayed
@@ -12,8 +13,6 @@ from dask.dataframe import DataFrame
 from dask.distributed import wait, worker_client
 from hashlib import md5
 from logging import Logger
-from typing import Dict
-
 from vani.core.characteristics import low_level_char_delayed
 from vani.core.metrics import filter_asymptote_delayed, filter_delayed, flatten_delayed, merge_delayed, sort_delayed
 from vani.core.scores import min_max_delayed, score
@@ -23,7 +22,7 @@ from vani.utils.logger import ElapsedTimeLogger, format_log
 
 CACHE_DIR = "cached"
 METRIC_DIR = "metric"
-PARTITION_DIR = "partitioned"
+INDEX_DIR = "indexed"
 
 
 class Analysis(object):
@@ -41,68 +40,78 @@ class Analysis(object):
         self.working_dir = working_dir
 
     def compute_low_level_char(self, ddf: DataFrame, leveled_metrics: list):
-        tasks_d = []
-        for index, metrics in enumerate(leveled_metrics):
-            sorted_metrics_d = sort_delayed(metrics=metrics, dask_key_name=f"ll-sort-{self.fg_index}-{index}")
-            filtered_metrics_d = filter_asymptote_delayed(sorted_metrics=sorted_metrics_d, by_metric='agg_dur',
-                                                          dask_key_name=f"ll-filter-{self.fg_index}-{index}")
-            low_level_char_d = self.compute_low_level_char_delayed(ddf=ddf, fg_index=self.fg_index,
-                                                                   filtered_metrics=filtered_metrics_d)
-            tasks_d.append(low_level_char_d)
-        return delayed(lambda x: x)(tasks_d, dask_key_name=f"ll-all-{self.fg_index}")
+        all_tasks_d = []
+        for by_metric in ['agg_dur', 'agg_bw']:
+            tasks_d = []
+            for index, metrics in enumerate(leveled_metrics):
+                dask_key_suffix = f"{self.fg_index}-{by_metric}-{index}"
+                sorted_metrics_d = sort_delayed(metrics=metrics, by_metric=by_metric,
+                                                dask_key_name=f"ll-sort-{dask_key_suffix}")
+                filtered_metrics_d = filter_asymptote_delayed(sorted_metrics=sorted_metrics_d, by_metric=by_metric,
+                                                              dask_key_name=f"ll-filter-{dask_key_suffix}")
+                low_level_char_d = self.compute_low_level_char_delayed(ddf=ddf, fg_index=self.fg_index,
+                                                                       filtered_metrics=filtered_metrics_d,
+                                                                       dask_key_name=f"ll-char-{dask_key_suffix}")
+                tasks_d.append(low_level_char_d)
+            all_tasks_d.append(delayed(lambda x: x)(tasks_d, dask_key_name=f"ll-all-{self.fg_index}-{by_metric}"))
+        return all_tasks_d
 
     @staticmethod
     @delayed
     def compute_low_level_char_delayed(ddf: DataFrame, fg_index: str, filtered_metrics: list):
-        tasks = []
+        tasks_d = []
         for metric in filtered_metrics:
             start, stop = metric['start'], metric['stop']
+            dask_key_suffix = f"{fg_index}-{start}-{stop}"
             target_ddf_d = Analysis.target_ddf_delayed(ddf=ddf, start=start, stop=stop,
-                                                       dask_key_name=f"ll-target-ddf-{fg_index}-{start}-{stop}")
+                                                       dask_key_name=f"ll-target-ddf-{dask_key_suffix}")
             agg = {
                 'filename': 'unique',
                 'func_id': 'unique',
                 'rank': 'unique',
             }
             low_level_char_d = low_level_char_delayed(ddf=target_ddf_d, metric=metric, agg=agg,
-                                                      dask_key_name=f"ll-char-{fg_index}-{start}-{stop}")
-            tasks.append(low_level_char_d)
+                                                      dask_key_name=f"ll-char-{dask_key_suffix}")
+            tasks_d.append(low_level_char_d)
         # client = dask.distributed.get_client()
         # characteristics_future = client.compute(delayed_tasks)
         # characteristics = client.gather(characteristics_future)
         with worker_client() as client:
-            characteristics_f = client.compute(tasks)
-            characteristics = client.gather(characteristics_f)
+            char_f = client.compute(tasks_d)
+            char = client.gather(char_f)
         # characteristics = dask.compute(delayed_tasks)
-        print(characteristics)
-        return characteristics
+        print(char)
+        return char
 
     def compute_metrics(self, ddf: DataFrame):
         if self.fg_index == 'tmid':
-            metrics_d = self.compute_metrics_tmid(ddf=ddf)
+            return self.compute_metrics_tmid(ddf=ddf)
         elif self.fg_index == 'proc_id':
-            metrics_d = self.compute_metrics_proc_id(ddf=ddf)
+            return self.compute_metrics_proc_id(ddf=ddf)
         elif self.fg_index == 'file_id':
-            metrics_d = self.compute_metrics_file_id(ddf=ddf)
+            return self.compute_metrics_file_id(ddf=ddf)
         else:
             raise
-        return metrics_d
 
     def compute_metrics_file_id(self, ddf: DataFrame):
-        unique_filenames = self.unique_filenames_delayed(ddf=ddf, log_dir=self.log_dir,
-                                                         dask_key_name=f"unique-filenames-{self.fg_index}").compute()
-        save_filenames_d = self.save_filenames_delayed(filenames=unique_filenames, log_dir=self.log_dir,
+        unique_filenames_d = self.unique_filenames_delayed(ddf=ddf, log_dir=self.log_dir,
+                                                           dask_key_name=f"unique-filenames-{self.fg_index}")  # .compute()
+        save_filenames_d = self.save_filenames_delayed(filenames=unique_filenames_d, log_dir=self.log_dir,
                                                        dask_key_name=f"save-filenames-{self.fg_index}")
-        metrics_d = self.metrics_filenames_delayed(ddf=ddf, filenames=unique_filenames)
-        return [metrics_d]
+        metrics_d = self.metrics_filenames_delayed(ddf=ddf, filenames=unique_filenames_d,
+                                                   dask_key_name=f"metrics-{self.fg_index}")
+        return [unique_filenames_d, save_filenames_d, [metrics_d]]
 
     def compute_metrics_proc_id(self, ddf: DataFrame):
-        unique_processes = self.unique_processes_delayed(ddf=ddf,
-                                                         dask_key_name=f"unique-processes-{self.fg_index}").compute()
+        unique_processes_d = self.unique_processes_delayed(ddf=ddf, log_dir=self.log_dir,
+                                                           dask_key_name=f"unique-processes-{self.fg_index}")  # .compute()
+        save_processes_d = self.save_processes_delayed(processes=unique_processes_d, log_dir=self.log_dir,
+                                                       dask_key_name=f"save-processes-{self.fg_index}")
         # hostname_ids_d = self.hostname_ids_delayed(ddf=unique_processes_d,
         #                                            dask_key_name=f"hostname-ids-{self.fg_index}")
-        metrics_d = self.metrics_proc_id_delayed(ddf=ddf, processes=unique_processes)
-        return [metrics_d]
+        metrics_d = self.metrics_proc_id_delayed(ddf=ddf, processes=unique_processes_d,
+                                                 dask_key_name=f"metrics-{self.fg_index}")
+        return [unique_processes_d, save_processes_d, [metrics_d]]
 
     def compute_metrics_tmid(self, ddf: DataFrame):
         min_val, max_val = tuple(self.global_min_max[self.fg_index])
@@ -111,9 +120,9 @@ class Analysis(object):
         time_range = range(min_val, max_val, interval)
         iterations = list(range(0, self.depth + 1))
         iterations.reverse()
-        all_tasks = [0] * (self.depth + 1)
+        all_tasks_d = [0] * (self.depth + 1)
         for i in iterations:
-            tasks = []
+            tasks_d = []
             if i == self.depth:
                 for start in time_range:
                     stop = start + interval - 1
@@ -121,33 +130,31 @@ class Analysis(object):
                                                            dask_key_name=f"target-ddf-{self.fg_index}-{start}-{stop}")
                     filter_d = filter_delayed(ddf=target_ddf_d, fg_index=self.fg_index, start=start, stop=stop,
                                               dask_key_name=f"filter-{self.fg_index}-{start}-{stop}")
-                    tasks.append(filter_d)
+                    tasks_d.append(filter_d)
             else:
-                Analysis.__arrange_merge_tasks(self.fg_index, all_tasks, tasks, i)
-            all_tasks[i] = tasks
+                Analysis.__arrange_merge_tasks(self.fg_index, all_tasks_d, tasks_d, i)
+            all_tasks_d[i] = tasks_d
         # return Analysis.__arrange_high_level_tasks(self.fg_index, all_tasks)
-        return all_tasks
-
-    def compute_observations(self):
-        pass
+        return [all_tasks_d]
 
     def compute_scores(self, metrics: list):
-        # print("---compute_scores---")
-        # self.logger.debug(metrics)
-        # print(metrics)
+        # Get root metric
         root_metric = metrics[-1][0]
-        # print(root_metric)
+        # Calculate min max values
         min_max_d = min_max_delayed(metric=root_metric, global_min_max=self.global_min_max,
                                     dask_key_name=f"min-max-{self.fg_index}")
+        # Create metrics bag
         if self.fg_index == 'tmid':
             metrics.reverse()
-        metrics_bag = db.from_delayed(metrics)
-        score.__name__ = f"scores-{self.fg_index}"
-        # scores_map = metrics_bag.map(score, min_max_d)
+        metrics_b = db.from_delayed(metrics)
+        # Calculate scores
         if self.fg_index == 'tmid':
-            scores = metrics_bag.map(score, min_max_d)
+            score.__name__ = f"scores-{self.fg_index}"
+            scores = metrics_b.map(score, min_max_d)
         else:
-            scores = metrics_bag.flatten().map(score, min_max_d)
+            score.__name__ = f"scores-{self.fg_index}"
+            scores = metrics_b.flatten().map(score, min_max_d)
+        # Return delayed scores
         return scores.to_delayed()
 
     def load_global_min_max(self):
@@ -158,20 +165,26 @@ class Analysis(object):
         return global_min_max
 
     def read_and_index_logs(self, use_cache=True):
-        fg_partition_dir = f"{self.log_dir}/{PARTITION_DIR}/{self.fg_index}"
-        if use_cache and os.path.exists(f"{fg_partition_dir}/_metadata"):
-            ddf_d = self.read_parquet_delayed(log_dir=fg_partition_dir, index=[self.fg_index],
+        fg_index_dir = f"{self.log_dir}/{INDEX_DIR}/{self.fg_index}"
+        if use_cache and os.path.exists(f"{fg_index_dir}/_metadata"):
+            ddf_d = self.read_parquet_delayed(log_dir=fg_index_dir, index=[self.fg_index],
                                               dask_key_name=f"read-parquet-{self.fg_index}")
             persisted_ddf_d = self.persist_ddf_delayed(ddf=ddf_d, dask_key_name=f"persist-ddf-{self.fg_index}")
             return [ddf_d, persisted_ddf_d]
         ddf_d = self.read_parquet_delayed(log_dir=self.log_dir, dask_key_name=f"read-parquet-{self.fg_index}")
         indexed_ddf_d = self.set_ddf_index_delayed(ddf=ddf_d, fg_index=self.fg_index,
                                                    dask_key_name=f"set-index-{self.fg_index}")
-        save_ddf_d = self.save_ddf_delayed(ddf=indexed_ddf_d, log_dir=self.log_dir, fg_index=self.fg_index,
-                                           dask_key_name=f"save-ddf-{self.fg_index}")
         persisted_ddf_d = self.persist_ddf_delayed(ddf=indexed_ddf_d, dask_key_name=f"persist-ddf-{self.fg_index}")
-        # wait_ddf_d = self.wait_ddf_delayed(ddf=persisted_ddf_d, dask_key_name=f"wait-ddf-{self.fg_index}")
-        return [ddf_d, indexed_ddf_d, save_ddf_d, persisted_ddf_d]
+        partitioned_ddf_d = self.repartition_delayed(ddf=persisted_ddf_d,
+                                                     dask_key_name=f"repartition-ddf-{self.fg_index}")
+        save_ddf_d = self.save_ddf_delayed(ddf=partitioned_ddf_d, log_dir=self.log_dir, fg_index=self.fg_index,
+                                           dask_key_name=f"save-ddf-{self.fg_index}")
+        return [ddf_d, indexed_ddf_d, persisted_ddf_d, save_ddf_d, partitioned_ddf_d]
+
+    @staticmethod
+    @delayed
+    def repartition_delayed(ddf: DataFrame, partition_size='128MB'):
+        return ddf.repartition(partition_size=partition_size)
 
     def set_filter_group(self, fg_index: str):
         self.fg_index = fg_index
@@ -191,99 +204,63 @@ class Analysis(object):
         # print("hostname_id_list", hostname_id_list)
         return hostname_id_list
 
-    # noinspection PyMethodMayBeStatic
-    def metrics_filenames_delayed(self, ddf: DataFrame, filenames: list, fg_index='file_id'):
-        # print("///metrics_file_id_delayed///")
-        # print("filenames", filenames)
-        # depth = math.ceil(math.sqrt(len(filenames)))
-        # print("depth", depth)
-        # iterations = list(range(0, depth + 1))
-        # print("iterations", iterations)
-        # iterations.reverse()
-        # all_tasks = [0] * (depth + 1)
-        # for i in iterations:
-        #     tasks = []
-        #     if i == depth:
-        #         for index, start in enumerate(filenames):
-        #             if index < len(filenames) - 1:
-        #                 stop = filenames[index + 1] - 1
-        #             else:
-        #                 stop = filenames[-1]
-        #             target_ddf_d = Analysis.target_ddf_delayed(ddf=ddf, start=start, stop=stop,
-        #                                                        dask_key_name=f"target-ddf-{fg_index}-{start}-{stop}")
-        #             filter_d = filter_delayed(ddf=target_ddf_d, fg_index=fg_index, start=start, stop=stop,
-        #                                       dask_key_name=f"filter-{fg_index}-{start}-{stop}")
-        #             tasks.append(filter_d)
-        #     else:
-        #         Analysis.__arrange_merge_tasks(fg_index, all_tasks, tasks, i)
-        #     all_tasks[i] = tasks
-        # metric_tasks = Analysis.__arrange_high_level_tasks(fg_index, all_tasks)
-        # Analysis.__arrange_root_tasks(fg_index, all_tasks)
-        # print('all_tasks len', len(all_tasks))
-        # print('all_tasks', all_tasks)
-        metric_tasks = []
+    @staticmethod
+    @delayed
+    def metrics_filenames_delayed(ddf: DataFrame, filenames: list, fg_index='file_id'):
+        print('calculating metrics for filenames', len(filenames))
+        tasks_d = []
         for filename in filenames:
             target_ddf_d = Analysis.target_ddf_delayed(ddf=ddf, start=filename, stop=filename,
                                                        dask_key_name=f"target-ddf-{fg_index}-{filename}")
             filter_d = filter_delayed(ddf=target_ddf_d, fg_index=fg_index, start=filename, stop=filename,
                                       dask_key_name=f"filter-{fg_index}-{filename}")
             flatten_d = flatten_delayed(filter_d, dask_key_name=f"flatten-{fg_index}-{filename}")
-            metric_tasks.append(flatten_d)
+            tasks_d.append(flatten_d)
+        print('num of tasks created', len(tasks_d))
+        with worker_client() as client:
+            print('submitting on', client)
+            metrics_f = client.compute(tasks_d)
+            print('gathering tasks', len(metrics_f))
+            metrics = client.gather(metrics_f)
+        # metrics = dask.compute(tasks_d)
+        print('computed metrics', type(metrics))
+        print('computed metrics', len(metrics))
+        # print('computed metrics', metrics)
+        return metrics
 
-        # metrics = dask.compute(*metric_tasks)
-        # print(type(metrics))
-        # print(metrics)
-        # print(list(metrics))
-        # print(metrics[0])
-        # print(type(metrics[0]))
-        return metric_tasks
-
-    # noinspection PyMethodMayBeStatic
-    def metrics_proc_id_delayed(self, ddf: DataFrame, processes: list, fg_index='proc_id'):
-        # print("///compute_metrics_proc_id///")
-        # print("processes", processes)
-        # depth = math.ceil(math.sqrt(len(processes)))
-        # print("depth", depth)
-        # iterations = list(range(0, depth + 1))
-        # print("iterations", iterations)
-        # iterations.reverse()
-        # all_tasks = [0] * (depth + 1)
-        # for i in iterations:
-        #     tasks = []
-        #     if i == depth:
-        #         for index, start in enumerate(processes):
-        #             if index < len(processes) - 1:
-        #                 stop = processes[index + 1] - 1
-        #             else:
-        #                 stop = processes[-1]
-        #             target_ddf_d = Analysis.target_ddf_delayed(ddf=ddf, start=start, stop=stop,
-        #                                                        dask_key_name=f"target-ddf-{fg_index}-{start}-{stop}")
-        #             filter_d = filter_delayed(ddf=target_ddf_d, fg_index=fg_index, start=start, stop=stop,
-        #                                       dask_key_name=f"filter-{fg_index}-{start}-{stop}")
-        #             tasks.append(filter_d)
-        #     else:
-        #         Analysis.__arrange_merge_tasks(fg_index, all_tasks, tasks, i)
-        #     all_tasks[i] = tasks
-        # metric_tasks = Analysis.__arrange_high_level_tasks(fg_index, all_tasks)
-        # Analysis.__arrange_root_tasks(fg_index, all_tasks)
-        # print('all_tasks len', len(all_tasks))
-        # print('all_tasks', all_tasks)
-        metric_tasks = []
+    @staticmethod
+    @delayed
+    def metrics_proc_id_delayed(ddf: DataFrame, processes: list, fg_index='proc_id'):
+        print('calculating metrics for processes', len(processes))
+        tasks_d = []
         for process in processes:
             target_ddf_d = Analysis.target_ddf_delayed(ddf=ddf, start=process, stop=process,
                                                        dask_key_name=f"target-ddf-{fg_index}-{process}")
             filter_d = filter_delayed(ddf=target_ddf_d, fg_index=fg_index, start=process, stop=process,
                                       dask_key_name=f"filter-{fg_index}-{process}")
             flatten_d = flatten_delayed(filter_d, dask_key_name=f"flatten-{fg_index}-{process}")
-            metric_tasks.append(flatten_d)
+            tasks_d.append(flatten_d)
+        print('num of tasks created', len(tasks_d))
+        metrics = []
+        with worker_client() as client:
+            print('submitting on', client)
+            for tasks in np.array_split(tasks_d, np.sqrt(len(tasks_d))):
+                print('tasks', tasks)
+                # metrics_f = client.compute(*tasks, sync=False)
+                sub_metrics = dask.compute(*tasks)
+                print('sub_metrics', sub_metrics)
+                # print('gathering tasks', len(metrics_f))
+                # metrics_0 = client.gather(metrics_f)
+                # print('metrics_0', metrics_0)
+                # metrics.extend(metrics_0)
+                # all_metrics_f.extend(metrics_f)
+                metrics.extend(sub_metrics)
+        # metrics = dask.compute(tasks_d)
 
-        # metrics = dask.compute(*metric_tasks)
-        # print(type(metrics))
-        # print(metrics)
-        # print(list(metrics))
-        # print(metrics[0])
-        # print(type(metrics[0]))
-        return metric_tasks
+        print('computed metrics', type(metrics))
+        print('computed metrics', len(metrics))
+        # print('computed metrics', metrics)
+        return metrics
 
     @staticmethod
     @delayed
@@ -306,23 +283,32 @@ class Analysis(object):
         print("Index not specified")
         return dd.read_parquet(f"{log_dir}/*.parquet", index=False)
 
-    # @staticmethod
-    # @delayed
-    # def repartition_ddf_delayed(ddf: DataFrame):
-    #     return ddf.repartition(par)
-
     @staticmethod
     @delayed
     def save_ddf_delayed(ddf: DataFrame, log_dir: str, fg_index: str):
-        ddf.to_parquet(f"{log_dir}/{PARTITION_DIR}/{fg_index}")
+        client = dask.distributed.get_client()
+        print('save_ddf_delayed client', client)
+        with worker_client() as client2:
+            print('save_ddf_delayed client2', client2)
+        ddf.to_parquet(f"{log_dir}/{INDEX_DIR}/{fg_index}")
 
     @staticmethod
     @delayed
     def save_filenames_delayed(filenames: list, log_dir: str):
+        print('saving', filenames)
         filenames = list(filenames)
         filenames.sort()
         with open(f"{log_dir}/filenames.json", "w") as file:
             json.dump(filenames, file, cls=NpEncoder)
+
+    @staticmethod
+    @delayed
+    def save_processes_delayed(processes: list, log_dir: str):
+        print('saving', processes)
+        processes = list(processes)
+        processes.sort()
+        with open(f"{log_dir}/processes.json", "w") as file:
+            json.dump(processes, file, cls=NpEncoder)
 
     @staticmethod
     @delayed
@@ -353,22 +339,19 @@ class Analysis(object):
 
     @staticmethod
     @delayed
-    def unique_processes_delayed(ddf: DataFrame):
-        unique_processes_ddf = ddf.groupby(ddf.index)['hostname', 'rank', 'thread_id'].min().compute()
-        unique_processes = list(unique_processes_ddf.index.unique())
+    def unique_processes_delayed(ddf: DataFrame, log_dir: str):
+        if os.path.exists(f"{log_dir}/processes.json"):
+            with open(f"{log_dir}/processes.json", "r") as file:
+                unique_processes = json.load(file)
+        else:
+            unique_processes_ddf = ddf.groupby(ddf.index)['hostname', 'rank', 'thread_id'].min().compute()
+            unique_processes = list(unique_processes_ddf.index.unique())
         # print("unique_processes", unique_processes)
         return unique_processes
 
     @staticmethod
-    @delayed
-    def wait_ddf_delayed(ddf: DataFrame):
-        wait(ddf)
-
-    @staticmethod
     def __arrange_high_level_tasks(fg_index: str, all_tasks: list):
         Analysis.__arrange_root_tasks(fg_index, all_tasks)
-        # for t, next_tasks in enumerate(all_tasks[0]):
-        #     all_tasks[0][t] = summary(next_tasks, dask_key_name=f"summary_{fg_index}_0_{t}")
         high_level_tasks = []
         all_tasks.reverse()
         for i, tasks in enumerate(all_tasks):
@@ -409,14 +392,14 @@ class Analysis(object):
 
     def __ensure_logs_partitioned(self, log_dir: str):
         # Ensure logs partitioned
-        is_partitioned = os.path.exists(f"{log_dir}/{PARTITION_DIR}/_common_metadata")
+        is_partitioned = os.path.exists(f"{log_dir}/{INDEX_DIR}/_common_metadata")
         self.logger.debug(format_log("main", f"Logs partitioned before: {is_partitioned}"))
-        files = glob.glob(f"{log_dir}/{PARTITION_DIR}/*.parquet", recursive=True)
+        files = glob.glob(f"{log_dir}/{INDEX_DIR}/*.parquet", recursive=True)
         return files if is_partitioned else self.__partition_logs(log_dir=log_dir)
 
     def __indexed_ddf(self, fg_index: str, log_dir: str):
         cache_dir = f"{log_dir}/{CACHE_DIR}/{fg_index}"
-        partition_dir = f"{log_dir}/{PARTITION_DIR}"
+        partition_dir = f"{log_dir}/{INDEX_DIR}"
         with ElapsedTimeLogger(logger=self.logger, message="Logs hash calculated", caller=fg_index):
             partition_dir_hash = dir_hash(partition_dir)
         partition_dir_hash_file = f"{self.working_dir}/_{md5(partition_dir.encode()).hexdigest()}"
@@ -437,7 +420,7 @@ class Analysis(object):
                 return indexed_ddf
         with self.clients[fg_index].as_current():
             with ElapsedTimeLogger(logger=self.logger, message="Logs read", caller=fg_index):
-                ddf = dd.read_parquet(f"{log_dir}/{PARTITION_DIR}/*.parquet", index=False)
+                ddf = dd.read_parquet(f"{log_dir}/{INDEX_DIR}/*.parquet", index=False)
             with ElapsedTimeLogger(logger=self.logger, message="Logs indexed", caller=fg_index):
                 indexed_ddf = ddf.set_index([fg_index])
         with ElapsedTimeLogger(logger=self.logger, message="Logs persisted", caller=fg_index):
@@ -475,7 +458,7 @@ class Analysis(object):
 
     def __partition_logs(self, log_dir: str, partition_size="4GB"):
         # Remove existing files
-        existing_files = glob.glob(f"{log_dir}/{PARTITION_DIR}/*.parquet", recursive=True)
+        existing_files = glob.glob(f"{log_dir}/{INDEX_DIR}/*.parquet", recursive=True)
         for existing_file in existing_files:
             os.remove(existing_file)
         if existing_files:
@@ -491,11 +474,11 @@ class Analysis(object):
             ddf = dd.read_parquet(f"{log_dir}/*.parquet")
         with ElapsedTimeLogger(logger=self.logger, message=f"Logs repartitioned into partitions of: {partition_size}"):
             ddf = ddf.repartition(partition_size=partition_size)
-        partition_folder = f"{log_dir}/{PARTITION_DIR}/"
+        partition_folder = f"{log_dir}/{INDEX_DIR}/"
         with ElapsedTimeLogger(logger=self.logger, message=f"Partitions written into: {partition_folder}"):
             dd.to_parquet(ddf, partition_folder)
         # Return partitioned files
-        partitioned_files = glob.glob(f"{log_dir}/{PARTITION_DIR}/*.parquet", recursive=True)
+        partitioned_files = glob.glob(f"{log_dir}/{INDEX_DIR}/*.parquet", recursive=True)
         return partitioned_files
 
     def __path_with_id(self, path: str):
