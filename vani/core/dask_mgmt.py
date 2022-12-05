@@ -8,6 +8,7 @@ from time import sleep
 from typing import Dict, List, Union
 from vani.common.filter_groups import *
 from vani.common.interfaces import *
+from vani.utils.file_utils import ensure_dir
 from vani.utils.logger import format_log
 
 DEFAULT_NODE_MEMORY = 1600
@@ -87,7 +88,9 @@ class DaskManager(object):
         cores = cluster_settings.get('cores', DEFAULT_N_WORKERS_PER_NODE)
         host = cluster_settings.get('host', socket.gethostname())
         log_file = cluster_settings.get('log_file', "%J.log")
-        log_file = log_file if log_file.startswith('/') else f"{self.working_dir}/worker_logs/{log_file}"
+        if not log_file.startswith('/'):
+            ensure_dir(f"{self.working_dir}/worker_logs")
+            log_file = f"{self.working_dir}/worker_logs/{log_file}"
         memory = cluster_settings.get('memory', DEFAULT_NODE_MEMORY)
         processes = cluster_settings.get('processes', DEFAULT_N_THREADS_PER_WORKER)
         use_stdin = cluster_settings.get('use_stdin', True)

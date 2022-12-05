@@ -153,12 +153,11 @@ def flatten_delayed(x):
 @delayed
 def sort_delayed(metrics: list, by_metric: str):
     # TODO make it parallel
-    sorted_metrics = sorted(metrics, key=lambda x: x['all'][by_metric], reverse=True)
-    return sorted_metrics
+    return sorted(metrics, key=lambda x: x['all'][by_metric], reverse=True)
 
 
 @delayed
-def filter_asymptote_delayed(sorted_metrics: list, by_metric: str, threshold=0.4, window=5):
+def filter_asymptote_delayed(sorted_metrics: list, by_metric: str, threshold=0.2, window=5):
     # Calculate total
     total = 0
     for m in sorted_metrics:
@@ -166,17 +165,20 @@ def filter_asymptote_delayed(sorted_metrics: list, by_metric: str, threshold=0.4
     percentages = []
     selected_metrics = []
     total_percentage = 0
+    is_threshold_exceeded = False
     for m in sorted_metrics:
-        percentage = (m['all'][by_metric] * 100.0) / total
-        m['all'][f"per_{by_metric}"] = percentage
+        percentage = m['all'][by_metric] / total
+        m[f"per_{by_metric}"] = percentage
         total_percentage = total_percentage + percentage
-        # print('cur_per_sum', total_percentage)
         percentages.append(total_percentage)
-        selected_metrics.append(m)
+        if not is_threshold_exceeded:
+            selected_metrics.append(m)
         if len(percentages) >= window:
-            print(f'{by_metric}: total_percentage, per_std', total_percentage, np.std(percentages[-window:]))
-            if np.std(percentages[-window:]) < threshold:
-                break
-        # if len(percentages) >= window and np.std(percentages[-window:]) < threshold:
-        #     break
+            if np.std(percentages[-window:]) * 100 < threshold and not is_threshold_exceeded:
+                is_threshold_exceeded = True
+                print(f'{by_metric}: %, std', total_percentage, np.std(percentages[-window:]), '<-')
+            else:
+                print(f'{by_metric}: %, std', total_percentage, np.std(percentages[-window:]))
+        else:
+            print(f'{by_metric}: %, std', total_percentage, -1)
     return selected_metrics

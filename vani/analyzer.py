@@ -186,24 +186,8 @@ class Analyzer(object):
             metrics_d = analysis.compute_metrics(ddf=logs_d[-1])
             delayed_tasks.extend(metrics_d)
             # Compute low level characteristics
-            low_level_char_d = analysis.compute_low_level_char(ddf=logs_d[-1], leveled_metrics=metrics_d)
-            delayed_tasks.append(low_level_char_d)
-
-            # Loop through metrics
-            all_filtered_metrics_d = []
-            # for metrics_depth in metrics_d:
-            #     sorted_metrics_d = dask.delayed(sort_metrics)(metrics_depth)
-                # delayed_tasks.append(sorted_metrics_d)
-
-                # filtered_metrics_d = dask.delayed(filter)(sorted_metrics_d)
-                #
-                # ll_characteristics = low_level_characteristics(ddf=logs_d[-1], ranges=filter_metrics_d,
-                #                                                fg_index=fg_index)
-                # delayed_tasks.append(filter_metrics_d)
-                # filter_metrics_list_d.append(ll_characteristics)
-
-            # delayed_tasks.append(
-            #     dask.delayed(lambda x: x)(filter_metrics_list_d, dask_key_name=f"filtered-metrics-{fg_index}"))
+            low_level_char_d = analysis.compute_low_level_char(ddf=logs_d[-1], leveled_metrics=metrics_d[-1])
+            delayed_tasks.extend(low_level_char_d)
 
             # Keep delayed tasks
             fg_delayed_tasks[fg_index] = delayed_tasks
@@ -215,31 +199,21 @@ class Analyzer(object):
 
         fg_futures = {}
         for fg_index in self.fg_indices:
-            with self.dask_mgr.clients[fg_index].as_current():
-                client = dask.distributed.get_client()
-                fg_futures[fg_index] = client.compute(fg_delayed_tasks[fg_index], sync=False)
-                # break
+            client = self.dask_mgr.get_client(cluster_key=fg_index)
+            fg_futures[fg_index] = client.compute(fg_delayed_tasks[fg_index], sync=False)
+
+        ensure_dir(f"{self.working_dir}/{analysis.id}/")
 
         for fg_index in self.fg_indices:
             start_time = perf_counter()
             for future in as_completed(fg_futures[fg_index]):
                 end_time = perf_counter() - start_time
                 print(f"{future.key} {future.status} {end_time / 60}")
-
-        ensure_dir(f"{self.working_dir}/{analysis.id}/")
-        for fg_index in self.fg_indices:
-            for future in fg_futures[fg_index]:
                 key_name = f"{future.key[0]}-{future.key[1]}" if isinstance(future.key, tuple) else future.key
-                # if key_name.startswith(f"metrics_{fg_index}_") or key_name.startswith(f"scores_{fg_index}_"):
-                if key_name.startswith("metrics-") or key_name.startswith("filtered-") or key_name.startswith("ll-all"):
-                    # key_name.startswith("scores-") or
-                    # key_name.startswith("sort-") or
-                    # key_name.startswith("list-") or \
-                    # key_name.startswith("filtered-"):
+                if key_name.startswith("metrics-") or key_name.startswith("llc-all"):
                     json_result = future.result()
                     with open(f"{self.working_dir}/{analysis.id}/{key_name}.json", "w+") as file:
-                        json.dump(json_result, file, cls=NpEncoder)
-                pass
+                        json.dump(json_result, file, cls=NpEncoder, sort_keys=True)
 
         return
 
