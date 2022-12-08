@@ -1,0 +1,1 @@
+[{"read": {"uniq_ranks": 0, "agg_dur": 0.0, "total_io_size": 0, "uniq_filenames": 0, "bw_sum": 0.0, "ops": 0}, "write": {"uniq_ranks": 0, "agg_dur": 0.0, "total_io_size": 0, "uniq_filenames": 0, "bw_sum": 0.0, "ops": 0}, "metadata": {"uniq_ranks": 1, "agg_dur": 0.3163586017108173, "uniq_filenames": 1, "ops": 1024.0}}]
