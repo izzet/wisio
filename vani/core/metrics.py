@@ -151,9 +151,9 @@ def flatten_delayed(x):
 
 
 @delayed
-def sort_delayed(metrics: list, by_metric: str):
+def sort_delayed(metrics: list, by_metric: str, reverse=True):
     # TODO make it parallel
-    return sorted(metrics, key=lambda x: x['all'][by_metric], reverse=True)
+    return sorted(metrics, key=lambda x: x['all'][by_metric], reverse=reverse)
 
 
 @delayed

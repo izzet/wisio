@@ -45,7 +45,7 @@ class Analysis(object):
             tasks_d = []
             for index, metrics in enumerate(leveled_metrics):
                 dask_key_suffix = f"{self.fg_index}-{by_metric}-{index}"
-                sorted_metrics_d = sort_delayed(metrics=metrics, by_metric=by_metric,
+                sorted_metrics_d = sort_delayed(metrics=metrics, by_metric=by_metric, reverse=by_metric is 'agg_dur',
                                                 dask_key_name=f"llc-sort-{dask_key_suffix}")
                 filtered_metrics_d = filter_asymptote_delayed(sorted_metrics=sorted_metrics_d, by_metric=by_metric,
                                                               dask_key_name=f"llc-filter-{dask_key_suffix}")
