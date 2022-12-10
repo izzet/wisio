@@ -1,3 +1,4 @@
+import copy
 import numpy as np
 import os
 from dask import delayed
@@ -38,6 +39,9 @@ def low_level_char_delayed(ddf: DataFrame, metric: Dict, agg: Dict):
     # Return metric back if dataframe is empty
     if ddf.empty:
         return metric
+
+    # Copy metric
+    metric = copy.deepcopy(metric)
 
     # Calculate aggregated values
     agg_values = ddf.groupby(['io_cat']).agg(agg)
