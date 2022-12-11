@@ -159,18 +159,18 @@ def sort_delayed(metrics: list, by_metric: str, reverse=True):
 
 @delayed
 def filter_asymptote_delayed(sorted_metrics: list, by_metric: str, threshold=0.2, window=5):
+    # Copy metrics
+    sorted_metrics = copy.deepcopy(sorted_metrics)
     # Calculate total
-    total = 0.0
+    total = 0
     for metric in sorted_metrics:
-        total = total + float(metric['all'][by_metric])
+        total = total + metric['all'][by_metric]
     percentages = []
     selected_metrics = []
     total_percentage = 0
     is_threshold_exceeded = False
     for metric in sorted_metrics:
-        # Copy metric
-        metric = copy.deepcopy(metric)
-        value = float(metric['all'][by_metric])
+        value = metric['all'][by_metric]
         # Ignore metrics that do not have any effect (hence 0)
         if value == 0:
             continue
@@ -186,9 +186,11 @@ def filter_asymptote_delayed(sorted_metrics: list, by_metric: str, threshold=0.2
             # Check threshold and ignore percentages that do not have any effect (hence 0)
             if 0 < window_med and 0 < window_std < threshold and not is_threshold_exceeded:
                 is_threshold_exceeded = True
-                print(f'{by_metric}: %t, %, std', total_percentage, percentage, window_std, '<-')
+                # print(f'{by_metric}: %t, %, std', total_percentage, percentage, window_std, '<-')
             else:
-                print(f'{by_metric}: %t, %, std', total_percentage, percentage, window_std)
+                pass
+                # print(f'{by_metric}: %t, %, std', total_percentage, percentage, window_std)
         else:
-            print(f'{by_metric}: %t, %, std', total_percentage, percentage, -1)
+            pass
+            # print(f'{by_metric}: %t, %, std', total_percentage, percentage, -1)
     return selected_metrics
