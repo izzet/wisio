@@ -51,6 +51,7 @@ class Analysis(object):
                                                               dask_key_name=f"llc-filter-{dask_key_suffix}")
                 low_level_char_d = self.compute_low_level_char_delayed(ddf=ddf, fg_index=self.fg_index,
                                                                        filtered_metrics=filtered_metrics_d,
+                                                                       by_metric=by_metric,
                                                                        dask_key_name=f"llc-char-{dask_key_suffix}")
                 tasks_d.append(low_level_char_d)
             all_tasks_d.append(delayed(lambda x: x)(tasks_d, dask_key_name=f"llc-all-{self.fg_index}-{by_metric}"))
@@ -58,11 +59,11 @@ class Analysis(object):
 
     @staticmethod
     @delayed
-    def compute_low_level_char_delayed(ddf: DataFrame, fg_index: str, filtered_metrics: list):
+    def compute_low_level_char_delayed(ddf: DataFrame, fg_index: str, filtered_metrics: list, by_metric: str):
         tasks_d = []
         for metric in filtered_metrics:
             start, stop = metric['start'], metric['stop']
-            dask_key_suffix = f"{fg_index}-{start}-{stop}"
+            dask_key_suffix = f"{fg_index}-{by_metric}-{start}-{stop}"
             target_ddf_d = Analysis.target_ddf_delayed(ddf=ddf, start=start, stop=stop,
                                                        dask_key_name=f"llc-target-ddf-{dask_key_suffix}")
             agg = {
