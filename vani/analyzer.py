@@ -1,142 +1,14 @@
-from itertools import chain
-
-import dask
-import dask.bag as db
-import dask.dataframe as dd
-import glob
 import json
-import numpy as np
-import os
-from anytree import PostOrderIter
-from dask.distributed import Client, as_completed, worker_client
+from dask.distributed import as_completed
 from time import perf_counter
 from vani.common.filter_groups import *
 from vani.common.interfaces import *
-from vani.common.nodes import AnalysisNode, BinNode, FilterGroupNode
 from vani.core.analysis import Analysis
 from vani.core.dask_mgmt import DEFAULT_N_WORKERS_PER_NODE, DaskManager
 from vani.utils.file_utils import ensure_dir
 from vani.utils.json_encoders import NpEncoder
-from vani.utils.logger import ElapsedTimeLogger, create_logger, format_log
+from vani.utils.logger import create_logger, format_log
 from vani.utils.visualization import save_graph
-
-PARTITION_FOLDER = "partitioned"
-
-
-@dask.delayed
-def low_level_characteristics_tmid(target_ddf: DataFrame, item):
-    if target_ddf.empty:
-        return item
-
-    def f(x):
-
-        d = {}
-        # FIXME change rank vs proc based on app or workflow
-        d['procs'] = x['rank'].unique()
-        d['files'] = x['filename'].unique()
-        d['funcs'] = x['func_id'].unique()
-        # TODO
-
-        # High-level filter without uniques to understand focus areas
-        # Low-level filter to explore details
-        # apply to aggregate (10x faster)
-
-        return pd.Series(d, index=['procs', 'files', 'funcs'])
-
-    aggregated_values = target_ddf.groupby('io_cat').apply(f)
-    # aggregated_values = ddf.groupby(['io_cat', 'proc_id']).apply(f)
-
-    del target_ddf
-
-    index_values = aggregated_values.index.unique()
-
-    if 1 in index_values:
-        item['read']['files'] = aggregated_values.loc[1]['files']
-        item['read']['funcs'] = aggregated_values.loc[1]['funcs']
-        item['read']['procs'] = aggregated_values.loc[1]['procs']
-    else:
-        item['read']['files'] = []
-        item['read']['funcs'] = []
-        item['read']['procs'] = []
-    if 2 in index_values:
-        item['write']['files'] = aggregated_values.loc[2]['files']
-        item['write']['funcs'] = aggregated_values.loc[2]['funcs']
-        item['write']['procs'] = aggregated_values.loc[2]['procs']
-    else:
-        item['write']['files'] = []
-        item['write']['funcs'] = []
-        item['write']['procs'] = []
-    if 3 in index_values:
-        item['metadata']['files'] = aggregated_values.loc[3]['files']
-        item['metadata']['funcs'] = aggregated_values.loc[3]['funcs']
-        item['metadata']['procs'] = aggregated_values.loc[3]['procs']
-    else:
-        item['metadata']['files'] = []
-        item['metadata']['funcs'] = []
-        item['metadata']['procs'] = []
-
-    all_files = np.union1d(np.union1d(item['read']['files'], item['write']['files']), item['metadata']['files'])
-    all_funcs = np.union1d(np.union1d(item['read']['funcs'], item['write']['funcs']), item['metadata']['funcs'])
-    all_procs = np.union1d(np.union1d(item['read']['procs'], item['write']['procs']), item['metadata']['procs'])
-
-    item['all']['files'] = all_files
-    item['all']['funcs'] = all_funcs
-    item['all']['procs'] = all_procs.astype(int)
-
-    item['all']['num_files'] = len(all_files)
-    item['all']['num_funcs'] = len(all_funcs)
-    item['all']['num_procs'] = len(all_procs)
-
-    item['file_per_process'] = len(all_files) / len(all_procs)
-    item['md_io_ratio'] = 0 if item['all']['agg_dur'] == 0 else item['metadata']['agg_dur'] / item['all']['agg_dur']
-
-    return item
-
-
-@dask.delayed
-def low_level_characteristics(ddf: DataFrame, ranges: list, fg_index):
-    delayed_tasks = []
-    for r in ranges:
-        start, stop = r['start'], r['stop']
-        args = [ddf, start, stop]
-        target_ddf_d = dask.delayed(lambda ddf, start, stop: ddf.loc[start:stop].reset_index())(*args,
-                                                                                                dask_key_name=f"ll-target-ddf-{fg_index}-{start}-{stop}")
-        low_level_characteristics_d = low_level_characteristics_tmid(target_ddf=target_ddf_d, item=r,
-                                                                     dask_key_name=f"ll-characteristics-{fg_index}-{start}-{stop}")
-        delayed_tasks.append(low_level_characteristics_d)
-    # client = dask.distributed.get_client()
-    # characteristics_future = client.compute(delayed_tasks)
-    # characteristics = client.gather(characteristics_future)
-    with worker_client() as client:
-        characteristics_future = client.compute(delayed_tasks)
-        characteristics = client.gather(characteristics_future)
-    # characteristics = dask.compute(delayed_tasks)
-    # print(characteristics)
-    return characteristics
-
-
-def sort_metrics(metrics: list):
-    # TODO make it parallel
-    sorted_metrics = sorted(metrics, key=lambda x: x['all']['agg_dur'], reverse=True)
-    return sorted_metrics
-
-
-def filter(sorted_metrics: list, threshold=90):
-    total_value = 0
-    for m in sorted_metrics:
-        total_value = total_value + m['all']['agg_dur']
-
-    selected_metrics = []
-    cur_per_sum = 0
-    for m in sorted_metrics:
-        per = m['all']['agg_dur'] * 100 / total_value
-        m['all']['per'] = per
-        cur_per_sum = cur_per_sum + per
-        print('cur_per_sum', cur_per_sum)
-        selected_metrics.append(m)
-        if cur_per_sum >= threshold:
-            break
-    return selected_metrics
 
 
 class Analyzer(object):
@@ -216,57 +88,6 @@ class Analyzer(object):
                         json.dump(json_result, file, cls=NpEncoder, sort_keys=True)
 
         return
-
-    def __partition_logs(self, log_dir: str, partition_size="4GB"):
-        # Remove existing files
-        existing_files = glob.glob(f"{log_dir}/{PARTITION_FOLDER}/*.parquet", recursive=True)
-        for existing_file in existing_files:
-            os.remove(existing_file)
-        if existing_files:
-            self.logger.debug(format_log("main", "Remaining for existing partitions removed"))
-        # Get raw files
-        files = glob.glob(f"{log_dir}/*.parquet", recursive=True)
-        total_size = 0
-        for file in files:
-            total_size = total_size + os.path.getsize(file)
-        self.logger.debug(format_log("main", f"Total file size: {total_size}"))
-        # Repartition files
-        with ElapsedTimeLogger(logger=self.logger, message="Logs read"):
-            ddf = dd.read_parquet(f"{log_dir}/*.parquet")
-        with ElapsedTimeLogger(logger=self.logger, message=f"Logs repartitioned into partitions of: {partition_size}"):
-            ddf = ddf.repartition(partition_size=partition_size)
-        partition_folder = f"{log_dir}/{PARTITION_FOLDER}/"
-        with ElapsedTimeLogger(logger=self.logger, message=f"Partitions written into: {partition_folder}"):
-            dd.to_parquet(ddf, partition_folder)
-        # Return partitioned files
-        partitioned_files = glob.glob(f"{log_dir}/{PARTITION_FOLDER}/*.parquet", recursive=True)
-        return partitioned_files
-
-    def generate_hypotheses(analysis: AnalysisNode):
-        # Get all filter groups
-        return analysis.generate_hypotheses()
-
-    def save_filter_group_node_as_flamegraph(self, filter_group_node: FilterGroupNode, output_path: str):
-        # Init lines
-        lines = []
-        # Loop nodes
-        for node in PostOrderIter(filter_group_node):
-            # When the root is reached
-            if node.parent == filter_group_node:
-                break  # Stop
-            # Read node bin
-            start, stop = node.bin
-            # Start building columns
-            columns = []
-            columns.append(repr(node))
-            for ancestor in reversed(node.ancestors):
-                if isinstance(ancestor, BinNode):
-                    columns.append(repr(ancestor))
-            # Build line
-            lines.append(f"{';'.join(reversed(columns))} {stop - start}")
-        # Write lines into output file
-        with open(output_path, 'w') as file:
-            file.write('\n'.join(lines))
 
     def shutdown(self):
         self.dask_mgr.shutdown()
