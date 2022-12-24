@@ -1,12 +1,14 @@
 import copy
 import numpy as np
-import os
 from dask import delayed
-from dask.dataframe import DataFrame
+# from dask.dataframe import DataFrame
+from os.path import normpath
+from pandas import DataFrame
 from typing import Dict
-
 from vani.common.constants import HDF5_CALLS, MPI_CALLS, POSIX_CALLS, MPI_COLL_CALLS
 
+ACC_PAT_RANDOM = 1
+ACC_PAT_SEQUENTIAL = 0
 IO_CAT_MAP = [('read', 1), ('write', 2), ('metadata', 3)]
 XFER_SIZE_BINS = [
     -np.inf,
@@ -43,9 +45,26 @@ def low_level_char_delayed(ddf: DataFrame, metric: Dict, agg: Dict):
     # Copy metric
     metric = copy.deepcopy(metric)
 
+    # Fix columns
+    ddf['filename'] = ddf['filename'].apply(lambda filename: normpath(filename))
+
     # Calculate aggregated values
-    agg_values = ddf.groupby(['io_cat']).agg(agg)
-    print(agg_values)
+    agg_values = ddf.groupby(['io_cat']).agg({**agg, **{'tstart': min, 'tend': max}})
+    # file_map = dict(tuple(ddf.groupby(['file_id']).agg({'filename': min}).to_records()))
+    file_accesses = ddf.groupby(['filename', 'func_id']).agg({
+        'tstart': min,
+        'tend': max,
+        'duration': sum,
+        'acc_pat': [min, max],
+        'index': ['count', min, max],
+        'rank': ['nunique', min, max],
+        'size': [min, max, 'last', sum],
+    })
+    file_accesses_sum = file_accesses.groupby(level=0).sum()
+    file_accesses['duration', 'per'] = file_accesses.div(file_accesses_sum, level=0)['duration', 'sum']
+    print('-' * 30)
+    # print(agg_values)
+    print(file_accesses)
 
     # Remove dataframe reference
     del ddf
@@ -65,13 +84,7 @@ def low_level_char_delayed(ddf: DataFrame, metric: Dict, agg: Dict):
             if io_cat in io_cats:
                 metric[io_cat_name][col_name] = agg_values.loc[io_cat][col]
                 if func == 'unique':
-                    values = metric[io_cat_name][col_name]
-                    if 'filename' in col_name:
-                        # 1- Filter empty paths
-                        # 2- Normalize paths
-                        # 3- Keep unique ones
-                        values = list(set(map(os.path.normpath, filter(None, values))))
-                    values = np.array(values)
+                    values = np.array(metric[io_cat_name][col_name])
                     if values.dtype == 'float':
                         values = values.astype(int)
                     metric[io_cat_name][col_name] = list(sorted(values))
@@ -116,7 +129,6 @@ def low_level_char_delayed(ddf: DataFrame, metric: Dict, agg: Dict):
     if 'unique_func_id' in metric['all']:
         # https://github.com/uiuc-hpc/Recorder/blob/caad9c8ec19a39a3cc7ce2a308afbeee8a8e91a4/lib/recorder-hdf5.c#L721
         metric['is_collective'] = any('_coll_' in f or f in MPI_COLL_CALLS for f in metric['all']['unique_func_id'])
-        metric['is_sequential'] = not any('seek' in f for f in metric['all']['unique_func_id'])
         for col, func_list in zip(['is_hdf5', 'is_mpi', 'is_posix'], [HDF5_CALLS, MPI_CALLS, POSIX_CALLS]):
             metric[col] = any(f in func_list for f in metric['all']['unique_func_id'])
 
@@ -127,6 +139,9 @@ def low_level_char_delayed(ddf: DataFrame, metric: Dict, agg: Dict):
     metric['is_read_only'] = metric['read']['agg_dur'] > 0 and metric['write']['agg_dur'] == 0
     metric['is_write_only'] = metric['write']['agg_dur'] > 0 and metric['read']['agg_dur'] == 0
     metric['is_md_only'] = metric['md_io_ratio'] == 1
+    metric['is_sequential'] = all((file_accesses['acc_pat', x].eq(ACC_PAT_SEQUENTIAL)).all() for x in ['min', 'max'])
+    metric['time_start'] = agg_values['tstart'].min()
+    metric['time_end'] = agg_values['tend'].max()
 
     return metric
 

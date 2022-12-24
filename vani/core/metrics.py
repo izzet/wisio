@@ -46,27 +46,27 @@ def filter_delayed(ddf: DataFrame, fg_index: str, start: int, stop: int):
 
         return pd.Series(d, index=['duration', 'size'])
 
-    aggregated_values = ddf.groupby(['io_cat']).apply(f)
+    agg_values = ddf.groupby(['io_cat']).apply(f)
 
     del ddf
 
-    io_cats = aggregated_values.index.unique()
+    io_cats = agg_values.index.unique()
 
     read_values = empty
     write_values = empty
     metadata_values = empty
 
     if 1 in io_cats:
-        read_agg_dur = aggregated_values.loc[1]['duration']
-        read_agg_size = aggregated_values.loc[1]['size']
+        read_agg_dur = agg_values.loc[1]['duration']
+        read_agg_size = agg_values.loc[1]['size']
         read_values = {
             'agg_bw': 0 if read_agg_dur == 0 else read_agg_size / read_agg_dur,
             'agg_dur': read_agg_dur,
             'agg_size': read_agg_size,
         }
     if 2 in io_cats:
-        write_agg_dur = aggregated_values.loc[2]['duration']
-        write_agg_size = aggregated_values.loc[2]['size']
+        write_agg_dur = agg_values.loc[2]['duration']
+        write_agg_size = agg_values.loc[2]['size']
         write_values = {
             'agg_bw': 0 if write_agg_dur == 0 else write_agg_size / write_agg_dur,
             'agg_dur': write_agg_dur,
@@ -74,7 +74,7 @@ def filter_delayed(ddf: DataFrame, fg_index: str, start: int, stop: int):
         }
     if 3 in io_cats:
         metadata_values = {
-            'agg_dur': aggregated_values.loc[3]['duration'],
+            'agg_dur': agg_values.loc[3]['duration'],
         }
 
     total_agg_dur = read_values['agg_dur'] + write_values['agg_dur'] + metadata_values['agg_dur']
@@ -159,8 +159,6 @@ def sort_delayed(metrics: list, by_metric: str, reverse=True):
 
 @delayed
 def filter_asymptote_delayed(sorted_metrics: list, by_metric: str, threshold=0.2, window=5):
-    # Copy metrics
-    sorted_metrics = copy.deepcopy(sorted_metrics)
     # Calculate total
     total = 0
     for metric in sorted_metrics:
@@ -170,6 +168,8 @@ def filter_asymptote_delayed(sorted_metrics: list, by_metric: str, threshold=0.2
     total_percentage = 0
     is_threshold_exceeded = False
     for metric in sorted_metrics:
+        # Copy metric
+        metric = copy.deepcopy(metric)
         value = metric['all'][by_metric]
         # Ignore metrics that do not have any effect (hence 0)
         if value == 0:
@@ -182,6 +182,7 @@ def filter_asymptote_delayed(sorted_metrics: list, by_metric: str, threshold=0.2
             selected_metrics.append(metric)
         if len(percentages) >= window:
             window_med = np.median(percentages[-window:])
+            # TODO fix std 
             window_std = np.std(percentages[-window:]) * 100
             # Check threshold and ignore percentages that do not have any effect (hence 0)
             if 0 < window_med and 0 < window_std < threshold and not is_threshold_exceeded:
