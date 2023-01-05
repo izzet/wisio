@@ -1,8 +1,13 @@
-TIME_PRECISION = 1e7
+from enum import Enum
 
-SECONDS_FORMAT = '{:.3f}'
-PERCENTAGE_FORMAT = '{:.1f}%'
-VALUE_FORMAT = '{:.5f}'
+
+class IOCat(Enum):
+    READ = 1
+    WRITE = 2
+    METADATA = 3
+
+
+TIME_PRECISION = 1e7
 
 # Copied from https://github.com/uiuc-hpc/Recorder/blob/pilgrim/include/recorder.h
 
