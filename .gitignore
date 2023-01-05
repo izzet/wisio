@@ -1,6 +1,7 @@
 __pycache__
 .digio
 .ipynb_checkpoints
+.recorder
 .vscode
 /vani-env*
 /vani-venv*

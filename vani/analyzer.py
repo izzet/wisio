@@ -16,6 +16,7 @@ class Analyzer(object):
     # noinspection PyTypeChecker
     def __init__(self, debug=False, cluster_settings: Dict[str, Any] = None, working_dir=".digio"):
         # Create logger
+        ensure_dir(working_dir)
         self.logger = create_logger(__name__, f"{working_dir}/analyzer.log")
         self.logger.info(format_log("main", "Initializing analyzer"))
         # Keep values
@@ -25,9 +26,6 @@ class Analyzer(object):
         self.n_workers_per_node = cluster_settings.get('cores', DEFAULT_N_WORKERS_PER_NODE)
         self.working_dir = working_dir
         # Boot Dask clusters & clients
-        client_urls = {}
-        with open(f"{working_dir}/clients.json") as file:
-            client_urls = json.load(file)
         self.dask_mgr = DaskManager(working_dir=working_dir, fg_indices=self.fg_indices, logger=self.logger,
                                     debug=debug)
         self.dask_mgr.boot(cluster_settings=cluster_settings, n_workers_per_node=self.n_workers_per_node)
