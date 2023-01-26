@@ -3,19 +3,23 @@ import numpy as np
 import pandas as pd
 from copy import copy
 from dask.distributed import Client
+from typing import List
 from ..utils.dask_agg import nunique
 from .constants import TIME_PRECISION, IOCat
 
 
 IO_CATS = [io_cat.value for io_cat in list(IOCat)]
+HLM_AGG = {
+    'acc_pat': [min, max],
+    'duration': [sum],
+    'index': ['count'],
+    'size': [min, max, sum],
+}
 LLC_AGG = {
     'acc_pat': [min, max],
     'duration': [sum],
-    'file_id': [nunique()],
     'index': ['count'],
-    'io_cat': [min, max],
-    'proc_id': [nunique()],
-    'size': [min, max, 'mean', sum],
+    'size': [min, max, sum],
 }
 XFER_SIZE_BINS = [
     -np.inf,
@@ -54,93 +58,109 @@ XFER_SIZE_BIN_NAMES = [
 ]
 
 
-def compute_hlm(
-    client: Client,
+def compute_higher_view(
+    # client: Client,
     log_dir: str,
     global_min_max: dict,
-    filter_group: str,
+    view_types: list
+):
+    # Add 'io_cat' anyway
+    groupby = view_types.copy()
+    groupby.append('io_cat')
+    # Set client as current
+    # with client.as_current():
+    # Prepare columns
+    columns = list(HLM_AGG.keys())
+    columns.extend(groupby)
+    # Read Parquet files
+    ddf = dd.read_parquet(f"{log_dir}/*.parquet", columns=get_parquet_columns(columns))
+    # Set trange
+    ddf = set_derived_ddf_fields(ddf=ddf, global_min_max=global_min_max)
+    # Fix types
+    ddf = fix_ddf_types(ddf=ddf)
+    # Compute hlm
+    higher_view = ddf \
+        .groupby(groupby) \
+        .agg(HLM_AGG) \
+        .reset_index() \
+        .persist()
+    # Return dataframe
+    return higher_view
+
+
+def compute_view(
+    # client: Client,
+    higher_view: pd.DataFrame,
+    view_type: str,
     metric='duration',
     delta=0.0001,
 ):
     # Set client as current
-    with client.as_current():
-        # Read Parquet files
-        ddf = dd.read_parquet(f"{log_dir}/*.parquet", columns=get_parquet_columns([filter_group, 'io_cat']))
-        # Set trange
-        ddf = set_derived_ddf_fields(ddf=ddf, global_min_max=global_min_max)
-        # Compute hlm
-        hlm_df = ddf \
-            .groupby([filter_group, 'io_cat']) \
-            .agg({metric: [sum]}) \
-            .compute() \
-            .sort_values((metric, 'sum'), ascending=False)
-        # Filter by delta
-        return filter_delta(df=hlm_df, delta=delta, metric=metric)
+    # with client.as_current():
+    # Sort for view
+    view = higher_view \
+        .groupby([view_type]) \
+        .sum() \
+        .sort_values((metric, 'sum'), ascending=False)
+    # Filter view by delta
+    return filter_delta(df=view, delta=delta, metric=metric)
 
 
-def compute_hlm_perm(
-    client: Client,
-    log_dir: str,
-    global_min_max: dict,
-    filter_perm: tuple,
-    hlm_df: pd.DataFrame,
+def compute_subview(
+    # client: Client,
+    higher_view: pd.DataFrame,
+    views: List[pd.DataFrame],
+    view_type: str,
+    subview_type: str,
     metric='duration',
     delta=0.0001,
 ):
     # Set client as current
-    with client.as_current():
-        # Read filter permutation
-        filter_group, perm_group = filter_perm
-        # Read Parquet files
-        ddf = dd.read_parquet(f"{log_dir}/*.parquet", columns=get_parquet_columns([filter_group, perm_group]))
-        # Set trange
-        ddf = set_derived_ddf_fields(ddf=ddf, global_min_max=global_min_max)
-        # Compute perm
-        perm_ddf = ddf[ddf[filter_group].isin(hlm_df.groupby(level=0).sum().index)] \
-            .groupby([perm_group]) \
-            .agg({metric: [sum]}) \
-            .compute() \
-            .sort_values((metric, 'sum'), ascending=False)
-        # Filter by delta
-        return filter_delta(df=perm_ddf, delta=delta, metric=metric)
+    # with client.as_current():
+    # Get view
+    view = views[view_type]
+    # Compute subview
+    subview = higher_view[higher_view[view_type].isin(list(set(view.index.compute())))] \
+        .groupby(subview_type) \
+        .sum() \
+        .sort_values((metric, 'sum'), ascending=False)
+    # Filter view by delta
+    return filter_delta(df=subview, delta=delta, metric=metric)
 
 
 def compute_llc(
-    client: Client,
-    log_dir: str,
-    global_min_max: dict,
-    filter_perm: tuple,
-    hlm_perm_df: pd.DataFrame,
-    stats_df: pd.DataFrame,
+    # client: Client,
+    higher_view: pd.DataFrame,
+    subviews: List[pd.DataFrame],
+    view_types: list,
+    view_type: str,
+    subview_type: str,
+    llc_type: str,
     metric='duration',
     delta=0.0001,
 ):
+    # Add 'io_cat' anyway
+    groupby = view_types.copy()
+    groupby.append('io_cat')
     # Set client as current
-    with client.as_current():
-        # Read filter permutation
-        filter_group, perm_group, final_group = filter_perm
-        # Read Parquet files
-        ddf = dd.read_parquet(f"{log_dir}/*.parquet", columns=get_parquet_columns(list(LLC_AGG.keys())))
-        # Set trange
-        ddf = set_derived_ddf_fields(ddf=ddf, global_min_max=global_min_max)
-        # Compute final perm
-        final_df = ddf[ddf[perm_group].isin(hlm_perm_df.index)] \
-            .groupby([final_group]) \
-            .agg({metric: [sum]}) \
-            .compute()
-        # Filter delta
-        final_ddf_filtered = filter_delta(df=final_df, delta=delta, metric=metric)
-        # Compute llc
-        llc_df = ddf[ddf[final_group].isin(final_ddf_filtered.index)] \
-            .groupby([filter_group, perm_group, final_group]) \
-            .agg(LLC_AGG) \
-            .compute() \
-            .dropna() \
-            .sort_values((metric, 'sum'), ascending=False)
-        # Format all
-        llc_df_formatted = format_df(df=llc_df, stats_df=stats_df)
-        # Filter formatted
-        return filter_delta(df=llc_df_formatted, delta=delta, metric=metric)
+    # with client.as_current():
+    # Get subview
+    subview = subviews[view_type, subview_type]
+    # Compute llcview
+    llc = higher_view[higher_view[subview_type].isin(list(set(subview.index.compute())))] \
+        .groupby(llc_type) \
+        .sum() \
+        .sort_values((metric, 'sum'), ascending=False)
+    # Filter llcview by delta
+    llc = filter_delta(df=llc, delta=delta, metric=metric)
+    # Compute groupview
+    llc = higher_view[higher_view[llc_type].isin(list(set(llc.index.compute())))].persist()
+    # Extend llcview
+    # for other_type in filter(lambda vt: vt != llc_type, view_types):
+    #     llc[other_type, 'nunique'] = groupview[other_type].nunique()
+    #     llc[other_type, 'unique'] = groupview[other_type].unique()
+    # Return extended llcview
+    return llc
 
 
 def compute_stats(
@@ -208,11 +228,16 @@ def compute_unique_processes(
 
 
 def filter_delta(df: pd.DataFrame, delta: float, metric='duration'):
-    df[metric, 'csp'] = df[metric, 'sum'].cumsum() / df[metric, 'sum'].sum()
-    df[metric, 'delta'] = df[metric, 'csp'].diff().fillna(df[metric, 'csp'])
-    df_filtered = df[df[metric, 'delta'] > delta]
-    df_filtered = df_filtered.reindex(sorted(df_filtered.columns), axis=1)
-    return df_filtered
+    df = df \
+        .map_partitions(lambda df: df.assign(csp=df[(metric, 'sum')].cumsum() / df[(metric, 'sum')].sum())) \
+        .map_partitions(lambda df: df.assign(delta=df['csp'].diff().fillna(df['csp'])))
+    return df[df['delta'] > delta]
+
+
+def fix_ddf_types(ddf: dd.DataFrame):
+    ddf['acc_pat'] = ddf['acc_pat'].astype('i1')
+    ddf['io_cat'] = ddf['io_cat'].astype('i1')
+    return ddf
 
 
 def format_df(df, stats_df: pd.DataFrame, add_xfer=True):

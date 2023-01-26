@@ -10,9 +10,11 @@ graphviz
 networkx
 numpy
 pandas
+panel
 portion
 #pyarrow
 pyyaml
+scikit-learn
 scipy
 seaborn
 tqdm

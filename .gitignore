@@ -1,11 +1,12 @@
-__pycache__
+*.out
 .digio
 .ipynb_checkpoints
 .recorder
 .vscode
+.wisio
 /vani-env*
 /vani-venv*
 /venv*
 /virenv*
+__pycache__
 dask-worker-space
-*.out
