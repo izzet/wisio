@@ -1,4 +1,4 @@
-from vani.recorder import RecorderAnalyzer
+from wisio.recorder import RecorderAnalyzer
 
 
 def run_recorder_analyzer():
