@@ -1,4 +1,4 @@
-from vani.recorder import RecorderAnalyzer
+from wisio.recorder import RecorderAnalyzer
 
 
 def run_recorder_analyzer():
@@ -13,7 +13,7 @@ def run_recorder_analyzer():
         cluster_manager_args=dict(
             force_local=True,
             cluster_settings=dict(
-                cores=8,
+                cores=4,
                 dashboard_port=3446,
                 local_directory="/var/tmp/dask-recorder",
                 log_file="%J.log",

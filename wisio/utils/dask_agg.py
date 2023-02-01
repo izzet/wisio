@@ -1,4 +1,5 @@
 import dask.dataframe as dd
+import itertools as it
 
 
 def nunique():
@@ -26,3 +27,11 @@ def nunique():
         return s.apply(lambda x: len(set(x)))
 
     return dd.Aggregation('nunique', chunk, agg, finalize)
+
+
+def unique():
+    return dd.Aggregation(
+        'unique',
+        lambda s: s.apply(set),
+        lambda s: s.apply(lambda chunks: list(set(it.chain.from_iterable(chunks))))
+    )

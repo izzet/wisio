@@ -1,5 +1,5 @@
-from vani.utils.file_utils import ensure_dir
-from vani.utils.logger import create_logger, format_log
+from .utils.file_utils import ensure_dir
+from .utils.logger import create_logger, format_log
 
 
 class Analyzer(object):
