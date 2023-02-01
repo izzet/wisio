@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from copy import copy
 from dask.distributed import Client
-from typing import List
+from typing import List, Tuple
 from ..utils.dask_agg import nunique
 from .constants import TIME_PRECISION, IOCat
 
@@ -89,72 +89,66 @@ def compute_higher_view(
 
 
 def compute_view(
-    # client: Client,
     higher_view: pd.DataFrame,
     view_type: str,
     metric='duration',
     delta=0.0001,
 ):
-    # Set client as current
-    # with client.as_current():
     # Sort for view
-    view = higher_view \
+    group_view = higher_view \
         .groupby([view_type]) \
         .sum() \
         .sort_values((metric, 'sum'), ascending=False)
     # Filter view by delta
-    return filter_delta(df=view, delta=delta, metric=metric)
+    group_view = filter_delta(df=group_view, delta=delta, metric=metric)
+    # Return view
+    return higher_view[higher_view[view_type].isin(list(set(group_view.index.compute())))]
 
 
 def compute_subview(
-    # client: Client,
-    higher_view: pd.DataFrame,
     views: List[pd.DataFrame],
-    view_type: str,
-    subview_type: str,
+    view_perm: Tuple[str, str],
     metric='duration',
     delta=0.0001,
 ):
-    # Set client as current
-    # with client.as_current():
+    # Read view permutation
+    view_type, subview_type = view_perm
     # Get view
     view = views[view_type]
     # Compute subview
-    subview = higher_view[higher_view[view_type].isin(list(set(view.index.compute())))] \
+    group_view = view \
         .groupby(subview_type) \
         .sum() \
         .sort_values((metric, 'sum'), ascending=False)
     # Filter view by delta
-    return filter_delta(df=subview, delta=delta, metric=metric)
+    group_view = filter_delta(df=group_view, delta=delta, metric=metric)
+    # Return view
+    return view[view[subview_type].isin(list(set(group_view.index.compute())))]
 
 
 def compute_llc(
-    # client: Client,
-    higher_view: pd.DataFrame,
     subviews: List[pd.DataFrame],
     view_types: list,
-    view_type: str,
-    subview_type: str,
-    llc_type: str,
+    view_perm: Tuple[str, str, str],
     metric='duration',
     delta=0.0001,
 ):
+    # Read view permutation
+    view_type, subview_type, llc_type = view_perm
     # Add 'io_cat' anyway
     groupby = view_types.copy()
     groupby.append('io_cat')
-    # Set client as current
-    # with client.as_current():
     # Get subview
     subview = subviews[view_type, subview_type]
     # Compute llcview
-    llc = higher_view[higher_view[subview_type].isin(list(set(subview.index.compute())))] \
+    group_view = subview \
         .groupby(llc_type) \
         .sum() \
         .sort_values((metric, 'sum'), ascending=False)
     # Filter llcview by delta
-    llc = filter_delta(df=llc, delta=delta, metric=metric)
+    group_view = filter_delta(df=group_view, delta=delta, metric=metric)
     # Compute groupview
-    llc = higher_view[higher_view[llc_type].isin(list(set(llc.index.compute())))].persist()
+    llc = subview[subview[llc_type].isin(list(set(group_view.index.compute())))].persist()
     # Extend llcview
     # for other_type in filter(lambda vt: vt != llc_type, view_types):
     #     llc[other_type, 'nunique'] = groupview[other_type].nunique()

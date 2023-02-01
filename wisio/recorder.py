@@ -1,3 +1,4 @@
+import dask.dataframe as dd
 import itertools as it
 import json
 import numpy as np
@@ -90,20 +91,22 @@ class RecorderAnalyzer(Analyzer):
             views[view_type] = view
         return views
 
-    def _compute_subviews(self, executor: ThreadPoolExecutor, higher_view: pd.DataFrame, views: List[pd.DataFrame]):
+    def _compute_subviews(
+        self,
+        executor: ThreadPoolExecutor,
+        higher_view: pd.DataFrame,
+        views: List[pd.DataFrame]
+    ):
         subviews = {}
-        for view_type, subview_type, subview in zip(
-            np.repeat(self.filter_groups, 3),
-            self.filter_groups * 3,
+        for view_perm, subview in zip(
+            it.permutations(self.filter_groups, N_PERMUTATIONS),
             executor.map(
                 compute_subview,
-                # np.repeat(self.cluster_manager.clients, 3),
-                it.repeat(higher_view),
                 it.repeat(views),
-                np.repeat(self.filter_groups, 3),
-                self.filter_groups * 3
+                it.permutations(self.filter_groups, N_PERMUTATIONS),
             )
         ):
+            view_type, subview_type = view_perm
             print('view', view_type, 'subview', subview_type, len(views[view_type]), len(subview))
             subviews[view_type, subview_type] = subview
         return subviews
@@ -116,21 +119,16 @@ class RecorderAnalyzer(Analyzer):
         subviews: List[pd.DataFrame]
     ):
         llcviews = {}
-        for view_type, subview_type, llc_type, llcview in zip(
-            np.repeat(self.filter_groups, 3 ** 2),
-            np.repeat(self.filter_groups, 3).tolist() * 3,
-            self.filter_groups * 3 ** 2,
+        for view_perm, llcview in zip(
+            it.permutations(self.filter_groups, N_PERMUTATIONS + 1),
             executor.map(
                 compute_llc,
-                # np.repeat(self.cluster_manager.clients, 3 ** 2),
-                it.repeat(higher_view),
                 it.repeat(subviews),
                 it.repeat(self.filter_groups),
-                np.repeat(self.filter_groups, 3 ** 2),
-                np.repeat(self.filter_groups, 3).tolist() * 3,
-                self.filter_groups * 3 ** 2,
+                it.permutations(self.filter_groups, N_PERMUTATIONS + 1),
             )
         ):
+            view_type, subview_type, llc_type = view_perm
             print('view', view_type, 'subview', subview_type, 'llc', llc_type, len(views[view_type]), len(subviews[view_type, subview_type]), len(llcview))
             llcviews[view_type, subview_type, llc_type] = llcview
         return llcviews
@@ -159,3 +157,8 @@ class RecorderAnalyzer(Analyzer):
         print('unique_processes', len(unique_processes))
         # Return results
         return unique_filenames, unique_processes
+
+    def _save_views(self, log_dir: str, views: Dict[Tuple, dd.DataFrame]):
+        for view_perm, view in views.items():
+            view.columns = ['_'.join(tup).rstrip('_') for tup in view.columns.values]
+            view.to_parquet(f"{log_dir}/stage1/{'_'.join(view_perm)}/")
