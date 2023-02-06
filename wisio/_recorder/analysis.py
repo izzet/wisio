@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from copy import copy
 from dask.distributed import Client
-from typing import List, Tuple
+from typing import List
 from ..utils.dask_agg import nunique
 from .constants import TIME_PRECISION, IOCat
 
@@ -58,8 +58,7 @@ XFER_SIZE_BIN_NAMES = [
 ]
 
 
-def compute_higher_view(
-    # client: Client,
+def compute_main_view(
     log_dir: str,
     global_min_max: dict,
     view_types: list
@@ -67,8 +66,6 @@ def compute_higher_view(
     # Add 'io_cat' anyway
     groupby = view_types.copy()
     groupby.append('io_cat')
-    # Set client as current
-    # with client.as_current():
     # Prepare columns
     columns = list(HLM_AGG.keys())
     columns.extend(groupby)
@@ -79,82 +76,36 @@ def compute_higher_view(
     # Fix types
     ddf = fix_ddf_types(ddf=ddf)
     # Compute hlm
-    higher_view = ddf \
+    main_view = ddf \
         .groupby(groupby) \
         .agg(HLM_AGG) \
         .reset_index() \
         .persist()
     # Return dataframe
-    return higher_view
+    return main_view
 
 
 def compute_view(
-    higher_view: pd.DataFrame,
-    view_type: str,
+    main_view: dd.DataFrame,
+    views: List[dd.DataFrame],
+    view_permutation: tuple,
     metric='duration',
     delta=0.0001,
 ):
-    # Sort for view
-    group_view = higher_view \
+    # Read types
+    parent_type = view_permutation[:-1]
+    view_type = view_permutation[-1]
+    # Get parent view
+    parent_view = views[parent_type] if parent_type in views else main_view
+    # Compute view
+    view = parent_view \
         .groupby([view_type]) \
         .sum() \
         .sort_values((metric, 'sum'), ascending=False)
-    # Filter view by delta
-    group_view = filter_delta(df=group_view, delta=delta, metric=metric)
-    # Return view
-    return higher_view[higher_view[view_type].isin(list(set(group_view.index.compute())))]
-
-
-def compute_subview(
-    views: List[pd.DataFrame],
-    view_perm: Tuple[str, str],
-    metric='duration',
-    delta=0.0001,
-):
-    # Read view permutation
-    view_type, subview_type = view_perm
-    # Get view
-    view = views[view_type]
-    # Compute subview
-    group_view = view \
-        .groupby(subview_type) \
-        .sum() \
-        .sort_values((metric, 'sum'), ascending=False)
-    # Filter view by delta
-    group_view = filter_delta(df=group_view, delta=delta, metric=metric)
-    # Return view
-    return view[view[subview_type].isin(list(set(group_view.index.compute())))]
-
-
-def compute_llc(
-    subviews: List[pd.DataFrame],
-    view_types: list,
-    view_perm: Tuple[str, str, str],
-    metric='duration',
-    delta=0.0001,
-):
-    # Read view permutation
-    view_type, subview_type, llc_type = view_perm
-    # Add 'io_cat' anyway
-    groupby = view_types.copy()
-    groupby.append('io_cat')
-    # Get subview
-    subview = subviews[view_type, subview_type]
-    # Compute llcview
-    group_view = subview \
-        .groupby(llc_type) \
-        .sum() \
-        .sort_values((metric, 'sum'), ascending=False)
-    # Filter llcview by delta
-    group_view = filter_delta(df=group_view, delta=delta, metric=metric)
-    # Compute groupview
-    llc = subview[subview[llc_type].isin(list(set(group_view.index.compute())))].persist()
-    # Extend llcview
-    # for other_type in filter(lambda vt: vt != llc_type, view_types):
-    #     llc[other_type, 'nunique'] = groupview[other_type].nunique()
-    #     llc[other_type, 'unique'] = groupview[other_type].unique()
-    # Return extended llcview
-    return llc
+    # Filter view
+    view = filter_delta(ddf=view, delta=delta, metric=metric)
+    # Return filtered records
+    return parent_view[parent_view[view_type].isin(list(set(view.index.compute())))]
 
 
 def compute_stats(
@@ -221,11 +172,11 @@ def compute_unique_processes(
         return processes_df.T.to_dict()
 
 
-def filter_delta(df: pd.DataFrame, delta: float, metric='duration'):
-    df = df \
+def filter_delta(ddf: dd.DataFrame, delta: float, metric='duration'):
+    ddf = ddf \
         .map_partitions(lambda df: df.assign(csp=df[(metric, 'sum')].cumsum() / df[(metric, 'sum')].sum())) \
         .map_partitions(lambda df: df.assign(delta=df['csp'].diff().fillna(df['csp'])))
-    return df[df['delta'] > delta]
+    return ddf[ddf['delta'] > delta]
 
 
 def fix_ddf_types(ddf: dd.DataFrame):
