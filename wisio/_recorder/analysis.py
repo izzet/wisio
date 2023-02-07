@@ -1,8 +1,10 @@
 import dask.dataframe as dd
+import itertools as it
 import numpy as np
 import pandas as pd
 from copy import copy
 from dask.distributed import Client
+from operator import mul
 from typing import List
 from ..utils.dask_agg import nunique
 from .constants import TIME_PRECISION, IOCat
@@ -21,6 +23,8 @@ LLC_AGG = {
     'index': ['count'],
     'size': [min, max, sum],
 }
+DELTA_BINS = 3
+DELTA_MUL = 100
 XFER_SIZE_BINS = [
     -np.inf,
     4 * 1024.0,
@@ -98,14 +102,20 @@ def compute_view(
     # Get parent view
     parent_view = views[parent_type] if parent_type in views else main_view
     # Compute view
-    view = parent_view \
+    group_view = parent_view \
         .groupby([view_type]) \
         .sum() \
         .sort_values((metric, 'sum'), ascending=False)
     # Filter view
-    view = filter_delta(ddf=view, delta=delta, metric=metric)
-    # Return filtered records
-    return parent_view[parent_view[view_type].isin(list(set(view.index.compute())))]
+    group_view = filter_delta(ddf=group_view, delta=delta, metric=metric)
+    # Find filtered records and set duration scores
+    view = parent_view[parent_view[view_type].isin(list(set(group_view.index.compute())))] \
+        .drop(columns=[(metric, 'score')], errors='ignore') \
+        .merge(group_view.reset_index()[[(view_type, ''), (metric, 'score')]], on=[(view_type, '')])
+    # Set metric percentages
+    view = set_metric_percentages(ddf=view, main_view=main_view, metric=metric)
+    # Return view
+    return view
 
 
 def compute_stats(
@@ -172,11 +182,18 @@ def compute_unique_processes(
         return processes_df.T.to_dict()
 
 
+def delta_bins(delta: float):
+    return list(map(mul, it.repeat(delta), map(pow, it.repeat(DELTA_MUL), range(DELTA_BINS))))
+
+
 def filter_delta(ddf: dd.DataFrame, delta: float, metric='duration'):
-    ddf = ddf \
-        .map_partitions(lambda df: df.assign(csp=df[(metric, 'sum')].cumsum() / df[(metric, 'sum')].sum())) \
-        .map_partitions(lambda df: df.assign(delta=df['csp'].diff().fillna(df['csp'])))
-    return ddf[ddf['delta'] > delta]
+    def set_delta(df: pd.DataFrame):
+        df[metric, 'csp'] = df[metric, 'sum'].cumsum() / df[metric, 'sum'].sum()
+        df[metric, 'delta'] = df[metric, 'csp'].diff().fillna(df[metric, 'csp'])
+        df[metric, 'score'] = np.digitize(df[metric, 'delta'], bins=delta_bins(delta=delta), right=True)
+        return df
+    ddf = ddf.map_partitions(set_delta)
+    return ddf[ddf[metric, 'delta'] > delta]
 
 
 def fix_ddf_types(ddf: dd.DataFrame):
@@ -217,6 +234,12 @@ def get_parquet_columns(columns: list):
 def set_derived_ddf_fields(ddf: dd.DataFrame, global_min_max: dict):
     tmid_min, tmid_max = global_min_max['tmid']
     trange = np.arange(tmid_min, tmid_max, TIME_PRECISION)
-    # ddf = ddf.map_partitions(lambda df: df.assign(trange=pd.cut(df['tmid'], trange, right=True)))
-    ddf = ddf.map_partitions(lambda df: df.assign(trange=np.digitize(df['tmid'], trange, right=True)))
-    return ddf
+    return ddf.map_partitions(lambda df: df.assign(trange=np.digitize(df['tmid'], trange, right=True)))
+
+
+def set_metric_percentages(ddf: dd.DataFrame, main_view: dd.DataFrame, metric: str):
+    def set_metric_percentage(df: pd.DataFrame):
+        df[metric, 'pero'] = df[metric, 'sum'] / main_view[metric, 'sum'].sum()
+        df[metric, 'perr'] = df[metric, 'sum'] / df[metric, 'sum'].sum()
+        return df
+    return ddf.map_partitions(set_metric_percentage)
