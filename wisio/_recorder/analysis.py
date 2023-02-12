@@ -80,7 +80,7 @@ def compute_main_view(
     # Fix types
     ddf = fix_ddf_types(ddf=ddf)
     # Compute hlm
-    main_view = ddf \
+    main_view = ddf[ddf['io_cat'].isin(IO_CATS)] \
         .groupby(groupby) \
         .agg(HLM_AGG) \
         .reset_index() \
