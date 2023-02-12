@@ -88,7 +88,7 @@ def compute_main_view(
 
 def compute_view(
     main_view: dd.DataFrame,
-    views: List[dd.DataFrame],
+    views: Dict[tuple, dd.DataFrame],
     view_permutation: tuple,
     metric='duration',
     delta=0.0001,
@@ -105,10 +105,14 @@ def compute_view(
         .sort_values((metric, 'sum'), ascending=False)
     # Filter view
     group_view = filter_delta(ddf=group_view, delta=delta, metric=metric)
+    # Prepare columns
+    metric_column, view_column = (metric, 'score'), (view_type, '')
+    # Get score view
+    score_view = group_view.reset_index()[[view_column, metric_column]]
     # Find filtered records and set duration scores
     view = parent_view[parent_view[view_type].isin(list(set(group_view.index.compute())))] \
-        .drop(columns=[(metric, 'score')], errors='ignore') \
-        .merge(group_view.reset_index()[[(view_type, ''), (metric, 'score')]], on=[(view_type, '')])
+        .drop(columns=[metric_column], errors='ignore') \
+        .merge(score_view, on=[view_column])
     # Set metric percentages
     view = set_metric_percentages(ddf=view, main_view=main_view, metric=metric)
     # Return view
