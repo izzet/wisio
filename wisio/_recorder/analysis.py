@@ -21,7 +21,24 @@ LLC_AGG = {
     'index': ['count'],
     'size': [min, max, sum],
 }
-DELTA_BINS = [0, 0.01, 0.1, 0.25, 0.5, 0.75, 1]
+DELTA_BINS = [
+    0,
+    0.01,
+    0.1,
+    0.25,
+    0.5,
+    0.75,
+    1
+]
+DELTA_BIN_LABELS = [
+    'none',
+    'very low',
+    'low',
+    'medium',
+    'high',
+    'very high',
+    'critical'
+]
 XFER_SIZE_BINS = [
     -np.inf,
     4 * 1024.0,
@@ -106,12 +123,12 @@ def compute_view(
     # Filter view
     group_view = filter_delta(ddf=group_view, delta=delta, metric=metric)
     # Prepare columns
-    metric_column, view_column = (metric, 'score'), (view_type, '')
+    view_column, metric_column, cut_column = (view_type, ''), (metric, 'score'), (metric, 'cut')
     # Get score view
-    score_view = group_view.reset_index()[[view_column, metric_column]]
+    score_view = group_view.reset_index()[[view_column, metric_column, cut_column]]
     # Find filtered records and set duration scores
     view = parent_view[parent_view[view_type].isin(list(set(group_view.index.compute())))] \
-        .drop(columns=[metric_column], errors='ignore') \
+        .drop(columns=[metric_column, cut_column], errors='ignore') \
         .merge(score_view, on=[view_column])
     # Set metric percentages
     view = set_metric_percentages(ddf=view, main_view=main_view, metric=metric)
@@ -148,39 +165,37 @@ def compute_stats(
 
 
 def compute_unique_filenames(
-    client: Client,
     log_dir: str,
     unique_file_ids: list,
 ):
-    # Set client as current
-    with client.as_current():
-        # Read Parquet files
-        ddf = dd.read_parquet(f"{log_dir}/*.parquet", columns=['file_id', 'filename'])
-        # Compute stats
-        filenames_df = ddf[ddf['file_id'].isin(unique_file_ids)] \
-            .groupby(['file_id']) \
-            .agg({'filename': min}) \
-            .compute()
-        # Return as dict
-        return filenames_df.T.to_dict()
+    # Read Parquet files
+    ddf = dd.read_parquet(f"{log_dir}/*.parquet", columns=['file_id', 'filename'])
+    # Compute unique filenames
+    unique_filenames = ddf \
+        .groupby(['file_id']) \
+        .agg({'filename': 'first'}) \
+        .compute()
+    # Return as dict
+    return unique_filenames.T.to_dict()
 
 
 def compute_unique_processes(
-    client: Client,
     log_dir: str,
     unique_proc_ids: list,
 ):
-    # Set client as current
-    with client.as_current():
-        # Read Parquet files
-        ddf = dd.read_parquet(f"{log_dir}/*.parquet", columns=['proc_id', 'app', 'hostname', 'rank'])
-        # Compute stats
-        processes_df = ddf[ddf['proc_id'].isin(unique_proc_ids)] \
-            .groupby(['proc_id']) \
-            .agg({'app': min, 'hostname': min, 'rank': min}) \
-            .compute()
-        # Return as dict
-        return processes_df.T.to_dict()
+    # Read Parquet files
+    ddf = dd.read_parquet(f"{log_dir}/*.parquet", columns=['proc_id', 'app', 'hostname', 'rank'])
+    # Compute unique processes
+    unique_processes = ddf \
+        .groupby(['proc_id']) \
+        .agg({
+            'app': 'first',
+            'hostname': 'first',
+            'rank': 'first'
+        }) \
+        .compute()
+    # Return as dict
+    return unique_processes.T.to_dict()
 
 
 def filter_delta(ddf: dd.DataFrame, delta: float, metric='duration'):
@@ -188,6 +203,7 @@ def filter_delta(ddf: dd.DataFrame, delta: float, metric='duration'):
         df[metric, 'csp'] = df[metric, 'sum'].cumsum() / df[metric, 'sum'].sum()
         df[metric, 'delta'] = df[metric, 'csp'].diff().fillna(df[metric, 'csp'])
         df[metric, 'score'] = np.digitize(df[metric, 'delta'], bins=DELTA_BINS, right=True)
+        df[metric, 'cut'] = np.choose(df[metric, 'score'] - 1, choices=DELTA_BINS, mode='clip')
         return df
     ddf = ddf.map_partitions(set_delta)
     return ddf[ddf[metric, 'delta'] > delta]

@@ -3,8 +3,10 @@ import itertools as it
 import json
 from typing import Dict, Tuple
 from ._recorder.analysis import compute_main_view, compute_unique_processes, compute_view
+from ._recorder.rules import RecorderRuleEngine
 from .base import Analyzer
 from .dask import ClusterManager
+from .rules import Rule
 
 VIEW_TYPES = ['trange', 'file_id', 'proc_id']
 
@@ -48,6 +50,7 @@ class RecorderAnalyzer(Analyzer):
                 delta=delta
             )
             print(view_permutation, len(views[view_permutation]))
+
         # Return views
         return views
 
