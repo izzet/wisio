@@ -1,0 +1,3 @@
+[submodule "external/Recorder"]
+	path = external/Recorder
+	url = git@github.com:uiuc-hpc/Recorder.git

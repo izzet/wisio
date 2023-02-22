@@ -3,6 +3,7 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/.idea/vani-analysis-tool.iml" filepath="$PROJECT_DIR$/.idea/vani-analysis-tool.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/wisio.iml" filepath="$PROJECT_DIR$/.idea/wisio.iml" />
     </modules>
   </component>
 </project>
