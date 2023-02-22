@@ -1,3 +1,4 @@
 [submodule "external/Recorder"]
 	path = external/Recorder
-	url = git@github.com:uiuc-hpc/Recorder.git
+	url = git@github.com:hariharan-devarajan/Recorder.git
+	branch = pilgrim
