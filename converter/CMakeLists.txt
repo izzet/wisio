@@ -21,6 +21,7 @@ target_link_libraries(converter
         arrow_shared
         parquet_shared
         -lstdc++fs
+        cpp-logger
         nlohmann_json::nlohmann_json
         )
 add_dependencies(converter reader)

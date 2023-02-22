@@ -1,0 +1,20 @@
+set(WISIO_FOUND TRUE)
+
+# Include directories
+set(WISIO_INCLUDE_DIRS "@WISIO_INSTALL_INCLUDE_DIR@")
+if (NOT IS_DIRECTORY "${WISIO_INCLUDE_DIRS}")
+    set(WISIO_FOUND FALSE)
+endif ()
+#message(STATUS "WISIO_INCLUDE_DIRS: " ${WISIO_INCLUDE_DIRS})
+get_filename_component(WISIO_ROOT_DIR ${WISIO_INCLUDE_DIRS}/.. ABSOLUTE)
+#message(STATUS "WISIO_ROOT_DIR: " ${WISIO_ROOT_DIR})
+set(WISIO_LIBRARY_PATH "@WISIO_INSTALL_LIB_DIR@")
+#message(STATUS "WISIO_LIBRARY_PATH: " ${WISIO_LIBRARY_PATH})
+set(WISIO_LIBRARIES "-L${WISIO_LIBRARY_PATH} -lwisio")
+set(WISIO_DEFINITIONS "")
+if (NOT TARGET wisio::wisio)
+    add_library(wisio::wisio ALIAS wisio)
+    include(FindPackageHandleStandardArgs)
+    find_package_handle_standard_args(wisio
+            REQUIRED_VARS WISIO_FOUND WISIO_INCLUDE_DIRS WISIO_LIBRARIES)
+endif ()
