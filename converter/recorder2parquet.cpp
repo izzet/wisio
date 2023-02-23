@@ -23,6 +23,7 @@
 #include <stdexcept>
 #include <string_view>
 #include <cpp-logger/logger.h>
+#include <regex>
 #define WISIO_LOGGER cpplogger::Logger::Instance("WISIO")
 #define WISIO_LOGINFO(format, ...) \
   WISIO_LOGGER->log(cpplogger::LOG_INFO, format, __VA_ARGS__);
@@ -33,7 +34,96 @@
 #define WISIO_LOGPRINT(format, ...) \
   WISIO_LOGGER->log(cpplogger::LOG_PRINT, format, __VA_ARGS__);
 namespace fs = std::experimental::filesystem;
+#include <signal.h>
+#include <execinfo.h>
+std::string getexepath() {
+    char result[PATH_MAX];
+    ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
+    return std::string(result, (count > 0) ? count : 0);
+}
 
+std::string sh(std::string cmd) {
+    std::array<char, 128> buffer;
+    std::string result;
+    std::shared_ptr<FILE> pipe(popen(cmd.c_str(), "r"), pclose);
+    if (!pipe) throw std::runtime_error("popen() failed!");
+    while (!feof(pipe.get())) {
+        if (fgets(buffer.data(), 128, pipe.get()) != nullptr) {
+            result += buffer.data();
+        }
+    }
+    return result;
+}
+
+
+void print_backtrace(void) {
+    void *bt[1024];
+    int bt_size;
+    char **bt_syms;
+    int i;
+
+    bt_size = backtrace(bt, 1024);
+    bt_syms = backtrace_symbols(bt, bt_size);
+    std::regex re("\\[(.+)\\]");
+    auto exec_path = getexepath();
+    std::string addrs = "";
+    for (i = 1; i < bt_size; i++) {
+        std::string sym = bt_syms[i];
+        std::smatch ms;
+        if (std::regex_search(sym, ms, re)) {
+            std::string m = ms[1];
+            addrs += " " + m;
+        }
+    }
+    auto r = sh("addr2line -e " + exec_path + " -f -C " + addrs);
+    std::cout << r << std::endl;
+    free(bt_syms);
+}
+
+void signal_handler(int sig){
+    switch(sig) {
+        case SIGHUP:{
+            WISIO_LOGPRINT("hangup signal caught",0);
+            break;
+        }
+        case SIGTERM:{
+            WISIO_LOGPRINT("terminate signal caught",0);
+            MPI_Finalize();
+            exit(0);
+            break;
+        }
+        default:{
+            WISIO_LOGERROR("Error: signal %d:\n", sig);
+            //print_backtrace(); 
+            /*void *array[20];
+            size_t size;
+            // get void*'s for all entries on the stack
+            size = backtrace(array, 20);
+            // print out all the frames to stderr
+            backtrace_symbols_fd(array, size, STDERR_FILENO);
+            */
+            void *trace[16];
+            char **messages = (char **)NULL;
+            int i, trace_size = 0;
+
+            void *array[20];
+            size_t size;
+            size = backtrace(array, 20);
+            messages = backtrace_symbols(array, size);
+            /* skip first stack frame (points here) */
+            printf("[bt] Execution path:\n");
+            for (i=1; i<size; ++i)
+            {
+                printf("[bt] #%d %s\n", i, messages[i]);
+                char syscom[256];
+                sprintf(syscom,"addr2line %p -e /g/g92/haridev/project/wisio/build/lib/libreader.so", array[i]); //last parameter is the name of this app
+                system(syscom);
+            } 
+            ::raise(SIGTERM);
+        }
+
+    }
+}
 
 std::vector<std::string> split(const std::string& s, char delimiter) {
    std::vector<std::string> tokens;
@@ -531,145 +621,142 @@ void handle_one_record(Record* record, void* arg) {
         int cat = recorder_get_func_type(&reader, record);
         const char* func_id = recorder_get_func_name(&reader, record);
         double duration = record->tend - record->tstart;
-        std::string file = std::string(get_filename(record));
-        fs::path file_path;
-        if (!file.empty()) {
-            file_path = fs::path(file);
-            if (!file_path.has_parent_path()) {
-                if (const char* env_working_dir = std::getenv("R2P_WORKING_DIR")) {
-                    fs::path working_dir = fs::path(env_working_dir);
-                    fs::path full_path = working_dir / file_path;
-                    file = full_path.string();
-                }
-            }
-        }
-        // std::cout << "file: " << file << std::endl;
-        std::string::difference_type n = std::count(file.begin(), file.end(), '/');
-        int64_t file_hash = 0;
-        if (!file.empty() && n > 2) {
-            fs::path filepath = fs::path(file);
-            auto filename = filepath.filename().string();
-            auto dir_0 = filepath.parent_path();
-            auto dir_0_name = dir_0.filename().string();
-            auto dir_1 = dir_0.parent_path();
-            auto dir_1_name = dir_1.filename().string();
-            auto dir_2 = dir_1.parent_path().string();
-            int64_t filename_hash = std::hash<std::string>()(filename) % std::numeric_limits<std::uint32_t>::max();
-            //std::bitset<64> x(filename_hash);
-            //std::cout << x << '\n';
-            int64_t dir_0_hash = (std::hash<std::string>()(dir_0_name) % std::numeric_limits<std::uint16_t>::max()) << 32;
-            //x = std::bitset<64> (dir_0_hash);
-            //std::cout << x << '\n';
-            int64_t dir_1_hash = (std::hash<std::string>()(dir_1_name) %std::numeric_limits<std::uint8_t>::max()) << 48;
-            //x= std::bitset<64> (dir_1_hash);
-            //std::cout << x << '\n';
-            int64_t dir_2_hash = (std::hash<std::string>()(dir_2) % std::numeric_limits<std::int8_t>::max()) << 56;
-            //x= std::bitset<64> (dir_2_hash);
-            //std::cout << x << '\n';
-            file_hash = file_hash | filename_hash | dir_0_hash | dir_1_hash | dir_2_hash;
-            //x= std::bitset<64> (hash);
-            //std::cout << x << '\n';
-        } else if (file.find("/dev/") == 0) {
-            file_hash = std::hash<std::string>()(file);
-        } else {
-            file_hash = std::hash<std::string>()(file);
-        }
-        trim_utf8(file);
-
-        int io_cat = get_io_category(record);
-        int64_t size = get_size(record);
-        int64_t count = get_count(record);
-        size = size * count;
-        double bandwidth = duration > 0 ? (size * 1.0 / duration / 1024.0 / 1024.0) : 0.0;
         uint64_t tmid = (record->tend + record->tstart) / 2.0 / reader.metadata.time_resolution;
         uint64_t tend = record->tend / reader.metadata.time_resolution;
-
         if (writer->max_tend < tend) writer->max_tend = tend;
-        if (writer->min_file_id > file_hash) writer->min_file_id = file_hash;
-        if (writer->max_file_id < file_hash) writer->max_file_id = file_hash;
-
+        std::string file = "UNKNOWN";
+        int64_t size = 0;
+        int64_t count = 1;
+        double bandwidth = 0.0;
         int64_t process_hash = 0;
-        int64_t thread_hash = (std::hash<int>()(record->tid) % std::numeric_limits<std::uint16_t>::max());
-        //std::bitset<64> x= std::bitset<64> (thread_hash);
-        //std::cout << x << '\n';
-        int64_t rank_hash = (std::hash<int>()(writer->rank) %std::numeric_limits<std::uint16_t>::max()) << 16;
-        //x= std::bitset<64> (rank_hash);
-        //std::cout << x << '\n';
-        int64_t proc_id_hash = (std::hash<int>()(writer->directory.proc_id) % std::numeric_limits<std::uint16_t>::max()) << 32;
-        //x = std::bitset<64> (proc_id_hash);
-       // std::cout << x << '\n';
-        int64_t hostname_hash = (std::hash<std::string>()(writer->directory.hostname) % std::numeric_limits<std::int16_t>::max()) << 48;
-        //x = std::bitset<64> (hostname_hash);
-        //std::cout << x << '\n';
-        process_hash = process_hash | thread_hash | rank_hash | proc_id_hash | hostname_hash;
-        //x= std::bitset<64> (process_hash);
-        //std::cout << x << '\n';
-    //    std::string process_name = std::string(writer->directory.hostname) + "-" +
-    //                                        std::to_string(writer->directory.proc_id) + "-" +
-    //                                        std::to_string(writer->rank) + "-" +
-    //                                        std::to_string(record->tid);
-
+        int io_cat = OTHER_FUNC;
         int access_pattern = 0;
-        if (writer->file_offsets.find(file_hash) == writer->file_offsets.end()) {
-            // writer->file_offsets.insert(file_hash, size);
-            writer->file_offsets[file_hash] = size;
-        } else {
-            const char* open_condition = strstr(func_id, "open");
-            const char* close_condition = strstr(func_id, "close");
-
-            const char* fopen_condition = strstr(func_id, "fopen");
-            const char* fclose_condition = strstr(func_id, "fclose");
-            const char* ftruncate_condition = strstr(func_id, "ftruncate");
-
-            const char* lseek_condition = strstr(func_id, "lseek");
-            const char* fseek_condition = strstr(func_id, "fseek");
-
-            int64_t current_offset = writer->file_offsets[file_hash];
-            if (std::string(func_id).rfind("H5", 0) == 0 || std::string(func_id).rfind("MPI", 0) == 0) {
-                // ignore if it is a H5 or MPI call
-            } else if (lseek_condition || fseek_condition) {
-                if (current_offset != size) {
-                    access_pattern = 1; // random
-                }
-                writer->file_offsets[file_hash] = size; // seek position
-            } else {
-                if (fopen_condition) {
-                    std::string open_mode = std::string(record->args[1]);
-                    if (open_mode.rfind("r", 0) == 0 || open_mode.rfind("w", 0) == 0) { // read or write
-                        current_offset = 0;
-                    } else {
-                        if (sizeof(record->args) > 1) {
-                            std::cout << "Unknown fopen_condition arg0: " << record->args[0] << " arg1: " << record->args[1] << std::endl;
-                        } else {
-                            std::cout << "Unknown fopen_condition arg0: " << record->args[0] << std::endl;
+        int64_t file_hash = 0;
+        if (cat == 0) {
+            file = std::string(get_filename(record));
+            {
+                fs::path file_path;
+                if (!file.empty() or file != "UNKNOWN") {
+                    file_path = fs::path(file);
+                    if (!file_path.has_parent_path()) {
+                        if (const char *env_working_dir = std::getenv("R2P_WORKING_DIR")) {
+                            fs::path working_dir = fs::path(env_working_dir);
+                            fs::path full_path = working_dir / file_path;
+                            file = full_path.string();
                         }
                     }
-                } else if (open_condition) {
-                    int open_flag = atol(record->args[1]); // get open flags
-                    // The file creation flags are O_CLOEXEC, O_CREAT, O_DIRECTORY, O_EXCL, O_NOCTTY, O_NOFOLLOW, O_TMPFILE, and O_TRUNC
-                    if (open_flag & O_CLOEXEC || open_flag & O_CREAT || open_flag & O_DIRECTORY || open_flag & O_EXCL ||
-                        open_flag & O_NOCTTY || open_flag & O_NOFOLLOW || open_flag & O_TMPFILE || open_flag & O_TRUNC) {
-                        // std::cout << "offset zeroed because: " << open_flag << std::endl;
-                        current_offset = 0;
-                    } else {
-                        // if (sizeof(record->args) > 1) {
-                        //     std::cout << "Unknown " << func_id << " arg0: " << record->args[0] << " arg1: " << record->args[1] << std::endl;
-                        // } else {
-                        //     std::cout << "Unknown " << func_id << " arg0: " << record->args[0] << std::endl;
-                        // }
-                    }
-                } else if (fclose_condition || close_condition || ftruncate_condition) {
-                    current_offset = 0;
                 }
-                writer->file_offsets[file_hash] = current_offset + size; // change offset
+                std::string::difference_type n = std::count(file.begin(), file.end(), '/');
+
+                if (!file.empty() && n > 2) {
+                    fs::path filepath = fs::path(file);
+                    auto filename = filepath.filename().string();
+                    auto dir_0 = filepath.parent_path();
+                    auto dir_0_name = dir_0.filename().string();
+                    auto dir_1 = dir_0.parent_path();
+                    auto dir_1_name = dir_1.filename().string();
+                    auto dir_2 = dir_1.parent_path().string();
+                    int64_t filename_hash =
+                            std::hash<std::string>()(filename) % std::numeric_limits<std::uint32_t>::max();
+                    //std::bitset<64> x(filename_hash);
+                    //std::cout << x << '\n';
+                    int64_t dir_0_hash =
+                            (std::hash<std::string>()(dir_0_name) % std::numeric_limits<std::uint16_t>::max()) << 32;
+                    //x = std::bitset<64> (dir_0_hash);
+                    //std::cout << x << '\n';
+                    int64_t dir_1_hash =
+                            (std::hash<std::string>()(dir_1_name) % std::numeric_limits<std::uint8_t>::max()) << 48;
+                    //x= std::bitset<64> (dir_1_hash);
+                    //std::cout << x << '\n';
+                    int64_t dir_2_hash =
+                            (std::hash<std::string>()(dir_2) % std::numeric_limits<std::int8_t>::max()) << 56;
+                    //x= std::bitset<64> (dir_2_hash);
+                    //std::cout << x << '\n';
+                    file_hash = file_hash | filename_hash | dir_0_hash | dir_1_hash | dir_2_hash;
+                    //x= std::bitset<64> (hash);
+                    //std::cout << x << '\n';
+                } else if (file.find("/dev/") == 0) {
+                    file_hash = std::hash<std::string>()(file);
+                } else {
+                    file_hash = std::hash<std::string>()(file);
+                }
+                //trim_utf8(file);
+                if (writer->min_file_id > file_hash) writer->min_file_id = file_hash;
+                if (writer->max_file_id < file_hash) writer->max_file_id = file_hash;
             }
+            io_cat = get_io_category(record);
+            size = get_size(record);
+            count = get_count(record);
+            size = size * count;
+            bandwidth = duration > 0 ? (size * 1.0 / duration / 1024.0 / 1024.0) : 0.0;
+
+            int64_t thread_hash = (std::hash<int>()(record->tid) % std::numeric_limits<std::uint16_t>::max());
+            int64_t rank_hash = (std::hash<int>()(writer->rank) %std::numeric_limits<std::uint16_t>::max()) << 16;
+            int64_t proc_id_hash = (std::hash<int>()(writer->directory.proc_id) % std::numeric_limits<std::uint16_t>::max()) << 32;
+            int64_t hostname_hash = (std::hash<std::string>()(writer->directory.hostname) % std::numeric_limits<std::int16_t>::max()) << 48;
+            process_hash = process_hash | thread_hash | rank_hash | proc_id_hash | hostname_hash;
+
+            if (writer->min_proc_id > process_hash) writer->min_proc_id = process_hash;
+            if (writer->max_proc_id < process_hash) writer->max_proc_id = process_hash;
+
+
+            if (writer->file_offsets.find(file_hash) == writer->file_offsets.end()) {
+                writer->file_offsets[file_hash] = size;
+            } else {
+                const char* open_condition = strstr(func_id, "open");
+                const char* close_condition = strstr(func_id, "close");
+
+                const char* fopen_condition = strstr(func_id, "fopen");
+                const char* fclose_condition = strstr(func_id, "fclose");
+                const char* ftruncate_condition = strstr(func_id, "ftruncate");
+
+                const char* lseek_condition = strstr(func_id, "lseek");
+                const char* fseek_condition = strstr(func_id, "fseek");
+
+                int64_t current_offset = writer->file_offsets[file_hash];
+                if (std::string(func_id).rfind("H5", 0) == 0 || std::string(func_id).rfind("MPI", 0) == 0) {
+                    // ignore if it is a H5 or MPI call
+                } else if (lseek_condition || fseek_condition) {
+                    if (current_offset != size) {
+                        access_pattern = 1; // random
+                    }
+                    writer->file_offsets[file_hash] = size; // seek position
+                } else {
+                    if (fopen_condition) {
+                        std::string open_mode = std::string(record->args[1]);
+                        if (open_mode.rfind("r", 0) == 0 || open_mode.rfind("w", 0) == 0) { // read or write
+                            current_offset = 0;
+                        } else {
+                            if (sizeof(record->args) > 1) {
+                                std::cout << "Unknown fopen_condition arg0: " << record->args[0] << " arg1: " << record->args[1] << std::endl;
+                            } else {
+                                std::cout << "Unknown fopen_condition arg0: " << record->args[0] << std::endl;
+                            }
+                        }
+                    } else if (open_condition) {
+                        int open_flag = atol(record->args[1]); // get open flags
+                        // The file creation flags are O_CLOEXEC, O_CREAT, O_DIRECTORY, O_EXCL, O_NOCTTY, O_NOFOLLOW, O_TMPFILE, and O_TRUNC
+                        if (open_flag & O_CLOEXEC || open_flag & O_CREAT || open_flag & O_DIRECTORY || open_flag & O_EXCL ||
+                            open_flag & O_NOCTTY || open_flag & O_NOFOLLOW || open_flag & O_TMPFILE || open_flag & O_TRUNC) {
+                            // std::cout << "offset zeroed because: " << open_flag << std::endl;
+                            current_offset = 0;
+                        } else {
+                            // if (sizeof(record->args) > 1) {
+                            //     std::cout << "Unknown " << func_id << " arg0: " << record->args[0] << " arg1: " << record->args[1] << std::endl;
+                            // } else {
+                            //     std::cout << "Unknown " << func_id << " arg0: " << record->args[0] << std::endl;
+                            // }
+                        }
+                    } else if (fclose_condition || close_condition || ftruncate_condition) {
+                        current_offset = 0;
+                    }
+                    writer->file_offsets[file_hash] = current_offset + size; // change offset
+                }
+            }
+
+            writer->sum_transfer_size += size;
+            writer->sum_bandwidth += bandwidth;
         }
-
-        if (writer->min_proc_id > process_hash) writer->min_proc_id = process_hash;
-        if (writer->max_proc_id < process_hash) writer->max_proc_id = process_hash;
-
-        writer->sum_transfer_size += size;
-        writer->sum_bandwidth += bandwidth;
         writer->record_count ++;
         writer->durationBuilder.Append(duration);
         writer->filenameBuilder.Append(file);
@@ -803,20 +890,59 @@ void handle_one_record(Record* record, void* arg) {
 int min(int a, int b) { return a < b ? a : b; }
 int max(int a, int b) { return a > b ? a : b; }
 
-void process_rank(char* parquet_file_dir, int rank, Directory dir,ParquetWriter* writer) {
+int process_rank(char* parquet_file_dir, int rank, Directory dir,ParquetWriter* writer) {
     CST cst;
     CFG cfg;
     writer->directory = dir;
     writer->rank = rank;
-    recorder_read_cst(&reader, rank, &cst);
+    int records = recorder_read_cst(&reader, rank, &cst);
+    if(records > 0){
     recorder_read_cfg(&reader, rank, &cfg);
     recorder_decode_records(&reader, &cst, &cfg, handle_one_record, writer);
     WISIO_LOGINFO("rank %d finished, unique call signatures: %d", rank, cst.entries);
     recorder_free_cst(&cst);
     recorder_free_cfg(&cfg);
+    return cst.entries;
+    }
+    return 0;
 }
+#include <chrono>
+class Timer {
+ public:
+  Timer() : elapsed_time(0) {}
+  void resumeTime() { t1 = std::chrono::high_resolution_clock::now(); }
+  double pauseTime() {
+    auto t2 = std::chrono::high_resolution_clock::now();
+    elapsed_time += std::chrono::duration<double>(t2 - t1).count();
+    return elapsed_time;
+  }
+  double getElapsedTime() { return elapsed_time; }
 
+ private:
+  std::chrono::high_resolution_clock::time_point t1;
+  double elapsed_time;
+};
 int main(int argc, char **argv) {
+
+    MPI_Init(&argc, &argv);
+    struct sigaction sa;
+    sa.sa_handler = signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+   
+    /*signal(SIGCHLD,signal_handler); 
+    signal(SIGTSTP,signal_handler);
+    signal(SIGTTOU,signal_handler);
+    signal(SIGTTIN,signal_handler);
+    signal(SIGSEGV,signal_handler);
+    signal(SIGABRT,signal_handler);
+    signal(SIGSEGV,signal_handler);
+    signal(SIGBUS,signal_handler);
+    signal(SIGHUP,signal_handler); 
+    signal(SIGTERM,signal_handler); 
+    */
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGUSR1, &sa, NULL);
     char* wisio_log_level = getenv("WISIO_LOG_LEVEL");
     if (wisio_log_level == nullptr) {
         WISIO_LOGGER->level = cpplogger::LoggerType::LOG_ERROR;
@@ -834,7 +960,6 @@ int main(int argc, char **argv) {
     sprintf(parquet_file_dir, "%s/_parquet", argv[1]);
     mkdir(parquet_file_dir, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
     int mpi_size, mpi_rank;
-    MPI_Init(&argc, &argv);
     MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
     MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
     auto ordered_map = std::map<Directory, std::string>();
@@ -874,38 +999,63 @@ int main(int argc, char **argv) {
     char parquet_filename_path[256];
     sprintf(parquet_filename_path, "%s/%d" , parquet_file_dir, mpi_rank);
     ParquetWriter writer(parquet_filename_path);
+    Timer step_timer;
     for (auto x : ordered_map){
+        /*if (completed < 12) {
+            completed++;
+            continue;
+        }*/ 
+        step_timer.resumeTime(); 
+        recorder_init_reader(x.second.c_str(), &reader);
+        int step_per_rank = 1;
+        int entries = 0;
+        if (reader.metadata.total_ranks > 1)
+             step_per_rank = mpi_size;
         if (reader.metadata.total_ranks == 1) {
             if (step >= start_step && step < end_step) {
                 WISIO_LOGINFO("Converting workflow step %d of %d of rank 0 in %s by rank %d", step+1, num_steps, x.first.directory.c_str(), mpi_rank);
                 recorder_init_reader(x.second.c_str(), &reader);
-                process_rank(parquet_file_dir, 0, x.first, &writer);
+                int entry = process_rank(parquet_file_dir, 0, x.first, &writer);
+                if (entry == 0) 
+                    WISIO_LOGERROR("Incomplete trace for rank %d in directory %s", 0, x.second.c_str()) 
+                entries += entry;
                 recorder_free_reader(&reader);
                 completed++;
             }
         } else {
-            recorder_init_reader(x.second.c_str(), &reader);
             // Each rank will process n files (n ranks traces)
             int n = max(reader.metadata.total_ranks/mpi_size, 1);
             int start_rank = n * mpi_rank;
             int end_rank   = min(reader.metadata.total_ranks, n*(mpi_rank+1));
             for(int rank = start_rank; rank < end_rank; rank++) {
                 WISIO_LOGINFO("Converting workflow step %d of %d of rank %d in %s by rank %d", step+1, num_steps, rank, x.first.directory.c_str(), mpi_rank);
-                process_rank(parquet_file_dir, rank, x.first, &writer);
+                int entry = process_rank(parquet_file_dir, rank, x.first, &writer);
+                if (entry == 0) 
+                    WISIO_LOGERROR("Incomplete trace for rank %d in directory %s", rank, x.second.c_str())        
+                entries += entry;
+                auto rank_index = rank - start_rank;
+                if(rank_index == n - 1) {
+                     WISIO_LOGINFO("Completed ranks %d of %d by rank %d", rank_index + 1, n, mpi_rank);
+                }
             }
             recorder_free_reader(&reader);
             completed++;
+            
         }
+        int total_entries;
+        MPI_Reduce(&entries, &total_entries, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+        MPI_Barrier(MPI_COMM_WORLD);
+        step_timer.pauseTime();
+        
+        if (mpi_rank == 0) 
+             WISIO_LOGPRINT("Processed step %d of %d with %d entries by %d ranks by %f secs", completed, num_steps, total_entries, step_per_rank, step_timer.getElapsedTime());
         step++;
-
-        if(prev != completed && completed % 1 == 0) {
-            WISIO_LOGINFO("[Recorder] Completed %d of %d by rank %d", completed, num_steps/mpi_size, mpi_rank);
-        }
         if (prev != completed) {
             prev = completed;
         }
     }
     
+    WISIO_LOGPRINT("Completed %d by rank %d", completed, mpi_rank);
     writer.finish();
 
     long long int global_proc_id_min, global_proc_id_max;
@@ -946,7 +1096,7 @@ int main(int argc, char **argv) {
         std::ofstream out(global_json);
         out << j;
         out.close();
-        WISIO_LOGPRINT("[Recorder] Written Global Json file by rank %d", mpi_rank);
+        WISIO_LOGPRINT("Written Global Json file by rank %d", mpi_rank);
     }
     
     MPI_Barrier(MPI_COMM_WORLD);
