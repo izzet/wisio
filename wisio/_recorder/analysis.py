@@ -2,9 +2,7 @@ import dask.dataframe as dd
 import numpy as np
 import pandas as pd
 from copy import copy
-from dask.distributed import Client
 from typing import Dict
-from ..utils.dask_agg import nunique
 from .constants import TIME_PRECISION, IOCat
 
 
@@ -137,38 +135,7 @@ def compute_view(
     return view.persist()
 
 
-def compute_stats(
-    client: Client,
-    log_dir: str,
-):
-    # Set client as current
-    with client.as_current():
-        # Read Parquet files
-        ddf = dd.read_parquet(f"{log_dir}/*.parquet")
-        # Compute stats
-        stats_df = ddf \
-            .groupby(['io_cat']) \
-            .agg({
-                'acc_pat': [min, max],
-                'app': [nunique()],
-                'duration': [sum],
-                'file_id': [nunique()],
-                'hostname': [nunique()],
-                'index': ['count'],
-                'proc_id': [nunique()],
-                'rank': [nunique()],
-                'size': [min, max, 'mean', sum],
-            }) \
-            .compute()
-        # Format stats
-        # stat_df = stat_df[stat_df.index.isin(IO_CATS)]
-        return format_df(df=stats_df, stats_df=stats_df)
-
-
-def compute_unique_filenames(
-    log_dir: str,
-    unique_file_ids: list,
-):
+def compute_unique_filenames(log_dir: str):
     # Read Parquet files
     ddf = dd.read_parquet(f"{log_dir}/*.parquet", columns=['file_id', 'filename'])
     # Compute unique filenames
@@ -180,10 +147,7 @@ def compute_unique_filenames(
     return unique_filenames.T.to_dict()
 
 
-def compute_unique_processes(
-    log_dir: str,
-    unique_proc_ids: list,
-):
+def compute_unique_processes(log_dir: str):
     # Read Parquet files
     ddf = dd.read_parquet(f"{log_dir}/*.parquet", columns=['proc_id', 'app', 'hostname', 'rank'])
     # Compute unique processes
