@@ -93,7 +93,6 @@ void signal_handler(int sig){
             break;
         }
         default:{
-            WISIO_LOGERROR("Error: signal %d:\n", sig);
             //print_backtrace(); 
             /*void *array[20];
             size_t size;
@@ -111,14 +110,43 @@ void signal_handler(int sig){
             size = backtrace(array, 20);
             messages = backtrace_symbols(array, size);
             /* skip first stack frame (points here) */
-            printf("[bt] Execution path:\n");
+            std::stringstream myString;
+            myString << "[bt] Execution path with signal "<<sig<< ":\n";
             for (i=1; i<size; ++i)
             {
-                printf("[bt] #%d %s\n", i, messages[i]);
-                char syscom[256];
-                sprintf(syscom,"addr2line %p -e /g/g92/haridev/project/wisio/build/lib/libreader.so", array[i]); //last parameter is the name of this app
-                system(syscom);
-            } 
+                //printf("%s\n", messages[i]);
+                std::string m_string(messages[i]);
+                //./prog(myfunc3+0x5c) [0x80487f0]
+                std::size_t open_paren = m_string.find_first_of("(");
+                if (open_paren == std::string::npos) {
+                    myString << "[bt] #"<< i <<" " << messages[i] << "\n";
+                    continue;
+                }
+                std::size_t plus = m_string.find_first_of("+");
+                std::size_t close_paren = m_string.find_first_of(")");
+                std::size_t open_square = m_string.find_first_of("[");
+                std::size_t close_square = m_string.find_first_of("]");
+                std::string prog_name = m_string.substr(0, open_paren);
+                std::string func_name = m_string.substr(open_paren + 1, plus - open_paren - 1);
+                std::string offset = m_string.substr(plus + 1, close_paren - plus -1);
+                std::string addr = m_string.substr(open_square + 1, close_square - open_square -1);
+                if (func_name.empty()) {
+                    myString << "[bt] #"<< i <<" " << messages[i] << "\n";
+                    continue;
+                }
+                char command[256];
+                sprintf(command,"nm %s | grep \"\\s%s$\" | awk '{print $1}'", prog_name.c_str(), func_name.c_str());
+                std::string base_addr=sh(command);
+                sprintf(command,"python2 -c \"print hex(0x%s+%s)\"", base_addr.c_str(), offset.c_str());
+                std::string hex_val=sh(command);
+                sprintf(command,"addr2line -e %s %s", prog_name.c_str(), hex_val.c_str());
+                std::string line=sh(command); // line has a new line char already
+                myString << "[bt] #"<< i <<" " << prog_name << "(" << func_name  << "+" << offset << ")" << line;
+            }
+            //std::string str = myString.str();
+            //WISIO_LOGERROR("%s\n", str.c_str());
+            std::string res = myString.str();
+            std::cout << res;
             ::raise(SIGTERM);
         }
 
@@ -929,20 +957,11 @@ int main(int argc, char **argv) {
     sa.sa_handler = signal_handler;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_RESTART;
-   
-    /*signal(SIGCHLD,signal_handler); 
-    signal(SIGTSTP,signal_handler);
-    signal(SIGTTOU,signal_handler);
-    signal(SIGTTIN,signal_handler);
-    signal(SIGSEGV,signal_handler);
-    signal(SIGABRT,signal_handler);
-    signal(SIGSEGV,signal_handler);
-    signal(SIGBUS,signal_handler);
-    signal(SIGHUP,signal_handler); 
-    signal(SIGTERM,signal_handler); 
-    */
     sigaction(SIGSEGV, &sa, NULL);
     sigaction(SIGUSR1, &sa, NULL);
+    sigaction(SIGABRT,&sa, NULL);
+    sigaction(SIGHUP, &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
     char* wisio_log_level = getenv("WISIO_LOG_LEVEL");
     if (wisio_log_level == nullptr) {
         WISIO_LOGGER->level = cpplogger::LoggerType::LOG_ERROR;
