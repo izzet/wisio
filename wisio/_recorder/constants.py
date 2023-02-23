@@ -1,7 +1,12 @@
 from enum import Enum
 
 
-class IOCat(Enum):
+class AccessPattern(Enum):
+    SEQUENTIAL = 0
+    RANDOM = 1
+
+
+class IOCategory(Enum):
     READ = 1
     WRITE = 2
     METADATA = 3

@@ -2,7 +2,7 @@ import dask.dataframe as dd
 import itertools as it
 import json
 from typing import Dict, Tuple
-from ._recorder.analysis import compute_main_view, compute_unique_processes, compute_view
+from ._recorder.analysis import compute_main_view, compute_max_io_time, compute_view
 from ._recorder.rules import RecorderRuleEngine
 from .base import Analyzer
 from .dask import ClusterManager
@@ -40,16 +40,20 @@ class RecorderAnalyzer(Analyzer):
             global_min_max=global_min_max,
             view_types=VIEW_TYPES
         )
+        # Compute `max_io_time`
+        max_io_time = compute_max_io_time(main_view=main_view)
         # Compute multifaceted views
         views = {}
         for view_permutation in it.chain.from_iterable(map(self._view_permutations, range(len(VIEW_TYPES)))):
             views[view_permutation] = compute_view(
                 main_view=main_view,
+                view_types=VIEW_TYPES,
                 views=views,
                 view_permutation=view_permutation,
+                max_io_time=max_io_time,
                 delta=delta
             )
-            print(view_permutation, len(views[view_permutation]))
+            # print(view_permutation, len(views[view_permutation]))
 
         # Return views
         return views

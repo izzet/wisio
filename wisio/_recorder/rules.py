@@ -6,6 +6,13 @@ from .analysis import DELTA_BIN_LABELS
 from ..rules import Rule, RuleEngine
 
 
+EXCESSIVE_IO_TIME_RULES = [
+    Rule.TIME_RANGE_EXCESSIVE_IO_TIME,
+    Rule.FILE_EXCESSIVE_IO_TIME,
+    Rule.PROCESS_EXCESSIVE_IO_TIME,
+]
+
+
 class RecorderRuleEngine(RuleEngine):
 
     def __init__(
@@ -23,31 +30,38 @@ class RecorderRuleEngine(RuleEngine):
         # Keep processed rules
         processed_views = {}
         # Run through views
-        for view_key, view in self.views.items():
+        for view_key, view_dict in self.views.items():
             # Processed rules
             processed_rules = []
-            # Prepare view
-            prepared_view = self._prepare_view(view)
             # Run through rules
             for rule in self.rules:
-                if rule in [Rule.TIME_RANGE_EXCESSIVE_IO_TIME, Rule.FILE_EXCESSIVE_IO_TIME, Rule.PROCESS_EXCESSIVE_IO_TIME]:
-                    processed_rules.append(self._process_excessive_io_time(rule=rule, view=prepared_view, cut=cut))
+                if rule in EXCESSIVE_IO_TIME_RULES:
+                    processed_rules.append(
+                        self._process_excessive_io_time(
+                            rule=rule,
+                            view_dict=view_dict,
+                            cut=cut
+                        )
+                    )
 
             processed_views[view_key] = dd.concat(processed_rules)
 
         return processed_views
 
-    def _process_excessive_io_time(self, rule: Rule, view: dd.DataFrame, cut: float):
+    def _process_excessive_io_time(self, rule: Rule, view_dict: Dict[str, dd.DataFrame], cut: float):
         # Set groupby
-        rule_column = 'trange'
+        rule_col = 'trange'
         if rule is Rule.FILE_EXCESSIVE_IO_TIME:
-            rule_column = 'file_id'
+            rule_col = 'file_id'
         elif rule is Rule.PROCESS_EXCESSIVE_IO_TIME:
-            rule_column = 'proc_id'
+            rule_col = 'proc_id'
 
-        # Compute top 10 durations
-        group_view = view[view['duration_cut'] >= cut] \
-            .groupby([rule_column]) \
+        # Get expanded view
+        expanded_view = view_dict['expanded_view']
+
+        # Compute group view
+        group_view = expanded_view[expanded_view['duration_cut'] >= cut] \
+            .groupby([rule_col]) \
             .agg({
                 'duration_pero': sum,
                 'duration_score': 'first',
@@ -66,7 +80,7 @@ class RecorderRuleEngine(RuleEngine):
                 'duration_pero': list,
                 'duration_score': list,
                 'duration_sum': list,
-                rule_column: list,
+                rule_col: list,
             })
 
         # Get originator
@@ -83,7 +97,8 @@ class RecorderRuleEngine(RuleEngine):
             total_duration_pero = np.sum(row['duration_pero']) * 100
             total_duration_sum = np.sum(row['duration_sum'])
 
-            values = row[rule_column]
+            values = row[rule_col]
+
             if len(values) == 1:
                 value = values[0]
                 return (
@@ -116,8 +131,3 @@ class RecorderRuleEngine(RuleEngine):
         rule_view = rule_view.drop(columns=['duration_pero', 'duration_score', 'duration_sum'])
 
         return rule_view
-
-    def _prepare_view(self, view: dd.DataFrame) -> dd.DataFrame:
-        copy_view = view.copy()
-        copy_view.columns = ['_'.join(tup).rstrip('_') for tup in copy_view.columns.values]
-        return copy_view

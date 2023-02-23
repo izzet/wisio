@@ -3,18 +3,10 @@ import numpy as np
 import pandas as pd
 from copy import copy
 from typing import Dict
-from .constants import TIME_PRECISION, IOCat
+from .constants import TIME_PRECISION, AccessPattern, IOCategory
 
 
-IO_CATS = [io_cat.value for io_cat in list(IOCat)]
 HLM_AGG = {
-    'acc_pat': [min, max],
-    'duration': [sum],
-    'index': ['count'],
-    'size': [min, max, sum],
-}
-LLC_AGG = {
-    'acc_pat': [min, max],
     'duration': [sum],
     'index': ['count'],
     'size': [min, max, sum],
@@ -79,32 +71,44 @@ def compute_main_view(
     global_min_max: dict,
     view_types: list
 ):
-    # Add 'io_cat' anyway
+    # Add `io_cat` and `acc_pat` anyway
     groupby = view_types.copy()
     groupby.append('io_cat')
+    groupby.append('acc_pat')
     # Prepare columns
     columns = list(HLM_AGG.keys())
     columns.extend(groupby)
     # Read Parquet files
-    ddf = dd.read_parquet(f"{log_dir}/*.parquet", columns=get_parquet_columns(columns))
-    # Set trange
-    ddf = set_derived_ddf_fields(ddf=ddf, global_min_max=global_min_max)
+    ddf = dd.read_parquet(f"{log_dir}/*.parquet", columns=_get_parquet_columns(columns))
+    # Set tranges
+    ddf = _set_tranges(ddf=ddf, global_min_max=global_min_max)
     # Fix types
-    ddf = fix_ddf_types(ddf=ddf)
-    # Compute hlm
-    main_view = ddf[ddf['io_cat'].isin(IO_CATS)] \
+    ddf = _fix_ddf_types(ddf=ddf)
+    # Compute high-level metrics
+    hlm_view = ddf[ddf['cat'] == 0] \
         .groupby(groupby) \
         .agg(HLM_AGG) \
+        .reset_index()
+    # Flatten column names
+    hlm_view = _flatten_column_names(ddf=hlm_view)
+    # Set derived columns
+    hlm_view = _set_derived_columns(ddf=hlm_view)
+    # Compute main_view
+    main_view = hlm_view \
+        .groupby(view_types) \
+        .sum() \
         .reset_index() \
         .persist()
-    # Return dataframe
+    # Return main_view
     return main_view
 
 
 def compute_view(
     main_view: dd.DataFrame,
+    view_types: list,
     views: Dict[tuple, dd.DataFrame],
     view_permutation: tuple,
+    max_io_time: dd.core.Scalar,
     metric='duration',
     delta=0.0001,
 ):
@@ -112,27 +116,71 @@ def compute_view(
     parent_type = view_permutation[:-1]
     view_type = view_permutation[-1]
     # Get parent view
-    parent_view = views[parent_type] if parent_type in views else main_view
-    # Compute view
-    group_view = parent_view \
-        .groupby([view_type]) \
-        .sum() \
-        .sort_values((metric, 'sum'), ascending=False)
+    parent_view = views[parent_type]['expanded_view'] if parent_type in views else main_view
+    # Create colum names
+    metric_col, score_col, cut_col = f"{metric}_sum", f"{metric}_score", f"{metric}_cut"
+    # Check view type
+    if view_type is not 'proc_id':
+        # Compute `proc_id` view first
+        proc_id_view = parent_view \
+            .groupby([view_type, 'proc_id']) \
+            .agg({metric_col: sum})
+        # Then compute group view
+        group_view = proc_id_view \
+            .groupby([view_type]) \
+            .max()
+    else:
+        # Compute group view
+        group_view = parent_view \
+            .groupby([view_type]) \
+            .agg({metric_col: sum}) \
+            .sort_values(metric_col, ascending=False)
     # Filter view
     group_view = filter_delta(ddf=group_view, delta=delta, metric=metric)
-    # Prepare columns
-    view_column, metric_column, cut_column = (view_type, ''), (metric, 'score'), (metric, 'cut')
     # Get score view
-    score_view = group_view.reset_index()[[view_column, metric_column, cut_column]]
+    score_view = group_view.reset_index()[[view_type, score_col, cut_col]]
     # Find filtered records and set duration scores
-    view = parent_view \
-        .query(f"`{view_column}`.isin(@indices)", local_dict={'indices': group_view.index.unique()}) \
-        .drop(columns=[metric_column, cut_column], errors='ignore') \
-        .merge(score_view, on=[view_column])
+    expanded_view = parent_view \
+        .query(f"{view_type}.isin(@indices)", local_dict={'indices': group_view.index.unique()}) \
+        .drop(columns=[score_col, cut_col], errors='ignore') \
+        .merge(score_view, on=[view_type])
     # Set metric percentages
-    view = set_metric_percentages(ddf=view, main_view=main_view, metric=metric)
-    # Return view
-    return view.persist()
+    expanded_view = _set_metric_percentages(ddf=expanded_view, max_io_time=max_io_time, metric=metric)
+    # Check view type
+    if view_type is not 'proc_id':
+        # Compute subview first
+        subview = expanded_view \
+            .groupby([view_type, 'proc_id']) \
+            .sum() \
+            .reset_index()
+        # Compute agg columns
+        agg_columns = {col: max if any(x in col for x in 'duration time'.split()) else sum for col in subview.columns}
+        # Compute grouped view
+        grouped_view = subview \
+            .groupby([view_type]) \
+            .agg(agg_columns)
+    else:
+        # Compute grouped view
+        grouped_view = expanded_view \
+            .groupby([view_type]) \
+            .sum()
+        # Compute subview
+        subview = grouped_view.reset_index()
+    # Persist grouped view
+    grouped_view = grouped_view \
+        .drop(columns=[*view_types, score_col, cut_col, 'io_cat', 'acc_pat'], errors='ignore') \
+        .merge(group_view[[score_col, cut_col]], left_index=True, right_index=True)
+    # Set metric percentages
+    grouped_view = _set_metric_percentages(ddf=grouped_view, max_io_time=max_io_time, metric=metric)
+    # Return views
+    return dict(
+        expanded_view=expanded_view.persist(),
+        grouped_view=grouped_view.persist()
+    )
+
+
+def compute_max_io_time(main_view: dd.DataFrame):
+    return main_view.groupby(['proc_id']).sum()['duration_sum'].max()
 
 
 def compute_unique_filenames(log_dir: str):
@@ -164,19 +212,32 @@ def compute_unique_processes(log_dir: str):
 
 
 def filter_delta(ddf: dd.DataFrame, delta: float, metric='duration'):
+    metric_col, csp_col, delta_col, score_col, cut_col = (
+        f"{metric}_sum",
+        f"{metric}_csp",
+        f"{metric}_delta",
+        f"{metric}_score",
+        f"{metric}_cut"
+    )
+
     def set_delta(df: pd.DataFrame):
-        df[metric, 'csp'] = df[metric, 'sum'].cumsum() / df[metric, 'sum'].sum()
-        df[metric, 'delta'] = df[metric, 'csp'].diff().fillna(df[metric, 'csp'])
-        df[metric, 'score'] = np.digitize(df[metric, 'delta'], bins=DELTA_BINS, right=True)
-        df[metric, 'cut'] = np.choose(df[metric, 'score'] - 1, choices=DELTA_BINS, mode='clip')
+        df[csp_col] = df[metric_col].cumsum() / df[metric_col].sum()
+        df[delta_col] = df[csp_col].diff().fillna(df[csp_col])
+        df[score_col] = np.digitize(df[delta_col], bins=DELTA_BINS, right=True)
+        df[cut_col] = np.choose(df[score_col] - 1, choices=DELTA_BINS, mode='clip')
         return df
     ddf = ddf.map_partitions(set_delta)
-    return ddf[ddf[metric, 'delta'] > delta]
+    return ddf[ddf[delta_col] > delta]
 
 
-def fix_ddf_types(ddf: dd.DataFrame):
+def _fix_ddf_types(ddf: dd.DataFrame):
     ddf['acc_pat'] = ddf['acc_pat'].astype('i1')
     ddf['io_cat'] = ddf['io_cat'].astype('i1')
+    return ddf
+
+
+def _flatten_column_names(ddf: dd.DataFrame):
+    ddf.columns = ['_'.join(tup).rstrip('_') for tup in ddf.columns.values]
     return ddf
 
 
@@ -203,21 +264,45 @@ def format_df(df, stats_df: pd.DataFrame, add_xfer=True):
     return df
 
 
-def get_parquet_columns(columns: list):
+def _get_parquet_columns(columns: list):
     columns = copy(columns)
-    columns.extend(['duration', 'tmid'])
+    columns.extend(['cat', 'duration', 'tmid'])
     return list(set(map(lambda x: x.replace('trange', 'tmid'), columns)))
 
 
-def set_derived_ddf_fields(ddf: dd.DataFrame, global_min_max: dict):
+def _set_derived_columns(ddf: dd.DataFrame):
+    # Derive `io_cat` columns
+    for col_suffix, col_value in zip(['time', 'size', 'count'], ['duration_sum', 'size_sum', 'index_count']):
+        for io_cat in list(IOCategory):
+            col_name = f"{io_cat.name.lower()}_{col_suffix}"
+            ddf[col_name] = 0
+            ddf[col_name] = ddf[col_name].mask(ddf['io_cat'] == io_cat.value, ddf[col_value])
+    # Derive `data` columns
+    ddf['data_count'] = ddf['write_count'] + ddf['read_count']
+    ddf['data_size'] = ddf['write_size'] + ddf['read_size']
+    ddf['data_time'] = ddf['write_time'] + ddf['read_time']
+    # Derive `acc_pat` columns
+    for col_suffix, col_value in zip(['time', 'size', 'count'], ['data_time', 'data_size', 'data_count']):
+        for acc_pat in list(AccessPattern):
+            col_name = f"{acc_pat.name.lower()}_{col_suffix}"
+            ddf[col_name] = 0
+            ddf[col_name] = ddf[col_name].mask(ddf['acc_pat'] == acc_pat.value, ddf[col_value])
+    # Return ddf
+    return ddf
+
+
+def _set_tranges(ddf: dd.DataFrame, global_min_max: dict):
     tmid_min, tmid_max = global_min_max['tmid']
     trange = np.arange(tmid_min, tmid_max, TIME_PRECISION)
     return ddf.map_partitions(lambda df: df.assign(trange=np.digitize(df['tmid'], trange, right=True)))
 
 
-def set_metric_percentages(ddf: dd.DataFrame, main_view: dd.DataFrame, metric: str):
-    def set_metric_percentage(df: pd.DataFrame):
-        df[metric, 'pero'] = df[metric, 'sum'] / main_view[metric, 'sum'].sum()
-        df[metric, 'perr'] = df[metric, 'sum'] / df[metric, 'sum'].sum()
-        return df
-    return ddf.map_partitions(set_metric_percentage)
+def _set_metric_percentages(ddf: dd.DataFrame, max_io_time: dd.core.Scalar, metric: str):
+    metric_col, pero_col, perr_col = (
+        f"{metric}_sum",
+        f"{metric}_pero",
+        f"{metric}_perr"
+    )
+    ddf[pero_col] = ddf[metric_col] / max_io_time
+    ddf[perr_col] = ddf[metric_col] / ddf[metric_col].sum()
+    return ddf
