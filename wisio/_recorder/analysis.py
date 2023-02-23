@@ -127,13 +127,14 @@ def compute_view(
     # Get score view
     score_view = group_view.reset_index()[[view_column, metric_column, cut_column]]
     # Find filtered records and set duration scores
-    view = parent_view[parent_view[view_type].isin(list(set(group_view.index.compute())))] \
+    view = parent_view \
+        .query(f"`{view_column}`.isin(@indices)", local_dict={'indices': group_view.index.unique()}) \
         .drop(columns=[metric_column, cut_column], errors='ignore') \
         .merge(score_view, on=[view_column])
     # Set metric percentages
     view = set_metric_percentages(ddf=view, main_view=main_view, metric=metric)
     # Return view
-    return view
+    return view.persist()
 
 
 def compute_stats(
