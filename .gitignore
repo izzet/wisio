@@ -10,3 +10,7 @@
 /virenv*
 __pycache__
 dask-worker-space
+build
+dependency/.spack-env
+dependency/spack.lock
+.idea
