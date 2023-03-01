@@ -4,12 +4,14 @@ import pandas as pd
 from copy import copy
 from typing import Dict
 from .constants import TIME_PRECISION, AccessPattern, IOCategory
+from ..utils.dask_agg import unique_flatten
 
 
 HLM_AGG = {
     'duration': [sum],
     'index': ['count'],
     'size': [min, max, sum],
+    'func_id': [unique_flatten()]
 }
 DELTA_BINS = [
     0,
@@ -93,12 +95,20 @@ def compute_main_view(
     hlm_view = _flatten_column_names(ddf=hlm_view)
     # Set derived columns
     hlm_view = _set_derived_columns(ddf=hlm_view)
+    # Compute agg columns
+    agg_columns = {col: sum for col in hlm_view.columns}
+    agg_columns['func_id_unique_flatten'] = unique_flatten()
+    for view_type in view_types:
+        agg_columns.pop(view_type)
     # Compute main_view
     main_view = hlm_view \
         .groupby(view_types) \
-        .sum() \
+        .agg(agg_columns) \
         .reset_index() \
         .persist()
+    print(main_view.columns)
+    main_view = main_view.rename(columns={'func_id_unique_flatten': 'func_id'})
+    print(main_view.columns)
     # Return main_view
     return main_view
 
@@ -119,64 +129,131 @@ def compute_view(
     parent_view = views[parent_type]['expanded_view'] if parent_type in views else main_view
     # Create colum names
     metric_col, score_col, cut_col = f"{metric}_sum", f"{metric}_score", f"{metric}_cut"
+    # Compute expanded view
+    expanded_view, filtered_view = _compute_expanded_view(
+        parent_view=parent_view,
+        view_type=view_type,
+        cols=(metric_col, score_col, cut_col),
+        metric=metric,
+        delta=delta,
+        max_io_time=max_io_time
+    )
+    # Compute grouped view
+    grouped_view = _compute_grouped_view(
+        expanded_view=expanded_view,
+        filtered_view=filtered_view,
+        view_types=view_types,
+        view_type=view_type,
+        cols=(metric_col, score_col, cut_col),
+        metric=metric,
+        max_io_time=max_io_time
+    )
+    # Return views
+    return dict(
+        expanded_view=expanded_view.persist(),
+        grouped_view=grouped_view.persist(),
+        cut_view=expanded_view[expanded_view['duration_cut'] >= 0.5]
+    )
+
+
+def _compute_grouped_view(
+    expanded_view: dd.DataFrame,
+    filtered_view: dd.DataFrame,
+    view_types: list,
+    view_type: str,
+    cols: tuple,
+    metric: str,
+    max_io_time: dd.core.Scalar
+):
+    print('_compute_grouped_view', view_type)
+    # Get column names
+    _, score_col, cut_col = cols
+    # Check view type
+    if view_type is not 'proc_id':
+        # Compute agg columns
+        agg_columns = {col: sum for col in expanded_view.columns}
+        agg_columns['func_id'] = unique_flatten()
+        for vt in [view_type, 'proc_id']:
+            agg_columns.pop(vt)
+        print(view_type, agg_columns)
+        # Compute subview first
+        subview = expanded_view \
+            .groupby([view_type, 'proc_id']) \
+            .agg(agg_columns) \
+            .reset_index()
+        # Compute agg columns
+        agg_columns = {col: max if any(x in col for x in 'duration time'.split()) else sum for col in subview.columns}
+        agg_columns['func_id'] = unique_flatten()
+        agg_columns.pop(view_type)
+        print(view_type, agg_columns)
+        # Compute grouped view
+        grouped_view = subview \
+            .groupby([view_type]) \
+            .agg(agg_columns)
+    else:
+        # Compute agg columns
+        agg_columns = {col: sum for col in expanded_view.columns}
+        agg_columns['func_id'] = unique_flatten()
+        agg_columns.pop(view_type)
+        print(view_type, agg_columns)
+        # Compute grouped view
+        grouped_view = expanded_view \
+            .groupby([view_type]) \
+            .agg(agg_columns)
+        # Compute subview
+        subview = grouped_view.reset_index()
+    # Persist grouped view
+    grouped_view = grouped_view \
+        .drop(columns=[*view_types, score_col, cut_col, 'io_cat', 'acc_pat'], errors='ignore') \
+        .merge(filtered_view[[score_col, cut_col]], left_index=True, right_index=True)
+    # Set metric percentages
+    grouped_view = _set_metric_percentages(ddf=grouped_view, max_io_time=max_io_time, metric=metric)
+    # Return grouped view
+    return grouped_view
+
+
+def _compute_expanded_view(
+    parent_view: dd.DataFrame,
+    view_type: str,
+    cols: tuple,
+    metric: str,
+    delta: float,
+    max_io_time: dd.core.Scalar
+):
+    print('_compute_expanded_view')
+    # Get column names
+    metric_col, score_col, cut_col = cols
     # Check view type
     if view_type is not 'proc_id':
         # Compute `proc_id` view first
-        proc_id_view = parent_view \
+        group_view = parent_view \
             .groupby([view_type, 'proc_id']) \
-            .agg({metric_col: sum})
-        # Then compute group view
-        group_view = proc_id_view \
+            .agg({metric_col: sum}) \
             .groupby([view_type]) \
             .max()
     else:
         # Compute group view
         group_view = parent_view \
             .groupby([view_type]) \
-            .agg({metric_col: sum}) \
-            .sort_values(metric_col, ascending=False)
+            .agg({metric_col: sum})
     # Filter view
-    group_view = filter_delta(ddf=group_view, delta=delta, metric=metric)
+    filtered_view = filter_delta(
+        ddf=group_view,
+        delta=delta,
+        metric=metric,
+        max_io_time=max_io_time
+    )
     # Get score view
-    score_view = group_view.reset_index()[[view_type, score_col, cut_col]]
+    score_view = filtered_view.reset_index()[[view_type, score_col, cut_col]]
     # Find filtered records and set duration scores
     expanded_view = parent_view \
-        .query(f"{view_type}.isin(@indices)", local_dict={'indices': group_view.index.unique()}) \
+        .query(f"{view_type}.isin(@indices)", local_dict={'indices': filtered_view.index.unique()}) \
         .drop(columns=[score_col, cut_col], errors='ignore') \
         .merge(score_view, on=[view_type])
     # Set metric percentages
     expanded_view = _set_metric_percentages(ddf=expanded_view, max_io_time=max_io_time, metric=metric)
-    # Check view type
-    if view_type is not 'proc_id':
-        # Compute subview first
-        subview = expanded_view \
-            .groupby([view_type, 'proc_id']) \
-            .sum() \
-            .reset_index()
-        # Compute agg columns
-        agg_columns = {col: max if any(x in col for x in 'duration time'.split()) else sum for col in subview.columns}
-        # Compute grouped view
-        grouped_view = subview \
-            .groupby([view_type]) \
-            .agg(agg_columns)
-    else:
-        # Compute grouped view
-        grouped_view = expanded_view \
-            .groupby([view_type]) \
-            .sum()
-        # Compute subview
-        subview = grouped_view.reset_index()
-    # Persist grouped view
-    grouped_view = grouped_view \
-        .drop(columns=[*view_types, score_col, cut_col, 'io_cat', 'acc_pat'], errors='ignore') \
-        .merge(group_view[[score_col, cut_col]], left_index=True, right_index=True)
-    # Set metric percentages
-    grouped_view = _set_metric_percentages(ddf=grouped_view, max_io_time=max_io_time, metric=metric)
-    # Return views
-    return dict(
-        expanded_view=expanded_view.persist(),
-        grouped_view=grouped_view.persist()
-    )
+    # Return expanded view
+    return expanded_view, filtered_view
 
 
 def compute_max_io_time(main_view: dd.DataFrame):
@@ -211,7 +288,7 @@ def compute_unique_processes(log_dir: str):
     return unique_processes.T.to_dict()
 
 
-def filter_delta(ddf: dd.DataFrame, delta: float, metric='duration'):
+def filter_delta(ddf: dd.DataFrame, delta: float, metric: str, max_io_time: dd.core.Scalar):
     metric_col, csp_col, delta_col, score_col, cut_col = (
         f"{metric}_sum",
         f"{metric}_csp",
@@ -221,7 +298,7 @@ def filter_delta(ddf: dd.DataFrame, delta: float, metric='duration'):
     )
 
     def set_delta(df: pd.DataFrame):
-        df[csp_col] = df[metric_col].cumsum() / df[metric_col].sum()
+        df[csp_col] = df[metric_col].cumsum() / max_io_time
         df[delta_col] = df[csp_col].diff().fillna(df[csp_col])
         df[score_col] = np.digitize(df[delta_col], bins=DELTA_BINS, right=True)
         df[cut_col] = np.choose(df[score_col] - 1, choices=DELTA_BINS, mode='clip')
@@ -266,7 +343,7 @@ def format_df(df, stats_df: pd.DataFrame, add_xfer=True):
 
 def _get_parquet_columns(columns: list):
     columns = copy(columns)
-    columns.extend(['cat', 'duration', 'tmid'])
+    columns.extend(['cat', 'duration', 'tmid', 'func_id'])
     return list(set(map(lambda x: x.replace('trange', 'tmid'), columns)))
 
 

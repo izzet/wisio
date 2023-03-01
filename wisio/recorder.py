@@ -56,7 +56,7 @@ class RecorderAnalyzer(Analyzer):
             # print(view_permutation, len(views[view_permutation]))
 
         # Return views
-        return views
+        return views, max_io_time
 
     def load_global_min_max(self, log_dir: str) -> dict:
         with open(f"{log_dir}/global.json") as file:
