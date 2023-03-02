@@ -2,8 +2,14 @@ import dask.dataframe as dd
 import itertools as it
 import json
 from typing import Dict, Tuple
-from ._recorder.analysis import compute_main_view, compute_max_io_time, compute_view
-from ._recorder.rules import RecorderRuleEngine
+from ._recorder.analysis import (
+    compute_main_view,
+    compute_max_io_time,
+    compute_unique_file_names,
+    compute_unique_proc_names,
+    compute_view
+)
+from ._recorder.bottlenecks import RecorderBottleneckDetector
 from .base import Analyzer
 from .dask import ClusterManager
 from .rules import Rule
@@ -31,7 +37,7 @@ class RecorderAnalyzer(Analyzer):
         # Boot cluster
         self.cluster_manager.boot()
 
-    def analyze_parquet(self, log_dir: str, delta=0.0001):
+    def analyze_parquet(self, log_dir: str, delta=0.0001, cut=0.5):
         # Load global min max
         global_min_max = self.load_global_min_max(log_dir=log_dir)
         # Compute main view
@@ -42,21 +48,36 @@ class RecorderAnalyzer(Analyzer):
         )
         # Compute `max_io_time`
         max_io_time = compute_max_io_time(main_view=main_view)
+        # Compute filenames & procnames
+        unique_file_names = compute_unique_file_names(log_dir=log_dir)
+        unique_proc_names = compute_unique_proc_names(log_dir=log_dir)
         # Compute multifaceted views
         views = {}
         for view_permutation in it.chain.from_iterable(map(self._view_permutations, range(len(VIEW_TYPES)))):
+            # Compute view
             views[view_permutation] = compute_view(
                 main_view=main_view,
-                view_types=VIEW_TYPES,
                 views=views,
                 view_permutation=view_permutation,
                 max_io_time=max_io_time,
-                delta=delta
+                delta=delta,
+                cut=cut
             )
             # print(view_permutation, len(views[view_permutation]))
 
+        # Detect bottlenecks
+        bottleneck_detector = RecorderBottleneckDetector(
+            log_dir=log_dir,
+            views=views,
+            view_types=['trange', 'file_id', 'proc_id'],
+            unique_file_names=unique_file_names,
+            unique_proc_names=unique_proc_names
+        )
+
+        bottlenecks = bottleneck_detector.detect_bottlenecks(max_io_time=max_io_time)
+
         # Return views
-        return views, max_io_time
+        return views, bottlenecks
 
     def load_global_min_max(self, log_dir: str) -> dict:
         with open(f"{log_dir}/global.json") as file:

@@ -3,7 +3,7 @@ import pandas as pd
 from typing import Dict
 
 
-class BottleneckGenerator(object):
+class BottleneckDetector(object):
 
     def __init__(
         self,
@@ -15,5 +15,5 @@ class BottleneckGenerator(object):
         self.views = views
         self.view_types = view_types
 
-    def generate_bottlenecks(self, max_io_time: dd.core.Scalar, cut=0.5) -> Dict[tuple, pd.DataFrame]:
+    def detect_bottlenecks(self, max_io_time: dd.core.Scalar, cut=0.5) -> Dict[tuple, pd.DataFrame]:
         raise NotImplementedError

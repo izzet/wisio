@@ -12,6 +12,8 @@ class IOCategory(Enum):
     METADATA = 3
 
 
+CAT_IO = 0
+
 TIME_PRECISION = 1e7
 
 # Copied from https://github.com/uiuc-hpc/Recorder/blob/pilgrim/include/recorder.h

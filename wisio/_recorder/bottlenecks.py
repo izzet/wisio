@@ -5,7 +5,7 @@ from dask.distributed import as_completed, futures_of, wait
 from itertools import permutations
 from pathlib import PurePath
 from typing import Dict
-from ..bottlenecks import BottleneckGenerator
+from ..bottlenecks import BottleneckDetector
 from ..utils.collection_utils import deepflatten
 from ..utils.dask_agg import unique_flatten
 
@@ -15,51 +15,46 @@ BOTTLENECK_ORDER = dict(
     proc_id=('proc_id', 'trange', 'file_id'),
     trange=('trange', 'proc_id', 'file_id')
 )
+BOTTLENECK_TREE_NAME = dict(
+    file_id='file_name',
+    proc_id='proc_name',
+    trange='trange'
+)
 
 
-class RecorderBottleneckGenerator(BottleneckGenerator):
+class RecorderBottleneckDetector(BottleneckDetector):
 
     def __init__(
         self,
         log_dir: str,
         views: Dict[tuple, dd.DataFrame],
         view_types: list,
-        unique_filenames: Dict[int, dict],
-        unique_processes: Dict[int, dict],
+        unique_file_names: dd.DataFrame,
+        unique_proc_names: dd.DataFrame,
     ):
         super().__init__(log_dir, views, view_types)
-        self.unique_filenames = unique_filenames
-        self.unique_processes = unique_processes
+        self.unique_file_names = unique_file_names
+        self.unique_proc_names = unique_proc_names
 
-    def generate_bottlenecks(self, max_io_time: dd.core.Scalar, cut=0.5) -> Dict[tuple, pd.DataFrame]:
+    def detect_bottlenecks(self, max_io_time: dd.core.Scalar, cut=0.5) -> Dict[tuple, pd.DataFrame]:
         # Keep bottleneck views
         all_bottleneck_views = {}
-        all_bottleneck_views_f = []
-
-        low_level_views = {}
-
+        all_bottleneck_views_futures = []
         # Run through views
         for view_key, view_dict in self.views.items():
             # Generate bottleneck views
             bottleneck_views = self._generate_bottlenecks_views(
-                low_level_views=low_level_views,
                 view_key=view_key,
                 view_dict=view_dict,
-                max_io_time=max_io_time,
-                cut=cut
             )
             # Set bottleneck views
             all_bottleneck_views[view_key] = bottleneck_views
-            low_level_views[view_key] = bottleneck_views['low_level_view']
             # Get futures
-            all_bottleneck_views_f.extend(map(futures_of, bottleneck_views.values()))
-
+            all_bottleneck_views_futures.extend(map(futures_of, bottleneck_views.values()))
         # Wait all bottleneck views to be done
-        wait(all_bottleneck_views_f)
-
+        wait(all_bottleneck_views_futures)
         # Generate bottlenecks
         bottlenecks = self._process_bottleneck_views(all_bottleneck_views=all_bottleneck_views)
-
         # Return bottleneck views
         return bottlenecks
 
@@ -82,60 +77,64 @@ class RecorderBottleneckGenerator(BottleneckGenerator):
             # Init bottlenecks
             bottlenecks = {}
             # Run through leveled views
-            # TODO remove iterrows
-            for high_level_id, high_level_row in high_level_view.iterrows():
-                high_level_name = self._get_level_name(col_name=high_level_col, col_id=high_level_id)
+            high_level_ids = high_level_view.index.unique()
+            for high_level_id in high_level_ids:
+                high_level_row = high_level_view.loc[high_level_id]
+                high_level_name, high_level_val = self._get_level_value(high_level_row, high_level_col, high_level_id)
                 mid_level_ids = high_level_row[mid_level_col].copy()
                 high_level_row.pop(mid_level_col)
                 high_level_row.pop(low_level_col)
-                bottlenecks[high_level_name] = {}
-                bottlenecks[high_level_name]['llc'] = dict(high_level_row)
-                bottlenecks[high_level_name][mid_level_col] = {}
+                if high_level_name in high_level_row:
+                    high_level_row.pop(high_level_name)
+                bottlenecks[high_level_val] = {}
+                bottlenecks[high_level_val]['llc'] = dict(high_level_row)
+                bottlenecks[high_level_val][mid_level_col] = {}
                 for mid_level_id in mid_level_ids:
-                    mid_level_name = self._get_level_name(col_name=mid_level_col, col_id=mid_level_id)
                     mid_level_row = mid_level_view.loc[high_level_id, mid_level_id]
+                    mid_level_name, mid_level_val = self._get_level_value(mid_level_row, mid_level_col, mid_level_id)
                     low_level_ids = mid_level_row[low_level_col].copy()
                     mid_level_row.pop(low_level_col)
-                    bottlenecks[high_level_name][mid_level_col][mid_level_name] = {}
-                    bottlenecks[high_level_name][mid_level_col][mid_level_name]['llc'] = dict(mid_level_row)
-                    bottlenecks[high_level_name][mid_level_col][mid_level_name][low_level_col] = {}
+                    if mid_level_name in mid_level_row:
+                        mid_level_row.pop(mid_level_name)
+                    bottlenecks[high_level_val][mid_level_col][mid_level_val] = {}
+                    bottlenecks[high_level_val][mid_level_col][mid_level_val]['llc'] = dict(mid_level_row)
+                    bottlenecks[high_level_val][mid_level_col][mid_level_val][low_level_col] = {}
                     for low_level_id in low_level_ids:
-                        low_level_name = self._get_level_name(col_name=low_level_col, col_id=low_level_id)
                         low_level_row = low_level_view.loc[high_level_id, mid_level_id, low_level_id]
-                        bottlenecks[high_level_name][mid_level_col][mid_level_name][low_level_col][low_level_name] = {}
-                        bottlenecks[high_level_name][mid_level_col][mid_level_name][low_level_col][low_level_name]['llc'] = dict(low_level_row)
+                        low_level_name, low_level_val = self._get_level_value(low_level_row, low_level_col, low_level_id)
+                        if low_level_name in low_level_row:
+                            low_level_row.pop(low_level_name)
+                        bottlenecks[high_level_val][mid_level_col][mid_level_val][low_level_col][low_level_val] = {}
+                        bottlenecks[high_level_val][mid_level_col][mid_level_val][low_level_col][low_level_val]['llc'] = dict(low_level_row)
 
             all_bottlenecks[view_key] = bottlenecks
 
         return all_bottlenecks
 
-    def _get_level_name(self, col_name: str, col_id):
-        if col_name == 'proc_id':
-            return self.unique_processes[col_id]['rank']
-        elif col_name == 'file_id':
-            return self.unique_filenames[col_id]['filename']
-        return col_id
+    def _get_level_value(self, row, col_name, col_id):
+        tree_name = BOTTLENECK_TREE_NAME[col_name]
+        # print('_get_level_name', col_name, col_id, bool(tree_name in row), bool(tree_name in dict(row)))
+        if tree_name in dict(row):
+            return tree_name, row[tree_name]
+        return tree_name, col_id
 
     def _generate_bottlenecks_views(
         self,
-        low_level_views: Dict[tuple, dd.DataFrame],
         view_key: tuple,
-        view_dict: Dict[str, dd.DataFrame],
-        max_io_time: dd.core.Scalar,
-        cut: float
+        view_dict: Dict[str, dd.DataFrame]
     ):
         # Read types
         parent_type = view_key[:-1]
         view_type = view_key[-1]
         # Get parent view
-        parent_view = view_dict['cut_view']
+        parent_view = view_dict['bottleneck_view']
         view_type = view_key[-1]
 
         # Create lower level view
         low_level_view = parent_view \
             .groupby(list(BOTTLENECK_ORDER[view_type])) \
             .first() \
-            .drop(columns=['acc_pat', 'io_cat'], errors='ignore')
+            .drop(columns=['acc_pat', 'io_cat', 'file_name', 'proc_name'], errors='ignore')
 
         # Non-proc agg columns
         non_proc_agg_dict = self._get_agg_dict(view_columns=low_level_view.columns, is_proc=False)
@@ -176,6 +175,22 @@ class RecorderBottleneckGenerator(BottleneckGenerator):
                 .reset_index() \
                 .groupby([view_type]) \
                 .agg(non_proc_agg_dict)
+
+        if view_type is not 'proc_id':
+            if view_type is 'file_id':
+                mid_level_view = mid_level_view \
+                    .merge(self.unique_file_names, left_index=True, right_index=True) \
+                    .merge(self.unique_proc_names, left_index=True, right_index=True)
+                high_level_view = high_level_view.merge(self.unique_file_names, left_index=True, right_index=True)
+            else:
+                mid_level_view = mid_level_view.merge(self.unique_proc_names, left_index=True, right_index=True)
+        else:
+            mid_level_view = mid_level_view.merge(self.unique_proc_names, left_index=True, right_index=True)
+            high_level_view = high_level_view.merge(self.unique_proc_names, left_index=True, right_index=True)
+
+        low_level_view = low_level_view \
+            .merge(self.unique_file_names, left_index=True, right_index=True) \
+            .merge(self.unique_proc_names, left_index=True, right_index=True)
 
         return dict(
             low_level_view=low_level_view.persist(),

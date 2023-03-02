@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from copy import copy
 from typing import Dict
-from .constants import TIME_PRECISION, AccessPattern, IOCategory
+from .constants import CAT_IO, TIME_PRECISION, AccessPattern, IOCategory
 from ..utils.dask_agg import unique_flatten
 
 
@@ -87,7 +87,7 @@ def compute_main_view(
     # Fix types
     ddf = _fix_ddf_types(ddf=ddf)
     # Compute high-level metrics
-    hlm_view = ddf[ddf['cat'] == 0] \
+    hlm_view = ddf[ddf['cat'] == CAT_IO] \
         .groupby(groupby) \
         .agg(HLM_AGG) \
         .reset_index()
@@ -105,22 +105,22 @@ def compute_main_view(
         .groupby(view_types) \
         .agg(agg_columns) \
         .reset_index() \
+        .rename(columns={
+            'func_id_unique_flatten': 'func_id'
+        }) \
         .persist()
-
-    main_view = main_view.rename(columns={'func_id_unique_flatten': 'func_id'})
-
     # Return main_view
     return main_view
 
 
 def compute_view(
     main_view: dd.DataFrame,
-    view_types: list,
     views: Dict[tuple, dd.DataFrame],
     view_permutation: tuple,
     max_io_time: dd.core.Scalar,
     metric='duration',
     delta=0.0001,
+    cut=0.5
 ):
     # Read types
     parent_type = view_permutation[:-1]
@@ -130,7 +130,7 @@ def compute_view(
     # Create colum names
     metric_col, score_col, cut_col = f"{metric}_sum", f"{metric}_score", f"{metric}_cut"
     # Compute expanded view
-    expanded_view, filtered_view = _compute_expanded_view(
+    expanded_view = _compute_expanded_view(
         parent_view=parent_view,
         view_type=view_type,
         cols=(metric_col, score_col, cut_col),
@@ -138,74 +138,11 @@ def compute_view(
         delta=delta,
         max_io_time=max_io_time
     )
-    # Compute grouped view
-    grouped_view = _compute_grouped_view(
-        expanded_view=expanded_view,
-        filtered_view=filtered_view,
-        view_types=view_types,
-        view_type=view_type,
-        cols=(metric_col, score_col, cut_col),
-        metric=metric,
-        max_io_time=max_io_time
-    )
     # Return views
     return dict(
-        expanded_view=expanded_view.persist(),
-        grouped_view=grouped_view.persist(),
-        cut_view=expanded_view[expanded_view['duration_cut'] >= 0.5]
+        expanded_view=expanded_view,
+        bottleneck_view=expanded_view[expanded_view[cut_col] >= cut],
     )
-
-
-def _compute_grouped_view(
-    expanded_view: dd.DataFrame,
-    filtered_view: dd.DataFrame,
-    view_types: list,
-    view_type: str,
-    cols: tuple,
-    metric: str,
-    max_io_time: dd.core.Scalar
-):
-    # Get column names
-    _, score_col, cut_col = cols
-    # Check view type
-    if view_type is not 'proc_id':
-        # Compute agg columns
-        agg_columns = {col: sum for col in expanded_view.columns}
-        agg_columns['func_id'] = unique_flatten()
-        for vt in [view_type, 'proc_id']:
-            agg_columns.pop(vt)
-        # Compute subview first
-        subview = expanded_view \
-            .groupby([view_type, 'proc_id']) \
-            .agg(agg_columns) \
-            .reset_index()
-        # Compute agg columns
-        agg_columns = {col: max if any(x in col for x in 'duration time'.split()) else sum for col in subview.columns}
-        agg_columns['func_id'] = unique_flatten()
-        agg_columns.pop(view_type)
-        # Compute grouped view
-        grouped_view = subview \
-            .groupby([view_type]) \
-            .agg(agg_columns)
-    else:
-        # Compute agg columns
-        agg_columns = {col: sum for col in expanded_view.columns}
-        agg_columns['func_id'] = unique_flatten()
-        agg_columns.pop(view_type)
-        # Compute grouped view
-        grouped_view = expanded_view \
-            .groupby([view_type]) \
-            .agg(agg_columns)
-        # Compute subview
-        subview = grouped_view.reset_index()
-    # Persist grouped view
-    grouped_view = grouped_view \
-        .drop(columns=[*view_types, score_col, cut_col, 'io_cat', 'acc_pat'], errors='ignore') \
-        .merge(filtered_view[[score_col, cut_col]], left_index=True, right_index=True)
-    # Set metric percentages
-    grouped_view = _set_metric_percentages(ddf=grouped_view, max_io_time=max_io_time, metric=metric)
-    # Return grouped view
-    return grouped_view
 
 
 def _compute_expanded_view(
@@ -248,39 +185,40 @@ def _compute_expanded_view(
     # Set metric percentages
     expanded_view = _set_metric_percentages(ddf=expanded_view, max_io_time=max_io_time, metric=metric)
     # Return expanded view
-    return expanded_view, filtered_view
+    return expanded_view
 
 
 def compute_max_io_time(main_view: dd.DataFrame):
     return main_view.groupby(['proc_id']).sum()['duration_sum'].max()
 
 
-def compute_unique_filenames(log_dir: str):
-    # Read Parquet files
-    ddf = dd.read_parquet(f"{log_dir}/*.parquet", columns=['file_id', 'filename'])
+def compute_unique_file_names(log_dir: str) -> dd.DataFrame:
     # Compute unique filenames
-    unique_filenames = ddf \
+    return dd.read_parquet(f"{log_dir}/*.parquet", columns=['file_id', 'filename']) \
         .groupby(['file_id']) \
         .agg({'filename': 'first'}) \
-        .compute()
-    # Return as dict
-    return unique_filenames.T.to_dict()
+        .rename(columns={'filename': 'file_name'}) \
+        .persist()
 
 
-def compute_unique_processes(log_dir: str):
-    # Read Parquet files
-    ddf = dd.read_parquet(f"{log_dir}/*.parquet", columns=['proc_id', 'app', 'hostname', 'rank'])
+def compute_unique_proc_names(log_dir: str) -> dd.DataFrame:
     # Compute unique processes
-    unique_processes = ddf \
+    return dd.read_parquet(f"{log_dir}/*.parquet", columns=['proc_id', 'app', 'hostname', 'rank']) \
         .groupby(['proc_id']) \
         .agg({
             'app': 'first',
             'hostname': 'first',
             'rank': 'first'
         }) \
-        .compute()
-    # Return as dict
-    return unique_processes.T.to_dict()
+        .map_partitions(lambda df: df.assign(proc_name=(
+            df['app']
+            .str.cat(df['hostname'], sep='-')
+            .str.cat(df['rank'].astype(str), sep='-')
+            .str.lstrip('-')
+            .str.rstrip('-')
+        ))) \
+        .drop(columns=['app', 'hostname', 'rank']) \
+        .persist()
 
 
 def filter_delta(ddf: dd.DataFrame, delta: float, metric: str, max_io_time: dd.core.Scalar):

@@ -20,5 +20,5 @@ class Analyzer(object):
         self.logger = create_logger(__name__, f"{working_dir}/{name}.log")
         self.logger.info(format_log('main', f"Initializing {name} analyzer"))
 
-    def analyze_parquet(self, log_dir: str, delta=0.0001):
+    def analyze_parquet(self, log_dir: str, delta=0.0001, cut=0.5):
         raise NotImplementedError
