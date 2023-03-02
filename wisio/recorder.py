@@ -12,7 +12,10 @@ from ._recorder.analysis import (
 from ._recorder.bottlenecks import RecorderBottleneckDetector
 from .base import Analyzer
 from .dask import ClusterManager
-from .rules import Rule
+from .utils.file_utils import ensure_dir
+from .utils.json_encoders import NpEncoder
+from .utils.logger import ElapsedTimeLogger
+
 
 VIEW_TYPES = ['trange', 'file_id', 'proc_id']
 
@@ -39,42 +42,54 @@ class RecorderAnalyzer(Analyzer):
 
     def analyze_parquet(self, log_dir: str, delta=0.0001, cut=0.5):
         # Load global min max
-        global_min_max = self.load_global_min_max(log_dir=log_dir)
+        with ElapsedTimeLogger(logger=self.logger, message='Load global min/max'):
+            global_min_max = self.load_global_min_max(log_dir=log_dir)
+
         # Compute main view
-        main_view = compute_main_view(
-            log_dir=log_dir,
-            global_min_max=global_min_max,
-            view_types=VIEW_TYPES
-        )
+        with ElapsedTimeLogger(logger=self.logger, message='Compute main view'):
+            main_view = compute_main_view(
+                log_dir=log_dir,
+                global_min_max=global_min_max,
+                view_types=VIEW_TYPES
+            )
+
         # Compute `max_io_time`
-        max_io_time = compute_max_io_time(main_view=main_view)
+        with ElapsedTimeLogger(logger=self.logger, message='Compute max I/O time'):
+            max_io_time = compute_max_io_time(main_view=main_view)
+
         # Compute filenames & procnames
-        unique_file_names = compute_unique_file_names(log_dir=log_dir)
-        unique_proc_names = compute_unique_proc_names(log_dir=log_dir)
+        with ElapsedTimeLogger(logger=self.logger, message='Compute file names & proc names'):
+            unique_file_names = compute_unique_file_names(log_dir=log_dir)
+            unique_proc_names = compute_unique_proc_names(log_dir=log_dir)
+
         # Compute multifaceted views
         views = {}
-        for view_permutation in it.chain.from_iterable(map(self._view_permutations, range(len(VIEW_TYPES)))):
-            # Compute view
-            views[view_permutation] = compute_view(
-                main_view=main_view,
-                views=views,
-                view_permutation=view_permutation,
-                max_io_time=max_io_time,
-                delta=delta,
-                cut=cut
-            )
-            # print(view_permutation, len(views[view_permutation]))
+        with ElapsedTimeLogger(logger=self.logger, message='Compute multifaceted view'):
+            for view_permutation in it.chain.from_iterable(map(self._view_permutations, range(len(VIEW_TYPES)))):
+                # Compute view
+                views[view_permutation] = compute_view(
+                    main_view=main_view,
+                    views=views,
+                    view_permutation=view_permutation,
+                    max_io_time=max_io_time,
+                    delta=delta,
+                    cut=cut
+                )
 
         # Detect bottlenecks
-        bottleneck_detector = RecorderBottleneckDetector(
-            log_dir=log_dir,
-            views=views,
-            view_types=['trange', 'file_id', 'proc_id'],
-            unique_file_names=unique_file_names,
-            unique_proc_names=unique_proc_names
-        )
+        with ElapsedTimeLogger(logger=self.logger, message='Detect bottlenecks'):
+            bottleneck_detector = RecorderBottleneckDetector(
+                logger=self.logger,
+                log_dir=log_dir,
+                views=views,
+                view_types=['trange', 'file_id', 'proc_id'],
+                unique_file_names=unique_file_names,
+                unique_proc_names=unique_proc_names
+            )
+            bottlenecks = bottleneck_detector.detect_bottlenecks(max_io_time=max_io_time)
 
-        bottlenecks = bottleneck_detector.detect_bottlenecks(max_io_time=max_io_time)
+        with ElapsedTimeLogger(logger=self.logger, message='Save bottlenecks'):
+            self.save_bottlenecks(log_dir=log_dir, bottlenecks=bottlenecks)
 
         # Return views
         return views, bottlenecks
@@ -83,6 +98,14 @@ class RecorderAnalyzer(Analyzer):
         with open(f"{log_dir}/global.json") as file:
             global_min_max = json.load(file)
         return global_min_max
+
+    def save_bottlenecks(self, log_dir: str, bottlenecks: Dict[tuple, object]):
+        bottleneck_dir = f"{log_dir}/bottlenecks"
+        ensure_dir(bottleneck_dir)
+        for view_key, bottleneck_dict in bottlenecks.items():
+            file_name = '_'.join(view_key) if isinstance(view_key, tuple) else view_key
+            with open(f"{bottleneck_dir}/{file_name}.json", 'w') as json_file:
+                json.dump(bottleneck_dict, json_file, cls=NpEncoder)
 
     def _save_views(self, log_dir: str, views: Dict[Tuple, dd.DataFrame]):
         for view_perm, view in views.items():

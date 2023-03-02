@@ -4,8 +4,8 @@ from wisio.recorder import RecorderAnalyzer
 def run_recorder_analyzer():
 
     log_dir = "/p/vast1/iopp/recorder_app_logs/cm1/nodes-32/workflow-4/_parquet"
-    # log_dir = "/p/gpfs1/iopp/recorder_app_logs/hacc/nodes-32/workflow-0/_parquet"
-    # log_dir = "/p/gpfs1/iopp/recorder_app_logs/montage/nodes-32/_parquet"
+    # log_dir = "/p/vast1/iopp/recorder_app_logs/hacc/nodes-32/workflow-0/_parquet"
+    # log_dir = "/p/vast1/iopp/recorder_app_logs/montage/nodes-32/_parquet"
     # log_dir = "/p/gpfs1/iopp/recorder_app_logs/genome_pegasus/nodes-32/_parquet"
     # log_dir = "/p/gpfs1/iopp/recorder_app_logs/lbann-jag/nodes-32/_parquet"
 
@@ -26,7 +26,7 @@ def run_recorder_analyzer():
 
     try:
         res = recorder_analyzer.analyze_parquet(log_dir=log_dir)
-        print(res)
+        # print(res)
     finally:
 
         recorder_analyzer.cluster_manager.shutdown()

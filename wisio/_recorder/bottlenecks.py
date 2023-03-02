@@ -1,6 +1,7 @@
 import dask.dataframe as dd
 import numpy as np
 import pandas as pd
+from dask import compute, delayed
 from dask.distributed import as_completed, futures_of, wait
 from itertools import permutations
 from pathlib import PurePath
@@ -8,6 +9,7 @@ from typing import Dict
 from ..bottlenecks import BottleneckDetector
 from ..utils.collection_utils import deepflatten
 from ..utils.dask_agg import unique_flatten
+from ..utils.logger import ElapsedTimeLogger
 
 
 BOTTLENECK_ORDER = dict(
@@ -21,18 +23,72 @@ BOTTLENECK_TREE_NAME = dict(
     trange='trange'
 )
 
+def _get_level_value(row, col_name, col_id):
+    tree_name = BOTTLENECK_TREE_NAME[col_name]
+    # print('_get_level_name', col_name, col_id, bool(tree_name in row), bool(tree_name in dict(row)))
+    if tree_name in dict(row):
+        return tree_name, row[tree_name]
+    return tree_name, col_id
+
+@delayed
+def _process_bottleneck_view(
+    view_key: tuple,
+    low_level_view: dd.DataFrame,
+    mid_level_view: dd.DataFrame,
+    high_level_view: dd.DataFrame,
+):
+    # Get view type
+    view_type = view_key[-1]
+    # Get ordered bottleneck columns
+    high_level_col, mid_level_col, low_level_col = BOTTLENECK_ORDER[view_type]
+    # Init bottlenecks
+    bottlenecks = {}
+    # Run through leveled views
+    high_level_ids = high_level_view.index.unique()
+    for high_level_id in high_level_ids:
+        high_level_row = high_level_view.loc[high_level_id]
+        high_level_name, high_level_val = _get_level_value(high_level_row, high_level_col, high_level_id)
+        mid_level_ids = high_level_row[mid_level_col]
+        high_level_row.pop(mid_level_col)
+        high_level_row.pop(low_level_col)
+        if high_level_name in high_level_row:
+            high_level_row.pop(high_level_name)
+        bottlenecks[high_level_val] = {}
+        bottlenecks[high_level_val]['llc'] = dict(high_level_row)
+        bottlenecks[high_level_val][mid_level_col] = {}
+        for mid_level_id in mid_level_ids:
+            mid_level_row = mid_level_view.loc[high_level_id, mid_level_id]
+            mid_level_name, mid_level_val = _get_level_value(mid_level_row, mid_level_col, mid_level_id)
+            low_level_ids = mid_level_row[low_level_col]
+            mid_level_row.pop(low_level_col)
+            if mid_level_name in mid_level_row:
+                mid_level_row.pop(mid_level_name)
+            bottlenecks[high_level_val][mid_level_col][mid_level_val] = {}
+            bottlenecks[high_level_val][mid_level_col][mid_level_val]['llc'] = dict(mid_level_row)
+            bottlenecks[high_level_val][mid_level_col][mid_level_val][low_level_col] = {}
+            for low_level_id in low_level_ids:
+                low_level_row = low_level_view.loc[high_level_id, mid_level_id, low_level_id]
+                low_level_name, low_level_val = _get_level_value(low_level_row, low_level_col, low_level_id)
+                if low_level_name in low_level_row:
+                    low_level_row.pop(low_level_name)
+                bottlenecks[high_level_val][mid_level_col][mid_level_val][low_level_col][low_level_val] = {}
+                bottlenecks[high_level_val][mid_level_col][mid_level_val][low_level_col][low_level_val]['llc'] = dict(low_level_row)
+
+    return view_key, bottlenecks
+
 
 class RecorderBottleneckDetector(BottleneckDetector):
 
     def __init__(
         self,
+        logger,
         log_dir: str,
         views: Dict[tuple, dd.DataFrame],
         view_types: list,
         unique_file_names: dd.DataFrame,
         unique_proc_names: dd.DataFrame,
     ):
-        super().__init__(log_dir, views, view_types)
+        super().__init__(logger, log_dir, views, view_types)
         self.unique_file_names = unique_file_names
         self.unique_proc_names = unique_proc_names
 
@@ -58,65 +114,35 @@ class RecorderBottleneckDetector(BottleneckDetector):
         # Return bottleneck views
         return bottlenecks
 
+    
+
     def _process_bottleneck_views(
         self,
         all_bottleneck_views: Dict[tuple, pd.DataFrame]
     ):
         # Init bottlenecks
         all_bottlenecks = {}
+        all_bottlenecks_d = []
         # Run through bottleneck views
         for view_key, bottleneck_views in all_bottleneck_views.items():
-            # Get view type
-            view_type = view_key[-1]
-            # Get ordered bottleneck columns
-            high_level_col, mid_level_col, low_level_col = BOTTLENECK_ORDER[view_type]
-            # Load leveled views
-            low_level_view = bottleneck_views['low_level_view'].compute()
-            mid_level_view = bottleneck_views['mid_level_view'].compute()
-            high_level_view = bottleneck_views['high_level_view'].compute()
-            # Init bottlenecks
-            bottlenecks = {}
-            # Run through leveled views
-            high_level_ids = high_level_view.index.unique()
-            for high_level_id in high_level_ids:
-                high_level_row = high_level_view.loc[high_level_id]
-                high_level_name, high_level_val = self._get_level_value(high_level_row, high_level_col, high_level_id)
-                mid_level_ids = high_level_row[mid_level_col].copy()
-                high_level_row.pop(mid_level_col)
-                high_level_row.pop(low_level_col)
-                if high_level_name in high_level_row:
-                    high_level_row.pop(high_level_name)
-                bottlenecks[high_level_val] = {}
-                bottlenecks[high_level_val]['llc'] = dict(high_level_row)
-                bottlenecks[high_level_val][mid_level_col] = {}
-                for mid_level_id in mid_level_ids:
-                    mid_level_row = mid_level_view.loc[high_level_id, mid_level_id]
-                    mid_level_name, mid_level_val = self._get_level_value(mid_level_row, mid_level_col, mid_level_id)
-                    low_level_ids = mid_level_row[low_level_col].copy()
-                    mid_level_row.pop(low_level_col)
-                    if mid_level_name in mid_level_row:
-                        mid_level_row.pop(mid_level_name)
-                    bottlenecks[high_level_val][mid_level_col][mid_level_val] = {}
-                    bottlenecks[high_level_val][mid_level_col][mid_level_val]['llc'] = dict(mid_level_row)
-                    bottlenecks[high_level_val][mid_level_col][mid_level_val][low_level_col] = {}
-                    for low_level_id in low_level_ids:
-                        low_level_row = low_level_view.loc[high_level_id, mid_level_id, low_level_id]
-                        low_level_name, low_level_val = self._get_level_value(low_level_row, low_level_col, low_level_id)
-                        if low_level_name in low_level_row:
-                            low_level_row.pop(low_level_name)
-                        bottlenecks[high_level_val][mid_level_col][mid_level_val][low_level_col][low_level_val] = {}
-                        bottlenecks[high_level_val][mid_level_col][mid_level_val][low_level_col][low_level_val]['llc'] = dict(low_level_row)
+            
+            all_bottlenecks_d.append(_process_bottleneck_view(
+                view_key=view_key,
+                low_level_view=bottleneck_views['low_level_view'],
+                mid_level_view=bottleneck_views['mid_level_view'],
+                high_level_view=bottleneck_views['high_level_view']
+            ))
 
-            all_bottlenecks[view_key] = bottlenecks
+            # all_bottlenecks[view_key] = bottlenecks
+        with ElapsedTimeLogger(logger=self.logger, message='Compute bottlenecks'):
+            futures = compute(*all_bottlenecks_d, sync=False)
+            for future in as_completed(list(futures)):
+                view_key, bottlenecks = future.result()
+                all_bottlenecks[view_key] = bottlenecks
 
         return all_bottlenecks
 
-    def _get_level_value(self, row, col_name, col_id):
-        tree_name = BOTTLENECK_TREE_NAME[col_name]
-        # print('_get_level_name', col_name, col_id, bool(tree_name in row), bool(tree_name in dict(row)))
-        if tree_name in dict(row):
-            return tree_name, row[tree_name]
-        return tree_name, col_id
+    
 
     def _generate_bottlenecks_views(
         self,
