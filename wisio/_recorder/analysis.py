@@ -106,9 +106,9 @@ def compute_main_view(
         .agg(agg_columns) \
         .reset_index() \
         .persist()
-    print(main_view.columns)
+
     main_view = main_view.rename(columns={'func_id_unique_flatten': 'func_id'})
-    print(main_view.columns)
+
     # Return main_view
     return main_view
 
@@ -165,7 +165,6 @@ def _compute_grouped_view(
     metric: str,
     max_io_time: dd.core.Scalar
 ):
-    print('_compute_grouped_view', view_type)
     # Get column names
     _, score_col, cut_col = cols
     # Check view type
@@ -175,7 +174,6 @@ def _compute_grouped_view(
         agg_columns['func_id'] = unique_flatten()
         for vt in [view_type, 'proc_id']:
             agg_columns.pop(vt)
-        print(view_type, agg_columns)
         # Compute subview first
         subview = expanded_view \
             .groupby([view_type, 'proc_id']) \
@@ -185,7 +183,6 @@ def _compute_grouped_view(
         agg_columns = {col: max if any(x in col for x in 'duration time'.split()) else sum for col in subview.columns}
         agg_columns['func_id'] = unique_flatten()
         agg_columns.pop(view_type)
-        print(view_type, agg_columns)
         # Compute grouped view
         grouped_view = subview \
             .groupby([view_type]) \
@@ -195,7 +192,6 @@ def _compute_grouped_view(
         agg_columns = {col: sum for col in expanded_view.columns}
         agg_columns['func_id'] = unique_flatten()
         agg_columns.pop(view_type)
-        print(view_type, agg_columns)
         # Compute grouped view
         grouped_view = expanded_view \
             .groupby([view_type]) \
@@ -220,7 +216,6 @@ def _compute_expanded_view(
     delta: float,
     max_io_time: dd.core.Scalar
 ):
-    print('_compute_expanded_view')
     # Get column names
     metric_col, score_col, cut_col = cols
     # Check view type
