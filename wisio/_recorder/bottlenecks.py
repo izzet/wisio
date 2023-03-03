@@ -30,50 +30,46 @@ def _get_level_value(row, col_name, col_id):
         return tree_name, row[tree_name]
     return tree_name, col_id
 
+
+def _calculate_llc(level_row: dd.DataFrame, level_id: list, level_col: str, level_name:str):
+    #print(level_col, level_ids)
+    for level in ["proc_id", "trange", "file_id"]:
+        if level in level_row:
+            level_row.pop(level)
+    if level_name in level_row:
+        level_row.pop(level_name)
+    return dict(level_row)
+
 @delayed
 def _process_bottleneck_view(
     view_key: tuple,
-    low_level_view: dd.DataFrame,
-    mid_level_view: dd.DataFrame,
-    high_level_view: dd.DataFrame,
+    ll_view: dd.DataFrame,
+    ml_view: dd.DataFrame,
+    hl_view: dd.DataFrame,
 ):
     # Get view type
     view_type = view_key[-1]
     # Get ordered bottleneck columns
-    high_level_col, mid_level_col, low_level_col = BOTTLENECK_ORDER[view_type]
+    hl_col, ml_col, ll_col = BOTTLENECK_ORDER[view_type]
     # Init bottlenecks
     bottlenecks = {}
-    # Run through leveled views
-    high_level_ids = high_level_view.index.unique()
-    for high_level_id in high_level_ids:
-        high_level_row = high_level_view.loc[high_level_id]
-        high_level_name, high_level_val = _get_level_value(high_level_row, high_level_col, high_level_id)
-        mid_level_ids = high_level_row[mid_level_col]
-        high_level_row.pop(mid_level_col)
-        high_level_row.pop(low_level_col)
-        if high_level_name in high_level_row:
-            high_level_row.pop(high_level_name)
-        bottlenecks[high_level_val] = {}
-        bottlenecks[high_level_val]['llc'] = dict(high_level_row)
-        bottlenecks[high_level_val][mid_level_col] = {}
-        for mid_level_id in mid_level_ids:
-            mid_level_row = mid_level_view.loc[high_level_id, mid_level_id]
-            mid_level_name, mid_level_val = _get_level_value(mid_level_row, mid_level_col, mid_level_id)
-            low_level_ids = mid_level_row[low_level_col]
-            mid_level_row.pop(low_level_col)
-            if mid_level_name in mid_level_row:
-                mid_level_row.pop(mid_level_name)
-            bottlenecks[high_level_val][mid_level_col][mid_level_val] = {}
-            bottlenecks[high_level_val][mid_level_col][mid_level_val]['llc'] = dict(mid_level_row)
-            bottlenecks[high_level_val][mid_level_col][mid_level_val][low_level_col] = {}
-            for low_level_id in low_level_ids:
-                low_level_row = low_level_view.loc[high_level_id, mid_level_id, low_level_id]
-                low_level_name, low_level_val = _get_level_value(low_level_row, low_level_col, low_level_id)
-                if low_level_name in low_level_row:
-                    low_level_row.pop(low_level_name)
-                bottlenecks[high_level_val][mid_level_col][mid_level_val][low_level_col][low_level_val] = {}
-                bottlenecks[high_level_val][mid_level_col][mid_level_val][low_level_col][low_level_val]['llc'] = dict(low_level_row)
-
+    ids_tuple = ll_view.index
+    for hl, ml, ll in ids_tuple:
+        hl_row =  hl_view.loc[hl]
+        hl_name, hl_val = _get_level_value(hl_row, hl_col, hl)
+        ml_row =  ml_view.loc[(hl,ml)]
+        ml_name, ml_val = _get_level_value(ml_row, ml_col, ml)
+        ll_row =  ll_view.loc[(hl,ml,ll)]
+        ll_name, ll_val = _get_level_value(ll_row, ll_col, ll)
+        if hl_val not in bottlenecks:
+            bottlenecks[hl_val] = {'llc':None, ml_col:{}}
+            bottlenecks[hl_val]['llc'] = _calculate_llc(hl_row, hl, hl_col, hl_name)
+        if ml_val not in bottlenecks[hl_val][ml_col]:
+            bottlenecks[hl_val][ml_col][ml_val] = {'llc':None, ll_col:{}}
+            bottlenecks[hl_val][ml_col][ml_val]['llc'] = _calculate_llc(ml_row, ml, ml_col, ml_name)
+        if ll_val not in bottlenecks[hl_val][ml_col][ml_val][ll_col]:
+            bottlenecks[hl_val][ml_col][ml_val][ll_col][ll_val] = {'llc':None}
+            bottlenecks[hl_val][ml_col][ml_val][ll_col][ll_val]['llc'] = _calculate_llc(ll_row, ll, ll_col, ll_name)
     return view_key, bottlenecks
 
 
@@ -128,9 +124,9 @@ class RecorderBottleneckDetector(BottleneckDetector):
             
             all_bottlenecks_d.append(_process_bottleneck_view(
                 view_key=view_key,
-                low_level_view=bottleneck_views['low_level_view'],
-                mid_level_view=bottleneck_views['mid_level_view'],
-                high_level_view=bottleneck_views['high_level_view']
+                ll_view=bottleneck_views['low_level_view'],
+                ml_view=bottleneck_views['mid_level_view'],
+                hl_view=bottleneck_views['high_level_view']
             ))
 
             # all_bottlenecks[view_key] = bottlenecks
@@ -166,16 +162,7 @@ class RecorderBottleneckDetector(BottleneckDetector):
         non_proc_agg_dict = self._get_agg_dict(view_columns=low_level_view.columns, is_proc=False)
         proc_agg_dict = self._get_agg_dict(view_columns=low_level_view.columns, is_proc=True)
 
-        if view_type is 'trange':
-            non_proc_agg_dict['file_id'] = unique_flatten()
-        elif view_type is 'file_id':
-            non_proc_agg_dict['trange'] = unique_flatten()
-
         if view_type is not 'proc_id':
-            proc_agg_dict['file_id'] = unique_flatten()
-            proc_agg_dict['proc_id'] = unique_flatten()
-            proc_agg_dict['trange'] = unique_flatten()
-            proc_agg_dict.pop(view_type)
 
             mid_level_view = low_level_view \
                 .reset_index() \
@@ -188,14 +175,11 @@ class RecorderBottleneckDetector(BottleneckDetector):
                 .agg(proc_agg_dict)
 
         else:
-            non_proc_agg_dict['file_id'] = unique_flatten()
 
             mid_level_view = low_level_view \
                 .reset_index() \
                 .groupby([view_type, 'trange']) \
                 .agg(non_proc_agg_dict)
-
-            non_proc_agg_dict['trange'] = unique_flatten()
 
             high_level_view = mid_level_view \
                 .reset_index() \
