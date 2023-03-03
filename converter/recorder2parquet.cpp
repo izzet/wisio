@@ -1010,7 +1010,7 @@ int main(int argc, char **argv) {
         ordered_map.insert({directory, argv[1]});
     }
     int num_steps = ordered_map.size();
-    int n = max(num_steps/mpi_size, 1);
+    int n = max(int(ceil(num_steps/mpi_size)), 1);
     int start_step = n * mpi_rank;
     int end_step   = min(num_steps, n*(mpi_rank+1));
     int completed = 0;
@@ -1019,35 +1019,49 @@ int main(int argc, char **argv) {
     sprintf(parquet_filename_path, "%s/%d" , parquet_file_dir, mpi_rank);
     ParquetWriter writer(parquet_filename_path);
     Timer step_timer;
+    int mpi_steps = 0;
+    int workflow_steps = 0;
     for (auto x : ordered_map){
-        /*if (completed < 12) {
-            completed++;
-            continue;
-        }*/ 
+        recorder_init_reader(x.second.c_str(), &reader);
+        if (reader.metadata.total_ranks > 1) mpi_steps +=1;
+        else workflow_steps+=1; 
+    }
+    if (mpi_rank == 0) 
+        WISIO_LOGPRINT("Workflow has %d mpi steps and %d workflow steps out of total %d steps", mpi_steps, workflow_steps, workflow_steps+mpi_steps);
+    for (step = 0; step < n; ++step) {
+        int map_element = mpi_rank * n + step;
+        auto x = ordered_map.begin();
+        std::advance(x, map_element);
+        step_timer.resumeTime();
+        int entries = 0;
+        if (x != ordered_map.end()) {
+          recorder_init_reader(x->second.c_str(), &reader);
+          if (reader.metadata.total_ranks == 1) {
+            WISIO_LOGINFO("Converting workflow step %d of %d of rank 0 in %s by rank %d", step+1, workflow_steps, x->first.directory.c_str(), mpi_rank);
+            int entry = process_rank(parquet_file_dir, 0, x->first, &writer);
+            if (entry == 0) 
+               WISIO_LOGERROR("Incomplete trace for rank %d in directory %s", 0, x->second.c_str()) 
+            entries += entry;
+          } 
+          recorder_free_reader(&reader);
+	}
+        int total_entries;
+        MPI_Reduce(&entries, &total_entries, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+        MPI_Barrier(MPI_COMM_WORLD);
+        step_timer.pauseTime();
+        if (mpi_rank == 0) 
+             WISIO_LOGPRINT("Processed workflow step %d of %d with %d entries in %f secs", step * mpi_size, workflow_steps, total_entries, step_timer.getElapsedTime());
+    } 
+    for (auto x : ordered_map){
         step_timer.resumeTime(); 
         recorder_init_reader(x.second.c_str(), &reader);
-        int step_per_rank = 1;
-        int entries = 0;
-        if (reader.metadata.total_ranks > 1)
-             step_per_rank = mpi_size;
-        if (reader.metadata.total_ranks == 1) {
-            if (step >= start_step && step < end_step) {
-                WISIO_LOGINFO("Converting workflow step %d of %d of rank 0 in %s by rank %d", step+1, num_steps, x.first.directory.c_str(), mpi_rank);
-                recorder_init_reader(x.second.c_str(), &reader);
-                int entry = process_rank(parquet_file_dir, 0, x.first, &writer);
-                if (entry == 0) 
-                    WISIO_LOGERROR("Incomplete trace for rank %d in directory %s", 0, x.second.c_str()) 
-                entries += entry;
-                recorder_free_reader(&reader);
-                completed++;
-            }
-        } else {
-            // Each rank will process n files (n ranks traces)
+        if (reader.metadata.total_ranks > 1) {
+            int entries = 0;
             int n = max(reader.metadata.total_ranks/mpi_size, 1);
             int start_rank = n * mpi_rank;
             int end_rank   = min(reader.metadata.total_ranks, n*(mpi_rank+1));
             for(int rank = start_rank; rank < end_rank; rank++) {
-                WISIO_LOGINFO("Converting workflow step %d of %d of rank %d in %s by rank %d", step+1, num_steps, rank, x.first.directory.c_str(), mpi_rank);
+                WISIO_LOGINFO("Converting mpi step %d of %d of rank %d in %s by rank %d", step+1, num_steps, rank, x.first.directory.c_str(), mpi_rank);
                 int entry = process_rank(parquet_file_dir, rank, x.first, &writer);
                 if (entry == 0) 
                     WISIO_LOGERROR("Incomplete trace for rank %d in directory %s", rank, x.second.c_str())        
@@ -1058,16 +1072,13 @@ int main(int argc, char **argv) {
                 }
             }
             recorder_free_reader(&reader);
-            completed++;
-            
+            int total_entries;
+            MPI_Reduce(&entries, &total_entries, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+            MPI_Barrier(MPI_COMM_WORLD);
+            step_timer.pauseTime();
+            if (mpi_rank == 0) 
+                 WISIO_LOGPRINT("Processed mpi step %d of %d with %d entries in %f secs", completed, mpi_steps, total_entries, step_timer.getElapsedTime());
         }
-        int total_entries;
-        MPI_Reduce(&entries, &total_entries, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
-        MPI_Barrier(MPI_COMM_WORLD);
-        step_timer.pauseTime();
-        
-        if (mpi_rank == 0) 
-             WISIO_LOGPRINT("Processed step %d of %d with %d entries by %d ranks by %f secs", completed, num_steps, total_entries, step_per_rank, step_timer.getElapsedTime());
         step++;
         if (prev != completed) {
             prev = completed;

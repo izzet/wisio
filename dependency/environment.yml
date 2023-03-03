@@ -1,0 +1,13 @@
+name: wisio 
+dependencies:
+  - python=3.9
+  - bokeh
+  - dask
+  - dask-jobqueue
+  - distributed
+  - fastparquet
+  - numpy
+  - pandas
+  - pyyaml
+  - jupyterlab
+  - ipython-autotime 
