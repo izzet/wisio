@@ -171,6 +171,7 @@ def _compute_expanded_view(
             .agg({metric_col: sum})
     # Filter view
     filtered_view = filter_delta(
+        view_type=view_type,
         ddf=group_view,
         delta=delta,
         metric=metric,
@@ -222,7 +223,7 @@ def compute_unique_proc_names(log_dir: str) -> dd.DataFrame:
         .persist()
 
 
-def filter_delta(ddf: dd.DataFrame, delta: float, metric: str, max_io_time: dd.core.Scalar):
+def filter_delta(view_type: str, ddf: dd.DataFrame, delta: float, metric: str, max_io_time: dd.core.Scalar):
     metric_col, csp_col, delta_col, score_col, cut_col = (
         f"{metric}_sum",
         f"{metric}_csp",
@@ -237,7 +238,18 @@ def filter_delta(ddf: dd.DataFrame, delta: float, metric: str, max_io_time: dd.c
         df[score_col] = np.digitize(df[delta_col], bins=DELTA_BINS, right=True)
         df[cut_col] = np.choose(df[score_col] - 1, choices=DELTA_BINS, mode='clip')
         return df
-    ddf = ddf.map_partitions(set_delta)
+
+    index = pd.MultiIndex(levels=[[1]], codes=[[]], names=[view_type])
+    meta = dd.utils.make_meta(([
+        (csp_col, np.float64),
+        (cut_col, np.float16),
+        (delta_col, np.float64),
+        (metric_col, np.float64),
+        (score_col, np.int8),
+    ]), index=index)
+
+    ddf = ddf.map_partitions(set_delta, meta=meta)
+
     return ddf[ddf[delta_col] > delta]
 
 
