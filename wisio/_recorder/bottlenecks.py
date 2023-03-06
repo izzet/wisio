@@ -1,15 +1,12 @@
 import dask.dataframe as dd
-import numpy as np
 import pandas as pd
 from dask import compute, delayed
-from dask.distributed import Client,as_completed, futures_of, wait
-from itertools import permutations
-from pathlib import PurePath
-from typing import Dict
+from dask.distributed import Client, futures_of, wait
+from typing import Any, Dict
 from ..bottlenecks import BottleneckDetector
-from ..utils.collection_utils import deepflatten
 from ..utils.dask_agg import unique_flatten
 from ..utils.logger import ElapsedTimeLogger
+from .constants import VIEW_TYPES
 
 
 BOTTLENECK_ORDER = dict(
@@ -23,29 +20,30 @@ BOTTLENECK_TREE_NAME = dict(
     trange='trange'
 )
 
-def _get_level_value(row, col_name, col_id):
-    tree_name = BOTTLENECK_TREE_NAME[col_name]
-    # print('_get_level_name', col_name, col_id, bool(tree_name in row), bool(tree_name in dict(row)))
-    if tree_name in dict(row):
-        return tree_name, row[tree_name]
-    return tree_name, col_id
+
+def _get_level_value(level_row: pd.Series, level_col: str, level_id: Any):
+    tree_name = BOTTLENECK_TREE_NAME[level_col]
+    if tree_name in level_row.values:
+        return tree_name, level_row[tree_name]
+    return tree_name, level_id
 
 
-def _calculate_llc(level_row: dd.DataFrame, level_id: list, level_col: str, level_name:str):
-    #print(level_col, level_ids)
-    for level in ["proc_id", "trange", "file_id"]:
-        if level in level_row:
-            level_row.pop(level)
-    if level_name in level_row:
-        level_row.pop(level_name)
-    return dict(level_row)
+def _calculate_llc(level_row: pd.Series, level_name: str):
+    llc = dict(level_row)
+    for level in VIEW_TYPES:
+        if level in llc:
+            llc.pop(level)
+    if level_name in llc:
+        llc.pop(level_name)
+    return llc
+
 
 @delayed
 def _process_bottleneck_view(
     view_key: tuple,
-    ll_view: dd.DataFrame,
-    ml_view: dd.DataFrame,
-    hl_view: dd.DataFrame,
+    ll_view: pd.DataFrame,
+    ml_view: pd.DataFrame,
+    hl_view: pd.DataFrame,
 ):
     # Get view type
     view_type = view_key[-1]
@@ -53,23 +51,25 @@ def _process_bottleneck_view(
     hl_col, ml_col, ll_col = BOTTLENECK_ORDER[view_type]
     # Init bottlenecks
     bottlenecks = {}
+    # Loop through index tuples
     ids_tuple = ll_view.index
-    for hl, ml, ll in ids_tuple:
-        hl_row =  hl_view.loc[hl]
-        hl_name, hl_val = _get_level_value(hl_row, hl_col, hl)
-        ml_row =  ml_view.loc[(hl,ml)]
-        ml_name, ml_val = _get_level_value(ml_row, ml_col, ml)
-        ll_row =  ll_view.loc[(hl,ml,ll)]
-        ll_name, ll_val = _get_level_value(ll_row, ll_col, ll)
+    for hl_id, ml_id, ll_id in ids_tuple:
+        hl_row = hl_view.loc[hl_id]
+        hl_name, hl_val = _get_level_value(hl_row, hl_col, hl_id)
+        ml_row = ml_view.loc[(hl_id, ml_id)]
+        ml_name, ml_val = _get_level_value(ml_row, ml_col, ml_id)
+        ll_row = ll_view.loc[(hl_id, ml_id, ll_id)]
+        ll_name, ll_val = _get_level_value(ll_row, ll_col, ll_id)
         if hl_val not in bottlenecks:
-            bottlenecks[hl_val] = {'llc':None, ml_col:{}}
-            bottlenecks[hl_val]['llc'] = _calculate_llc(hl_row, hl, hl_col, hl_name)
+            bottlenecks[hl_val] = {'llc': None, ml_col: {}}
+            bottlenecks[hl_val]['llc'] = _calculate_llc(hl_row, hl_name)
         if ml_val not in bottlenecks[hl_val][ml_col]:
-            bottlenecks[hl_val][ml_col][ml_val] = {'llc':None, ll_col:{}}
-            bottlenecks[hl_val][ml_col][ml_val]['llc'] = _calculate_llc(ml_row, ml, ml_col, ml_name)
+            bottlenecks[hl_val][ml_col][ml_val] = {'llc': None, ll_col: {}}
+            bottlenecks[hl_val][ml_col][ml_val]['llc'] = _calculate_llc(ml_row, ml_name)
         if ll_val not in bottlenecks[hl_val][ml_col][ml_val][ll_col]:
-            bottlenecks[hl_val][ml_col][ml_val][ll_col][ll_val] = {'llc':None}
-            bottlenecks[hl_val][ml_col][ml_val][ll_col][ll_val]['llc'] = _calculate_llc(ll_row, ll, ll_col, ll_name)
+            bottlenecks[hl_val][ml_col][ml_val][ll_col][ll_val] = {'llc': None}
+            bottlenecks[hl_val][ml_col][ml_val][ll_col][ll_val]['llc'] = _calculate_llc(ll_row, ll_name)
+    # Return view key & bottlenecks
     return view_key, bottlenecks
 
 
@@ -110,8 +110,6 @@ class RecorderBottleneckDetector(BottleneckDetector):
         # Return bottleneck views
         return bottlenecks
 
-    
-
     def _process_bottleneck_views(
         self,
         all_bottleneck_views: Dict[tuple, pd.DataFrame]
@@ -121,39 +119,34 @@ class RecorderBottleneckDetector(BottleneckDetector):
         all_bottlenecks_d = []
         # Run through bottleneck views
         for view_key, bottleneck_views in all_bottleneck_views.items():
-            
             all_bottlenecks_d.append(_process_bottleneck_view(
                 view_key=view_key,
                 ll_view=bottleneck_views['low_level_view'],
                 ml_view=bottleneck_views['mid_level_view'],
                 hl_view=bottleneck_views['high_level_view']
             ))
-
-            # all_bottlenecks[view_key] = bottlenecks
+        # Compute all bottlenecks
         with ElapsedTimeLogger(logger=self.logger, message='Compute bottlenecks'):
             futures = compute(*all_bottlenecks_d, sync=False)
-            vals = Client.current().gather(list(futures))
-            for view_key, bottlenecks in vals:
+            results = Client.current().gather(list(futures))
+            for view_key, bottlenecks in results:
                 all_bottlenecks[view_key] = bottlenecks
-
+        # Return all bottlenecks
         return all_bottlenecks
-
-    
 
     def _generate_bottlenecks_views(
         self,
         view_key: tuple,
         view_dict: Dict[str, dd.DataFrame]
     ):
-        # Read types
-        parent_type = view_key[:-1]
-        view_type = view_key[-1]
-        # Get parent view
-        parent_view = view_dict['bottleneck_view']
+        # Get view type
         view_type = view_key[-1]
 
+        # Get parent view
+        bottleneck_view = view_dict['bottleneck_view']
+
         # Create lower level view
-        low_level_view = parent_view \
+        low_level_view = bottleneck_view \
             .groupby(list(BOTTLENECK_ORDER[view_type])) \
             .first() \
             .drop(columns=['acc_pat', 'io_cat', 'file_name', 'proc_name'], errors='ignore')

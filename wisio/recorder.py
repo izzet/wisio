@@ -10,6 +10,7 @@ from ._recorder.analysis import (
     compute_view
 )
 from ._recorder.bottlenecks import RecorderBottleneckDetector
+from ._recorder.constants import VIEW_TYPES
 from .base import Analyzer
 from .dask import ClusterManager
 from .utils.file_utils import ensure_dir
@@ -82,7 +83,7 @@ class RecorderAnalyzer(Analyzer):
                 logger=self.logger,
                 log_dir=log_dir,
                 views=views,
-                view_types=['trange', 'file_id', 'proc_id'],
+                view_types=VIEW_TYPES,
                 unique_file_names=unique_file_names,
                 unique_proc_names=unique_proc_names
             )
