@@ -18,9 +18,6 @@ from .utils.json_encoders import NpEncoder
 from .utils.logger import ElapsedTimeLogger
 
 
-VIEW_TYPES = ['trange', 'file_id', 'proc_id']
-
-
 class RecorderAnalyzer(Analyzer):
 
     def __init__(
@@ -106,7 +103,7 @@ class RecorderAnalyzer(Analyzer):
         for view_key, bottleneck_dict in bottlenecks.items():
             file_name = '_'.join(view_key) if isinstance(view_key, tuple) else view_key
             with open(f"{bottleneck_dir}/{file_name}.json", 'w') as json_file:
-                json.dump(bottleneck_dict, json_file, cls=NpEncoder)
+                json.dump(bottleneck_dict, json_file, cls=NpEncoder, sort_keys=True)
 
     def _save_views(self, log_dir: str, views: Dict[Tuple, dd.DataFrame]):
         for view_perm, view in views.items():
