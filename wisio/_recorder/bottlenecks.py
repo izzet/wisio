@@ -1,7 +1,7 @@
 import dask.dataframe as dd
 import pandas as pd
 from dask import compute, delayed
-from dask.distributed import Client, futures_of, wait
+from dask.distributed import get_client
 from typing import Any, Dict
 from ..bottlenecks import BottleneckDetector
 from ..utils.dask_agg import unique_flatten
@@ -79,65 +79,55 @@ class RecorderBottleneckDetector(BottleneckDetector):
         self,
         logger,
         log_dir: str,
-        views: Dict[tuple, dd.DataFrame],
-        view_types: list,
         unique_file_names: dd.DataFrame,
         unique_proc_names: dd.DataFrame,
     ):
-        super().__init__(logger, log_dir, views, view_types)
+        super().__init__(logger, log_dir)
         self.unique_file_names = unique_file_names
         self.unique_proc_names = unique_proc_names
 
-    def detect_bottlenecks(self, max_io_time: dd.core.Scalar, cut=0.5) -> Dict[tuple, pd.DataFrame]:
+    def detect_bottlenecks(self, views: Dict[tuple, dd.DataFrame], view_types: list) -> Dict[tuple, object]:
         # Keep bottleneck views
-        all_bottleneck_views = {}
-        all_bottleneck_views_futures = []
+        bottleneck_views = {}
         # Run through views
-        for view_key, view_dict in self.views.items():
+        for view_key, view_dict in views.items():
             # Generate bottleneck views
-            bottleneck_views = self._generate_bottlenecks_views(
+            bottleneck_views[view_key] = self._generate_bottlenecks_views(
                 view_key=view_key,
                 view_dict=view_dict,
+                view_types=view_types,
             )
-            # Set bottleneck views
-            all_bottleneck_views[view_key] = bottleneck_views
-            # Get futures
-            all_bottleneck_views_futures.extend(map(futures_of, bottleneck_views.values()))
-        # Wait all bottleneck views to be done
-        wait(all_bottleneck_views_futures)
         # Generate bottlenecks
-        bottlenecks = self._process_bottleneck_views(all_bottleneck_views=all_bottleneck_views)
+        bottlenecks = self._process_bottleneck_views(bottleneck_views=bottleneck_views)
         # Return bottleneck views
         return bottlenecks
 
-    def _process_bottleneck_views(
-        self,
-        all_bottleneck_views: Dict[tuple, pd.DataFrame]
-    ):
+    def _process_bottleneck_views(self, bottleneck_views: Dict[tuple, pd.DataFrame]):
         # Init bottlenecks
-        all_bottlenecks = {}
-        all_bottlenecks_d = []
+        bottlenecks = {}
+        bottlenecks_delayed = []
         # Run through bottleneck views
-        for view_key, bottleneck_views in all_bottleneck_views.items():
-            all_bottlenecks_d.append(_process_bottleneck_view(
+        for view_key, view_dict in bottleneck_views.items():
+            bottlenecks_delayed.append(_process_bottleneck_view(
                 view_key=view_key,
-                ll_view=bottleneck_views['low_level_view'],
-                ml_view=bottleneck_views['mid_level_view'],
-                hl_view=bottleneck_views['high_level_view']
+                ll_view=view_dict['low_level_view'],
+                ml_view=view_dict['mid_level_view'],
+                hl_view=view_dict['high_level_view']
             ))
         # Compute all bottlenecks
         with ElapsedTimeLogger(logger=self.logger, message='Compute bottlenecks'):
-            futures = compute(*all_bottlenecks_d, sync=False)
-            results = Client.current().gather(list(futures))
-            for view_key, bottlenecks in results:
-                all_bottlenecks[view_key] = bottlenecks
+            futures = compute(*bottlenecks_delayed, sync=False)
+            results = get_client().gather(list(futures))
+            for view_key, result in results:
+                bottlenecks[view_key] = result
         # Return all bottlenecks
-        return all_bottlenecks
+        return bottlenecks
 
     def _generate_bottlenecks_views(
         self,
         view_key: tuple,
-        view_dict: Dict[str, dd.DataFrame]
+        view_dict: Dict[str, dd.DataFrame],
+        view_types: list
     ):
         # Get view type
         view_type = view_key[-1]
@@ -152,8 +142,8 @@ class RecorderBottleneckDetector(BottleneckDetector):
             .drop(columns=['acc_pat', 'io_cat', 'file_name', 'proc_name'], errors='ignore')
 
         # Non-proc agg columns
-        non_proc_agg_dict = self._get_agg_dict(view_columns=low_level_view.columns, is_proc=False)
-        proc_agg_dict = self._get_agg_dict(view_columns=low_level_view.columns, is_proc=True)
+        non_proc_agg_dict = self._get_agg_dict(view_types=view_types, view_columns=low_level_view.columns, is_proc=False)
+        proc_agg_dict = self._get_agg_dict(view_types=view_types, view_columns=low_level_view.columns, is_proc=True)
 
         if view_type is not 'proc_id':
 
@@ -201,7 +191,7 @@ class RecorderBottleneckDetector(BottleneckDetector):
             high_level_view=high_level_view.persist()
         )
 
-    def _get_agg_dict(self, view_columns: list, is_proc=False):
+    def _get_agg_dict(self, view_types: list, view_columns: list, is_proc=False):
         if is_proc:
             agg_dict = {col: max if any(x in col for x in 'duration time'.split()) else sum for col in view_columns}
         else:
@@ -209,7 +199,7 @@ class RecorderBottleneckDetector(BottleneckDetector):
         agg_dict['func_id'] = unique_flatten()
         agg_dict['size_min'] = min
         agg_dict['size_max'] = max
-        for view_type in self.view_types:
+        for view_type in view_types:
             if view_type in agg_dict:
                 agg_dict.pop(view_type)
         return agg_dict

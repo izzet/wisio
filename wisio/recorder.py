@@ -79,12 +79,13 @@ class RecorderAnalyzer(Analyzer):
             bottleneck_detector = RecorderBottleneckDetector(
                 logger=self.logger,
                 log_dir=log_dir,
-                views=views,
-                view_types=VIEW_TYPES,
                 unique_file_names=unique_file_names,
                 unique_proc_names=unique_proc_names
             )
-            bottlenecks = bottleneck_detector.detect_bottlenecks(max_io_time=max_io_time)
+            bottlenecks = bottleneck_detector.detect_bottlenecks(
+                views=views,
+                view_types=VIEW_TYPES
+            )
 
         with ElapsedTimeLogger(logger=self.logger, message='Save bottlenecks'):
             self.save_bottlenecks(log_dir=log_dir, bottlenecks=bottlenecks)
