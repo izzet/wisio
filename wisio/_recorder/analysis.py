@@ -180,7 +180,7 @@ def _compute_expanded_view(
     score_view = filtered_view.reset_index()[[view_type, score_col, cut_col]]
     # Find filtered records and set duration scores
     expanded_view = parent_view \
-        .query(f"{view_type}.isin(@indices)", local_dict={'indices': filtered_view.index.unique()}) \
+        .query(f"{view_type} in @indices", local_dict={'indices': filtered_view.index.unique()}) \
         .drop(columns=[score_col, cut_col], errors='ignore') \
         .merge(score_view, on=[view_type])
     # Set metric percentages
