@@ -90,7 +90,8 @@ def compute_main_view(
     hlm_view = ddf[ddf['cat'] == CAT_IO] \
         .groupby(groupby) \
         .agg(HLM_AGG) \
-        .reset_index()
+        .reset_index() \
+        .persist()
     # Flatten column names
     hlm_view = _flatten_column_names(ddf=hlm_view)
     # Set derived columns
@@ -105,10 +106,10 @@ def compute_main_view(
         .groupby(view_types) \
         .agg(agg_columns) \
         .reset_index() \
-        .rename(columns={
-            'func_id_unique_flatten': 'func_id'
-        }) \
+        .rename(columns={'func_id_unique_flatten': 'func_id'}) \
         .persist()
+    # Delete hlm_view
+    del hlm_view
     # Return main_view
     return main_view
 
