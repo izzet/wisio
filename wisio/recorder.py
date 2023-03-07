@@ -55,14 +55,10 @@ class RecorderAnalyzer(Analyzer):
         with ElapsedTimeLogger(logger=self.logger, message='Compute max I/O time'):
             max_io_time = compute_max_io_time(main_view=main_view)
 
-        # Compute filenames & procnames
-        with ElapsedTimeLogger(logger=self.logger, message='Compute file names & proc names'):
-            unique_file_names = compute_unique_file_names(log_dir=log_dir)
-            unique_proc_names = compute_unique_proc_names(log_dir=log_dir)
-
         # Compute multifaceted views
         views = {}
         with ElapsedTimeLogger(logger=self.logger, message='Compute multifaceted view'):
+            # Loop through view permutations
             for view_permutation in it.chain.from_iterable(map(self._view_permutations, range(len(VIEW_TYPES)))):
                 # Compute view
                 views[view_permutation] = compute_view(
@@ -75,13 +71,8 @@ class RecorderAnalyzer(Analyzer):
                 )
 
         # Detect bottlenecks
+        bottleneck_detector = RecorderBottleneckDetector(logger=self.logger, log_dir=log_dir)
         with ElapsedTimeLogger(logger=self.logger, message='Detect bottlenecks'):
-            bottleneck_detector = RecorderBottleneckDetector(
-                logger=self.logger,
-                log_dir=log_dir,
-                unique_file_names=unique_file_names,
-                unique_proc_names=unique_proc_names
-            )
             bottlenecks = bottleneck_detector.detect_bottlenecks(
                 views=views,
                 view_types=VIEW_TYPES
