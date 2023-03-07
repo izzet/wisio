@@ -5,8 +5,6 @@ from typing import Dict, Tuple
 from ._recorder.analysis import (
     compute_main_view,
     compute_max_io_time,
-    compute_unique_file_names,
-    compute_unique_proc_names,
     compute_view
 )
 from ._recorder.bottlenecks import RecorderBottleneckDetector
