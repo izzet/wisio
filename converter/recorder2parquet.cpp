@@ -246,11 +246,11 @@ struct ParquetWriter {
     arrow::Int32Builder categoryBuilder, ioCategoryBuilder, rankBuilder, threadBuilder, levelBuilder, accessPatternBuilder;
     arrow::Int64Builder procBuilder,indexBuilder, sizeBuilder, fileIdBuilder, procIdBuilder, tmidBuilder;
     arrow::FloatBuilder tstartBuilder, tendBuilder, durationBuilder, bandwidthBuilder;
-    arrow::StringBuilder func_idBuilder, appBuilder, hostnameBuilder, filenameBuilder;
+    arrow::StringBuilder func_idBuilder, appBuilder, hostnameBuilder, filenameBuilder, procnameBuilder;
 
     std::shared_ptr<arrow::Array> indexArray, categoryArray, ioCategoryArray, procArray, rankArray, threadArray, levelArray, tstartArray, tendArray,
             func_idArray, appArray,hostnameArray, sizeArray, durationArray, bandwidthArray, filenameArray, tmidArray, fileIdArray, procIdArray, 
-            accessPatternArray;
+            accessPatternArray, procnameArray;
 
     std::shared_ptr<arrow::Schema> schema;
     const int64_t chunk_size = 1024;
@@ -290,7 +290,8 @@ ParquetWriter::ParquetWriter(char* _path):
         arrow::field("level", arrow::int32()),
         arrow::field("hostname", arrow::utf8()),
         arrow::field("app", arrow::utf8()),
-        arrow::field("filename", arrow::utf8()),
+        arrow::field("proc_name", arrow::utf8()),
+        arrow::field("file_name", arrow::utf8()),
         arrow::field("size", arrow::int64()),
         arrow::field("acc_pat", arrow::int32()),
         arrow::field("bandwidth", arrow::float32()),
@@ -329,6 +330,8 @@ ParquetWriter::ParquetWriter(char* _path):
 
     hostnameBuilder = arrow::StringBuilder();
     hostnameArray.reset();
+    procnameBuilder = arrow::StringBuilder();
+    procnameArray.reset();
     filenameBuilder = arrow::StringBuilder();
     filenameArray.reset();
 
@@ -363,6 +366,7 @@ void ParquetWriter::finish(void) {
     func_idBuilder.Finish(&func_idArray);
     levelBuilder.Finish(&levelArray);
     hostnameBuilder.Finish(&hostnameArray);
+    procnameBuilder.Finish(&procnameArray);
     filenameBuilder.Finish(&filenameArray);
     appBuilder.Finish(&appArray);
     categoryBuilder.Finish(&categoryArray);
@@ -382,6 +386,7 @@ void ParquetWriter::finish(void) {
         levelArray,
         hostnameArray,
         appArray,
+        procnameArray,
         filenameArray,
         sizeArray,
         accessPatternArray,
@@ -718,11 +723,21 @@ void handle_one_record(Record* record, void* arg) {
             size = size * count;
             bandwidth = duration > 0 ? (size * 1.0 / duration / 1024.0 / 1024.0) : 0.0;
 
+
+
             int64_t thread_hash = (std::hash<int>()(record->tid) % std::numeric_limits<std::uint16_t>::max());
-            int64_t rank_hash = (std::hash<int>()(writer->rank) %std::numeric_limits<std::uint16_t>::max()) << 16;
-            int64_t proc_id_hash = (std::hash<int>()(writer->directory.proc_id) % std::numeric_limits<std::uint16_t>::max()) << 32;
-            int64_t hostname_hash = (std::hash<std::string>()(writer->directory.hostname) % std::numeric_limits<std::int16_t>::max()) << 48;
-            process_hash = process_hash | thread_hash | rank_hash | proc_id_hash | hostname_hash;
+            int process_id_used = writer->directory.proc_id;
+            if (process_id_used == 1)
+                process_id_used = writer->rank;
+            std::string proc_name = writer->directory.app + "#" +
+                                    writer->directory.hostname + "#" +
+                                    std::to_string(process_id_used) + "#" +
+                                    std::to_string(record->tid);
+
+            int64_t process_id_hash = (std::hash<int>()(process_id_used) %std::numeric_limits<std::uint16_t>::max()) << 16;
+            int64_t hostname_hash = (std::hash<std::string>()(writer->directory.hostname) % std::numeric_limits<std::int16_t>::max()) << 32;
+            int64_t app_hash = (std::hash<std::string>()(writer->directory.app) % std::numeric_limits<std::uint16_t>::max()) << 48;
+            process_hash = app_hash | hostname_hash | process_id_hash | thread_hash;
 
             if (writer->min_proc_id > process_hash) writer->min_proc_id = process_hash;
             if (writer->max_proc_id < process_hash) writer->max_proc_id = process_hash;
