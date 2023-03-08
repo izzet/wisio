@@ -665,7 +665,7 @@ void handle_one_record(Record* record, void* arg) {
         int io_cat = OTHER_FUNC;
         int access_pattern = 0;
         int64_t file_hash = 0;
-        std::string proc_name = "";
+        std::string proc_name = "UNKNOWN";
         if (cat == 0) {
             file = std::string(get_filename(record));
             {
@@ -1071,7 +1071,7 @@ int main(int argc, char **argv) {
         MPI_Barrier(MPI_COMM_WORLD);
         step_timer.pauseTime();
         if (mpi_rank == 0) 
-             WISIO_LOGPRINT("Processed workflow step %d of %d with %d entries in %f secs", step * mpi_size, workflow_steps, total_entries, step_timer.getElapsedTime());
+             WISIO_LOGPRINT("Processed workflow step %d of %d with %d entries in %f secs", (step + 1) * mpi_size, workflow_steps, total_entries, step_timer.getElapsedTime());
     } 
     completed = 0;
     if (mpi_steps > 0) {
