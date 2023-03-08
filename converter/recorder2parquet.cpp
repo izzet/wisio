@@ -1093,13 +1093,13 @@ int main(int argc, char **argv) {
                 if(rank_index == n - 1) {
                      WISIO_LOGINFO("Completed ranks %d of %d by rank %d", rank_index + 1, n, mpi_rank);
                 }
-                completed++; 
             }
             recorder_free_reader(&reader);
             int total_entries;
             MPI_Reduce(&entries, &total_entries, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
             MPI_Barrier(MPI_COMM_WORLD);
             step_timer.pauseTime();
+            completed++; 
             if (mpi_rank == 0) 
                  WISIO_LOGPRINT("Processed mpi step %d of %d with %d entries in %f secs", completed, mpi_steps, total_entries, step_timer.getElapsedTime());
         }
