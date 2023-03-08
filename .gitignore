@@ -14,3 +14,5 @@ build
 dependency/.spack-env
 dependency/spack.lock
 .idea
+CMakeFiles
+CMakeCache.txt
