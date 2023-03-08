@@ -11,7 +11,9 @@ HLM_AGG = {
     'duration': [sum],
     'index': ['count'],
     'size': [min, max, sum],
-    'func_id': [unique_flatten()]
+    'file_name': ['first'],
+    'proc_name': ['first'],
+    'func_id': [unique_flatten()],
 }
 DELTA_BINS = [
     0,
@@ -71,7 +73,7 @@ XFER_SIZE_BIN_NAMES = [
 def compute_main_view(
     log_dir: str,
     global_min_max: dict,
-    view_types: list
+    view_types: list,
 ):
     # Add `io_cat` and `acc_pat` anyway
     groupby = view_types.copy()
@@ -81,34 +83,44 @@ def compute_main_view(
     columns = list(HLM_AGG.keys())
     columns.extend(groupby)
     # Read Parquet files
-    ddf = dd.read_parquet(f"{log_dir}/*.parquet", columns=_get_parquet_columns(columns))
+    ddf = dd.read_parquet(f"{log_dir}/*.parquet")
     # Set tranges
     ddf = _set_tranges(ddf=ddf, global_min_max=global_min_max)
+    # Set process names
+    ddf = _set_proc_names(ddf=ddf)
     # Fix types
     ddf = _fix_ddf_types(ddf=ddf)
     # Compute high-level metrics
     hlm_view = ddf[ddf['cat'] == CAT_IO] \
+        .rename(columns={'filename': 'file_name'}) \
         .groupby(groupby) \
         .agg(HLM_AGG) \
-        .reset_index()
+        .reset_index() \
+        .persist()
     # Flatten column names
     hlm_view = _flatten_column_names(ddf=hlm_view)
     # Set derived columns
     hlm_view = _set_derived_columns(ddf=hlm_view)
     # Compute agg columns
-    agg_columns = {col: sum for col in hlm_view.columns}
-    agg_columns['func_id_unique_flatten'] = unique_flatten()
+    agg_dict = {col: sum for col in hlm_view.columns}
+    agg_dict['file_name_first'] = 'first'
+    agg_dict['proc_name_first'] = 'first'
+    agg_dict['func_id_unique_flatten'] = unique_flatten()
     for view_type in view_types:
-        agg_columns.pop(view_type)
+        agg_dict.pop(view_type)
     # Compute main_view
     main_view = hlm_view \
         .groupby(view_types) \
-        .agg(agg_columns) \
+        .agg(agg_dict) \
         .reset_index() \
         .rename(columns={
-            'func_id_unique_flatten': 'func_id'
+            'file_name_first': 'file_name',
+            'proc_name_first': 'proc_name',
+            'func_id_unique_flatten': 'func_id',
         }) \
         .persist()
+    # Delete hlm_view
+    del hlm_view
     # Return main_view
     return main_view
 
@@ -136,7 +148,7 @@ def compute_view(
         cols=(metric_col, score_col, cut_col),
         metric=metric,
         delta=delta,
-        max_io_time=max_io_time
+        max_io_time=max_io_time,
     )
     # Return views
     return dict(
@@ -151,7 +163,7 @@ def _compute_expanded_view(
     cols: tuple,
     metric: str,
     delta: float,
-    max_io_time: dd.core.Scalar
+    max_io_time: dd.core.Scalar,
 ):
     # Get column names
     metric_col, score_col, cut_col = cols
@@ -170,6 +182,7 @@ def _compute_expanded_view(
             .agg({metric_col: sum})
     # Filter view
     filtered_view = filter_delta(
+        view_type=view_type,
         ddf=group_view,
         delta=delta,
         metric=metric,
@@ -179,7 +192,7 @@ def _compute_expanded_view(
     score_view = filtered_view.reset_index()[[view_type, score_col, cut_col]]
     # Find filtered records and set duration scores
     expanded_view = parent_view \
-        .query(f"{view_type}.isin(@indices)", local_dict={'indices': filtered_view.index.unique()}) \
+        .query(f"{view_type} in @indices", local_dict={'indices': filtered_view.index.unique()}) \
         .drop(columns=[score_col, cut_col], errors='ignore') \
         .merge(score_view, on=[view_type])
     # Set metric percentages
@@ -192,36 +205,7 @@ def compute_max_io_time(main_view: dd.DataFrame):
     return main_view.groupby(['proc_id']).sum()['duration_sum'].max()
 
 
-def compute_unique_file_names(log_dir: str) -> dd.DataFrame:
-    # Compute unique filenames
-    return dd.read_parquet(f"{log_dir}/*.parquet", columns=['file_id', 'filename']) \
-        .groupby(['file_id']) \
-        .agg({'filename': 'first'}) \
-        .rename(columns={'filename': 'file_name'}) \
-        .persist()
-
-
-def compute_unique_proc_names(log_dir: str) -> dd.DataFrame:
-    # Compute unique processes
-    return dd.read_parquet(f"{log_dir}/*.parquet", columns=['proc_id', 'app', 'hostname', 'rank']) \
-        .groupby(['proc_id']) \
-        .agg({
-            'app': 'first',
-            'hostname': 'first',
-            'rank': 'first'
-        }) \
-        .map_partitions(lambda df: df.assign(proc_name=(
-            df['app']
-            .str.cat(df['hostname'], sep='-')
-            .str.cat(df['rank'].astype(str), sep='-')
-            .str.lstrip('-')
-            .str.rstrip('-')
-        ))) \
-        .drop(columns=['app', 'hostname', 'rank']) \
-        .persist()
-
-
-def filter_delta(ddf: dd.DataFrame, delta: float, metric: str, max_io_time: dd.core.Scalar):
+def filter_delta(view_type: str, ddf: dd.DataFrame, delta: float, metric: str, max_io_time: dd.core.Scalar):
     metric_col, csp_col, delta_col, score_col, cut_col = (
         f"{metric}_sum",
         f"{metric}_csp",
@@ -236,7 +220,18 @@ def filter_delta(ddf: dd.DataFrame, delta: float, metric: str, max_io_time: dd.c
         df[score_col] = np.digitize(df[delta_col], bins=DELTA_BINS, right=True)
         df[cut_col] = np.choose(df[score_col] - 1, choices=DELTA_BINS, mode='clip')
         return df
-    ddf = ddf.map_partitions(set_delta)
+
+    index = pd.MultiIndex(levels=[[1]], codes=[[]], names=[view_type])
+    meta = dd.utils.make_meta(([
+        (metric_col, np.float64),
+        (csp_col, np.float64),
+        (delta_col, np.float64),
+        (score_col, np.int8),
+        (cut_col, np.float16),
+    ]), index=index)
+
+    ddf = ddf.map_partitions(set_delta, meta=meta)
+
     return ddf[ddf[delta_col] > delta]
 
 
@@ -299,6 +294,16 @@ def _set_derived_columns(ddf: dd.DataFrame):
             ddf[col_name] = ddf[col_name].mask(ddf['acc_pat'] == acc_pat.value, ddf[col_value])
     # Return ddf
     return ddf
+
+
+def _set_proc_names(ddf: dd.DataFrame):
+    return ddf.map_partitions(lambda df: df.assign(proc_name=(
+        df['app']
+        .str.cat(df['hostname'], sep='-')
+        .str.cat(df['rank'].astype(str), sep='-')
+        .str.lstrip('-')
+        .str.rstrip('-')
+    )))
 
 
 def _set_tranges(ddf: dd.DataFrame, global_min_max: dict):
