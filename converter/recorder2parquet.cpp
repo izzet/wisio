@@ -665,6 +665,7 @@ void handle_one_record(Record* record, void* arg) {
         int io_cat = OTHER_FUNC;
         int access_pattern = 0;
         int64_t file_hash = 0;
+        std::string proc_name = "";
         if (cat == 0) {
             file = std::string(get_filename(record));
             {
@@ -729,7 +730,7 @@ void handle_one_record(Record* record, void* arg) {
             int process_id_used = writer->directory.proc_id;
             if (process_id_used == 1)
                 process_id_used = writer->rank;
-            std::string proc_name = writer->directory.app + "#" +
+            proc_name = writer->directory.app + "#" +
                                     writer->directory.hostname + "#" +
                                     std::to_string(process_id_used) + "#" +
                                     std::to_string(record->tid);
@@ -821,6 +822,7 @@ void handle_one_record(Record* record, void* arg) {
         writer->ioCategoryBuilder.Append(io_cat);
         writer->levelBuilder.Append(record->level);
         writer->hostnameBuilder.Append(writer->directory.hostname);
+        writer->procnameBuilder.Append(proc_name);
         writer->appBuilder.Append(writer->directory.app);
         writer->procIdBuilder.Append(process_hash);
         writer->fileIdBuilder.Append(file_hash);
@@ -847,6 +849,7 @@ void handle_one_record(Record* record, void* arg) {
             writer->hostnameBuilder.Finish(&writer->hostnameArray);
             writer->filenameBuilder.Finish(&writer->filenameArray);
             writer->appBuilder.Finish(&writer->appArray);
+            writer->procnameBuilder.Finish(&writer->procnameArray);
             writer->accessPatternBuilder.Finish(&writer->accessPatternArray);
 
             auto table = arrow::Table::Make(writer->schema, {
@@ -862,6 +865,7 @@ void handle_one_record(Record* record, void* arg) {
                 writer->levelArray,
                 writer->hostnameArray,
                 writer->appArray,
+                writer->procnameArray,
                 writer->filenameArray,
                 writer->sizeArray,
                 writer->accessPatternArray,
@@ -906,6 +910,8 @@ void handle_one_record(Record* record, void* arg) {
 
             writer->hostnameBuilder = arrow::StringBuilder();
             writer->hostnameArray.reset();
+            writer->procnameBuilder = arrow::StringBuilder();
+            writer->procnameArray.reset();
             writer->filenameBuilder = arrow::StringBuilder();
             writer->filenameArray.reset();
 
@@ -1043,7 +1049,7 @@ int main(int argc, char **argv) {
     }
     if (mpi_rank == 0) 
         WISIO_LOGPRINT("Workflow has %d mpi steps and %d workflow steps out of total %d steps", mpi_steps, workflow_steps, workflow_steps+mpi_steps);
-    for (step = 0; step < n; ++step) {
+    for (step = 0; workflow_steps > 0 && step < n; ++step) {
         int map_element = mpi_rank * n + step;
         auto x = ordered_map.begin();
         std::advance(x, map_element);
@@ -1067,6 +1073,8 @@ int main(int argc, char **argv) {
         if (mpi_rank == 0) 
              WISIO_LOGPRINT("Processed workflow step %d of %d with %d entries in %f secs", step * mpi_size, workflow_steps, total_entries, step_timer.getElapsedTime());
     } 
+    completed = 0;
+    if (mpi_steps > 0) {
     for (auto x : ordered_map){
         step_timer.resumeTime(); 
         recorder_init_reader(x.second.c_str(), &reader);
@@ -1085,6 +1093,7 @@ int main(int argc, char **argv) {
                 if(rank_index == n - 1) {
                      WISIO_LOGINFO("Completed ranks %d of %d by rank %d", rank_index + 1, n, mpi_rank);
                 }
+                completed++; 
             }
             recorder_free_reader(&reader);
             int total_entries;
@@ -1099,7 +1108,7 @@ int main(int argc, char **argv) {
             prev = completed;
         }
     }
-    
+    }
     WISIO_LOGPRINT("Completed %d by rank %d", completed, mpi_rank);
     writer.finish();
 
