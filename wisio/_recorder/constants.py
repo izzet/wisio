@@ -12,7 +12,14 @@ class IOCategory(Enum):
     METADATA = 3
 
 
-CAT_IO = 0
+# https://github.com/uiuc-hpc/Recorder/blob/6c1e5c9377fef4c8d300cd1dc44bca8defb03561/include/recorder-logger.h#L85
+# define RECORDER_POSIX      0
+# define RECORDER_MPIIO      1
+# define RECORDER_MPI        2
+# define RECORDER_HDF5       3
+# define RECORDER_FTRACE     4
+
+CAT_POSIX = 0
 
 TIME_PRECISION = 1e7
 

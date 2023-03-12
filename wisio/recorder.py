@@ -1,7 +1,6 @@
-import dask.dataframe as dd
 import itertools as it
 import json
-from typing import Dict, Tuple
+from typing import Dict
 from ._recorder.analysis import (
     compute_main_view,
     compute_max_io_time,
@@ -65,7 +64,6 @@ class RecorderAnalyzer(Analyzer):
                     view_permutation=view_permutation,
                     max_io_time=max_io_time,
                     delta=delta,
-                    cut=cut
                 )
 
         # Detect bottlenecks
@@ -73,11 +71,9 @@ class RecorderAnalyzer(Analyzer):
         with ElapsedTimeLogger(logger=self.logger, message='Detect bottlenecks'):
             bottlenecks = bottleneck_detector.detect_bottlenecks(
                 views=views,
-                view_types=VIEW_TYPES
+                view_types=VIEW_TYPES,
+                max_io_time=max_io_time,
             )
-
-        with ElapsedTimeLogger(logger=self.logger, message='Save bottlenecks'):
-            self.save_bottlenecks(log_dir=log_dir, bottlenecks=bottlenecks)
 
         # Return views
         return views, bottlenecks
@@ -94,12 +90,6 @@ class RecorderAnalyzer(Analyzer):
             file_name = '_'.join(view_key) if isinstance(view_key, tuple) else view_key
             with open(f"{bottleneck_dir}/{file_name}.json", 'w') as json_file:
                 json.dump(bottleneck_dict, json_file, cls=NpEncoder, sort_keys=True)
-
-    def _save_views(self, log_dir: str, views: Dict[Tuple, dd.DataFrame]):
-        for view_perm, view in views.items():
-            copy_view = view.copy()
-            copy_view.columns = ['_'.join(tup).rstrip('_') for tup in copy_view.columns.values]
-            copy_view.to_parquet(f"{log_dir}/{'_'.join(view_perm) if isinstance(view_perm, tuple) else view_perm}")
 
     @staticmethod
     def _view_permutations(r: int):

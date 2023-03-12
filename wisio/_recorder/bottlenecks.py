@@ -1,12 +1,12 @@
 import dask.dataframe as dd
 import pandas as pd
 from dask import compute, delayed
-from dask.distributed import get_client
 from logging import Logger
 from typing import Dict
 from ..bottlenecks import BottleneckDetector
 from ..utils.dask_agg import unique_flatten
 from ..utils.logger import ElapsedTimeLogger
+from .analysis import DELTA_BINS, set_metric_percentages, set_metric_scores
 from .constants import VIEW_TYPES
 
 
@@ -36,9 +36,10 @@ def _calculate_llc(level_row: pd.Series):
 @delayed
 def _process_bottleneck_view(
     view_key: tuple,
-    ll_view: pd.DataFrame,
-    ml_view: pd.DataFrame,
-    hl_view: pd.DataFrame,
+    threshold: float,
+    low_level_view: pd.DataFrame,
+    mid_level_view: pd.DataFrame,
+    high_level_view: pd.DataFrame,
 ):
     # Get view type
     view_type = view_key[-1]
@@ -47,11 +48,11 @@ def _process_bottleneck_view(
     # Init bottlenecks
     bottlenecks = {}
     # Loop through index tuples
-    ids_tuple = ll_view.index
+    ids_tuple = low_level_view.index
     for hl_id, ml_id, ll_id in ids_tuple:
-        hl_row = hl_view.loc[hl_id]
-        ml_row = ml_view.loc[(hl_id, ml_id)]
-        ll_row = ll_view.loc[(hl_id, ml_id, ll_id)]
+        hl_row = high_level_view.loc[hl_id]
+        ml_row = mid_level_view.loc[(hl_id, ml_id)]
+        ll_row = low_level_view.loc[(hl_id, ml_id, ll_id)]
         if hl_id not in bottlenecks:
             bottlenecks[hl_id] = {}
             bottlenecks[hl_id]['llc'] = _calculate_llc(hl_row)
@@ -64,7 +65,7 @@ def _process_bottleneck_view(
             bottlenecks[hl_id][ml_col][ml_id][ll_col][ll_id] = {}
             bottlenecks[hl_id][ml_col][ml_id][ll_col][ll_id]['llc'] = _calculate_llc(ll_row)
     # Return view key & bottlenecks
-    return view_key, bottlenecks
+    return view_key, threshold, bottlenecks
 
 
 class RecorderBottleneckDetector(BottleneckDetector):
@@ -72,68 +73,89 @@ class RecorderBottleneckDetector(BottleneckDetector):
     def __init__(self, logger: Logger, log_dir: str):
         super().__init__(logger, log_dir)
 
-    def detect_bottlenecks(self, views: Dict[tuple, dd.DataFrame], view_types: list) -> Dict[tuple, object]:
+    def detect_bottlenecks(
+        self,
+        views: Dict[tuple, dd.DataFrame],
+        view_types: list,
+        max_io_time: dd.core.Scalar,
+        metric='duration',
+    ) -> Dict[tuple, object]:
         # Keep bottleneck views
         bottleneck_views = {}
         # Run through views
-        for view_key, view_dict in views.items():
+        for view_key, view in views.items():
             # Generate bottleneck views
             bottleneck_views[view_key] = self._generate_bottlenecks_views(
                 view_key=view_key,
-                view_dict=view_dict,
+                view=view,
                 view_types=view_types,
+                max_io_time=max_io_time,
+                metric=metric,
             )
         # Generate bottlenecks
-        bottlenecks = self._process_bottleneck_views(bottleneck_views=bottleneck_views)
+        bottlenecks = self._process_bottleneck_views(
+            bottleneck_views=bottleneck_views,
+            metric=metric,
+        )
         # Return bottleneck views
         return bottlenecks
 
-    def _process_bottleneck_views(self, bottleneck_views: Dict[tuple, pd.DataFrame]):
+    def _process_bottleneck_views(self, bottleneck_views: Dict[tuple, dd.DataFrame], metric: str):
         # Init bottlenecks
         bottlenecks = {}
         bottlenecks_delayed = []
         # Run through bottleneck views
         for view_key, view_dict in bottleneck_views.items():
-            bottlenecks_delayed.append(_process_bottleneck_view(
-                view_key=view_key,
-                ll_view=view_dict['low_level_view'],
-                ml_view=view_dict['mid_level_view'],
-                hl_view=view_dict['high_level_view']
-            ))
+            # For given thresholds
+            for th in DELTA_BINS[4:-1]:  # [0.25, 0.5, 0.75]
+
+                threshold_col = f"{metric}_th"
+
+                low_level_view = view_dict['low_level_view']
+                mid_level_view = view_dict['mid_level_view']
+                high_level_view = view_dict['high_level_view']
+
+                bottlenecks_delayed.append(_process_bottleneck_view(
+                    view_key=view_key,
+                    threshold=th,
+                    low_level_view=low_level_view.query(f"{threshold_col} >= @th", local_dict={'th': th}),
+                    mid_level_view=mid_level_view.query(f"{threshold_col} >= @th", local_dict={'th': th}),
+                    high_level_view=high_level_view.query(f"{threshold_col} >= @th", local_dict={'th': th})
+                ))
+
         # Compute all bottlenecks
         with ElapsedTimeLogger(logger=self.logger, message='Compute bottlenecks'):
-            futures = compute(*bottlenecks_delayed, sync=False)
-            results = get_client().gather(list(futures))
-            for view_key, result in results:
-                bottlenecks[view_key] = result
+            results = compute(*bottlenecks_delayed)
+            for view_key, th, result in results:
+                bottlenecks[view_key] = bottlenecks[view_key] if view_key in bottlenecks else {}
+                bottlenecks[view_key][f"{th:.2f}"] = result
         # Return all bottlenecks
         return bottlenecks
 
     def _generate_bottlenecks_views(
         self,
         view_key: tuple,
-        view_dict: Dict[str, dd.DataFrame],
-        view_types: list
+        view: dd.DataFrame,
+        view_types: list,
+        max_io_time: dd.core.Scalar,
+        metric: str,
     ):
         # Get view type
         view_type = view_key[-1]
         bottleneck_type = BOTTLENECK_TYPE[view_type]
 
-        # Get parent view
-        bottleneck_view = view_dict['bottleneck_view']
-
         # Create lower level view
-        low_level_view = bottleneck_view \
+        low_level_view = view \
             .groupby(list(BOTTLENECK_ORDER[view_type])) \
             .first() \
-            .drop(columns=['acc_pat', 'io_cat'], errors='ignore')
+            .drop(columns=['acc_pat', 'io_cat', 'file_id', 'proc_id'], errors='ignore')
 
         # Non-proc agg columns
         non_proc_agg_dict = self._get_agg_dict(view_types=view_types, view_columns=low_level_view.columns, is_proc=False)
         proc_agg_dict = self._get_agg_dict(view_types=view_types, view_columns=low_level_view.columns, is_proc=True)
 
+        # Create mid and high level views
         if bottleneck_type is not 'proc_name':
-
             mid_level_view = low_level_view \
                 .reset_index() \
                 .groupby([bottleneck_type, 'proc_name']) \
@@ -143,9 +165,7 @@ class RecorderBottleneckDetector(BottleneckDetector):
                 .reset_index() \
                 .groupby([bottleneck_type]) \
                 .agg(proc_agg_dict)
-
         else:
-
             mid_level_view = low_level_view \
                 .reset_index() \
                 .groupby([bottleneck_type, 'trange']) \
@@ -156,10 +176,22 @@ class RecorderBottleneckDetector(BottleneckDetector):
                 .groupby([bottleneck_type]) \
                 .agg(non_proc_agg_dict)
 
+        low_level_view = low_level_view \
+            .map_partitions(set_metric_percentages, metric=metric, max_io_time=max_io_time) \
+            .map_partitions(set_metric_scores, metric=metric, col=f"{metric}_pero")
+
+        mid_level_view = mid_level_view \
+            .map_partitions(set_metric_percentages, metric=metric, max_io_time=max_io_time) \
+            .map_partitions(set_metric_scores, metric=metric, col=f"{metric}_pero")
+
+        high_level_view = high_level_view \
+            .map_partitions(set_metric_percentages, metric=metric, max_io_time=max_io_time) \
+            .map_partitions(set_metric_scores, metric=metric, col=f"{metric}_pero")
+
         return dict(
-            low_level_view=low_level_view.persist(),
-            mid_level_view=mid_level_view.persist(),
-            high_level_view=high_level_view.persist()
+            low_level_view=low_level_view,
+            mid_level_view=mid_level_view,
+            high_level_view=high_level_view
         )
 
     def _get_agg_dict(self, view_types: list, view_columns: list, is_proc=False):

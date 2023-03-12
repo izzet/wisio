@@ -9,5 +9,11 @@ class BottleneckDetector(object):
         self.bottleneck_dir = f"{log_dir}/bottlenecks"
         self.logger = logger
 
-    def detect_bottlenecks(self, views: Dict[tuple, dd.DataFrame], view_types: list) -> Dict[tuple, object]:
+    def detect_bottlenecks(
+        self,
+        views: Dict[tuple, dd.DataFrame],
+        view_types: list,
+        max_io_time: dd.core.Scalar,
+        metric='duration',
+    ) -> Dict[tuple, object]:
         raise NotImplementedError
