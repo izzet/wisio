@@ -431,6 +431,7 @@ char* get_filename(Record* record) {
     const char* write_condition = strstr(func_name, "write");
     const char* xstat_condition = strstr(func_name, "__xstat");
     const char* fxstat_condition = strstr(func_name, "__fxstat");
+    const char* lxstat_condition = strstr(func_name, "__lxstat");
     const char* lseek_condition = strstr(func_name, "lseek");
     const char* fseek_condition = strstr(func_name, "fseek");
     const char* ftruncate_condition = strstr(func_name, "ftruncate");
@@ -442,6 +443,9 @@ char* get_filename(Record* record) {
     const char* ftell_condition = strstr(func_name, "ftell");
     const char* getcwd_condition = strstr(func_name, "getcwd");
     const char* mkdir_condition = strstr(func_name, "mkdir");
+    const char* fcntl_condition = strstr(func_name, "fcntl");
+    const char* rmdir_condition = strstr(func_name, "rmdir");
+    const char* chmod_condition = strstr(func_name, "chmod");
     if(open_condition && !mpi_condition) return record->args[0];
     if(open_condition && mpi_condition) return get_record_arg(func_name, record, 1);
     if(close_condition && !closedir_condition) return record->args[0];
@@ -451,6 +455,7 @@ char* get_filename(Record* record) {
     if(fwrite_condition) return get_record_arg(func_name, record, 3);
     if(xstat_condition) return get_record_arg(func_name, record, 1);
     if(fxstat_condition) return get_record_arg(func_name, record, 1);
+    if(lxstat_condition) return get_record_arg(func_name, record, 1);
     if(lseek_condition) return record->args[0];
     if(fseek_condition) return record->args[0];
     if(ftruncate_condition) return record->args[0];
@@ -461,6 +466,9 @@ char* get_filename(Record* record) {
     if(fileno_condition) return record->args[0];
     if(ftell_condition) return record->args[0];
     if(mkdir_condition) return record->args[0];
+    if(fcntl_condition) return record->args[1];
+    if(rmdir_condition) return record->args[1];
+    if(chmod_condition) return record->args[1];
     if (!std::string(func_name).rfind("H5", 0) == 0 && !mpi_condition && !getcwd_condition) {
         // if (record->args) {
         //     if (sizeof(record->args) > 1 && record->args[0] && record->args[1]) {
@@ -626,11 +634,15 @@ int get_io_category(Record* record) {
     int cat = recorder_get_func_type(&reader, record);
     if (cat == 0 || cat == 1 || cat == 3) {
         // IO Category
+        bool closedir_condition = std::string(func_id).find("closedir") != std::string::npos;
+        bool getcwd_condition = std::string(func_id).find("getcwd") != std::string::npos;
         bool read_condition = std::string(func_id).find("read") != std::string::npos;
         bool readdir_condition = std::string(func_id).find("readdir") != std::string::npos;
         bool readlink_condition = std::string(func_id).find("readlink") != std::string::npos;
+        bool umask_condition = std::string(func_id).find("umask") != std::string::npos;
         bool write_condition = std::string(func_id).find("write") != std::string::npos;
-        if (read_condition && !readdir_condition && !readlink_condition) return READ_FUNC;
+        if (closedir_condition || getcwd_condition || readdir_condition || readlink_condition || umask_condition) return OTHER_FUNC;
+        else if (read_condition) return READ_FUNC;
         else if (write_condition) return WRITE_FUNC;
         else return METADATA_FUNC;
     } else {
