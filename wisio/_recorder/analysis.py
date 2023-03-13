@@ -4,16 +4,12 @@ import pandas as pd
 from dask.distributed import Future, get_client
 from typing import Dict, Union
 from .constants import CAT_POSIX, TIME_PRECISION, AccessPattern, IOCategory
-from ..utils.dask_agg import unique_flatten
 
 
 HLM_AGG = {
     'duration': [sum],
     'index': ['count'],
     'size': [min, max, sum],
-    'file_name': ['first'],
-    'proc_name': ['first'],
-    'func_id': [unique_flatten()],
 }
 IO_CATS = [io_cat.value for io_cat in list(IOCategory)]
 DELTA_BINS = [
@@ -36,6 +32,7 @@ DELTA_BIN_LABELS = [
     'very high',
     'critical'
 ]
+PROC_COL = 'proc_name'
 XFER_SIZE_BINS = [
     -np.inf,
     4 * 1024.0,
@@ -85,10 +82,10 @@ def compute_main_view(
     ddf['io_cat'] = ddf['io_cat'].astype('i1')
     # Compute tranges
     tranges = _compute_tranges(global_min_max=global_min_max)
-    # Add `io_cat` and `acc_pat` to groupby
+    # Add `io_cat`, `acc_pat`, and `func_id` to groupby
+    extra_cols = ['io_cat', 'acc_pat', 'func_id']
     groupby = view_types.copy()
-    groupby.append('io_cat')
-    groupby.append('acc_pat')
+    groupby.extend(extra_cols)
     # Compute high-level metrics
     hlm_view = ddf[(ddf['cat'] == CAT_POSIX) & (ddf['io_cat'].isin(IO_CATS))] \
         .map_partitions(set_tranges, tranges=tranges) \
@@ -100,29 +97,14 @@ def compute_main_view(
     hlm_view = _flatten_column_names(ddf=hlm_view)
     # Set derived columns
     hlm_view = _set_derived_columns(ddf=hlm_view)
-    # Compute agg columns
-    agg_dict = {col: sum for col in hlm_view.columns}
-    agg_dict['file_name_first'] = 'first'
-    agg_dict['proc_name_first'] = 'first'
-    agg_dict['func_id_unique_flatten'] = unique_flatten()
-    for view_type in view_types:
-        agg_dict.pop(view_type)
     # Compute agg_view
-    agg_view = hlm_view \
+    main_view = hlm_view \
+        .drop(columns=extra_cols) \
         .groupby(view_types) \
-        .agg(agg_dict) \
-        .persist()
-    # Then compute main_view
-    main_view = agg_view \
+        .sum() \
         .reset_index() \
-        .rename(columns={
-            'file_name_first': 'file_name',
-            'proc_name_first': 'proc_name',
-            'func_id_unique_flatten': 'func_id',
-        }) \
         .persist()
-    # Delete unused views
-    del agg_view
+    # Delete hlm_view
     del hlm_view
     # Return main_view
     return main_view
@@ -144,10 +126,10 @@ def compute_view(
     # Create colum names
     metric_col, delta_col = f"{metric}_sum", f"{metric}_delta"
     # Check view type
-    if view_type is not 'proc_id':
-        # Compute `proc_id` view first
+    if view_type is not PROC_COL:
+        # Compute proc view first
         group_view = parent_view \
-            .groupby([view_type, 'proc_id']) \
+            .groupby([view_type, PROC_COL]) \
             .agg({metric_col: sum}) \
             .groupby([view_type]) \
             .max()
@@ -167,7 +149,7 @@ def compute_view(
 
 
 def compute_max_io_time(main_view: dd.DataFrame):
-    return main_view.groupby(['proc_id']).sum()['duration_sum'].max()
+    return main_view.groupby([PROC_COL]).sum()['duration_sum'].max()
 
 
 def set_metric_deltas(df: pd.DataFrame, metric: str, max_io_time: float):
@@ -237,5 +219,13 @@ def _set_derived_columns(ddf: dd.DataFrame):
             col_name = f"{acc_pat.name.lower()}_{col_suffix}"
             ddf[col_name] = 0
             ddf[col_name] = ddf[col_name].mask(ddf['acc_pat'] == acc_pat.value, ddf[col_value])
+    # Derive metadata operation columns
+    for md_op in ['close', 'open', 'seek', 'stat']:
+        col_name = f"{md_op}_time"
+        ddf[col_name] = 0
+        if md_op in ['close', 'open']:
+            ddf[col_name] = ddf[col_name].mask(ddf['func_id'].str.contains(md_op) & ~ddf['func_id'].str.contains('dir'), ddf['duration_sum'])
+        else:
+            ddf[col_name] = ddf[col_name].mask(ddf['func_id'].str.contains(md_op), ddf['duration_sum'])
     # Return ddf
     return ddf

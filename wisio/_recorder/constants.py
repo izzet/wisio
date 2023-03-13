@@ -23,7 +23,7 @@ CAT_POSIX = 0
 
 TIME_PRECISION = 1e7
 
-VIEW_TYPES = ['trange', 'file_id', 'proc_id']
+VIEW_TYPES = ['trange', 'file_name', 'proc_name']
 
 # Copied from https://github.com/uiuc-hpc/Recorder/blob/pilgrim/include/recorder.h
 

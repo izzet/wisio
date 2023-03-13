@@ -4,21 +4,20 @@ from dask import compute, delayed
 from logging import Logger
 from typing import Dict
 from ..bottlenecks import BottleneckDetector
-from ..utils.dask_agg import unique_flatten
 from ..utils.logger import ElapsedTimeLogger
-from .analysis import DELTA_BINS, set_metric_percentages, set_metric_scores
+from .analysis import (
+    DELTA_BINS,
+    PROC_COL,
+    set_metric_percentages,
+    set_metric_scores,
+)
 from .constants import VIEW_TYPES
 
 
 BOTTLENECK_ORDER = dict(
-    file_id=('file_name', 'proc_name', 'trange'),
-    proc_id=('proc_name', 'trange', 'file_name'),
+    file_name=('file_name', 'proc_name', 'trange'),
+    proc_name=('proc_name', 'trange', 'file_name'),
     trange=('trange', 'proc_name', 'file_name'),
-)
-BOTTLENECK_TYPE = dict(
-    file_id='file_name',
-    proc_id='proc_name',
-    trange='trange'
 )
 
 
@@ -27,9 +26,6 @@ def _calculate_llc(level_row: pd.Series):
     for view_type in VIEW_TYPES:
         if view_type in llc:
             llc.pop(view_type)
-        bottleneck_type = BOTTLENECK_TYPE[view_type]
-        if bottleneck_type in llc:
-            llc.pop(bottleneck_type)
     return llc
 
 
@@ -103,32 +99,29 @@ class RecorderBottleneckDetector(BottleneckDetector):
     def _process_bottleneck_views(self, bottleneck_views: Dict[tuple, dd.DataFrame], metric: str):
         # Init bottlenecks
         bottlenecks = {}
-        bottlenecks_delayed = []
+        bottleneck_tasks = []
         # Run through bottleneck views
         for view_key, view_dict in bottleneck_views.items():
             # For given thresholds
-            for th in DELTA_BINS[4:-1]:  # [0.25, 0.5, 0.75]
-
+            for th in DELTA_BINS[1:-1]:  # [0.001, 0.01, 0.1, 0.25, 0.5, 0.75]
                 threshold_col = f"{metric}_th"
-
                 low_level_view = view_dict['low_level_view']
                 mid_level_view = view_dict['mid_level_view']
                 high_level_view = view_dict['high_level_view']
-
-                bottlenecks_delayed.append(_process_bottleneck_view(
+                bottleneck_tasks.append(_process_bottleneck_view(
                     view_key=view_key,
                     threshold=th,
                     low_level_view=low_level_view.query(f"{threshold_col} >= @th", local_dict={'th': th}),
                     mid_level_view=mid_level_view.query(f"{threshold_col} >= @th", local_dict={'th': th}),
                     high_level_view=high_level_view.query(f"{threshold_col} >= @th", local_dict={'th': th})
                 ))
-
         # Compute all bottlenecks
         with ElapsedTimeLogger(logger=self.logger, message='Compute bottlenecks'):
-            results = compute(*bottlenecks_delayed)
-            for view_key, th, result in results:
-                bottlenecks[view_key] = bottlenecks[view_key] if view_key in bottlenecks else {}
-                bottlenecks[view_key][f"{th:.2f}"] = result
+            bottleneck_results = compute(*bottleneck_tasks)
+        # Create bottlenecks dict
+        for view_key, th, result in bottleneck_results:
+            bottlenecks[view_key] = bottlenecks[view_key] if view_key in bottlenecks else {}
+            bottlenecks[view_key][f"{th:.3f}"] = result
         # Return all bottlenecks
         return bottlenecks
 
@@ -142,38 +135,36 @@ class RecorderBottleneckDetector(BottleneckDetector):
     ):
         # Get view type
         view_type = view_key[-1]
-        bottleneck_type = BOTTLENECK_TYPE[view_type]
 
         # Create lower level view
         low_level_view = view \
             .groupby(list(BOTTLENECK_ORDER[view_type])) \
-            .first() \
-            .drop(columns=['acc_pat', 'io_cat', 'file_id', 'proc_id'], errors='ignore')
+            .first()
 
         # Non-proc agg columns
         non_proc_agg_dict = self._get_agg_dict(view_types=view_types, view_columns=low_level_view.columns, is_proc=False)
         proc_agg_dict = self._get_agg_dict(view_types=view_types, view_columns=low_level_view.columns, is_proc=True)
 
         # Create mid and high level views
-        if bottleneck_type is not 'proc_name':
+        if view_type is not PROC_COL:
             mid_level_view = low_level_view \
                 .reset_index() \
-                .groupby([bottleneck_type, 'proc_name']) \
+                .groupby([view_type, PROC_COL]) \
                 .agg(non_proc_agg_dict)
 
             high_level_view = mid_level_view \
                 .reset_index() \
-                .groupby([bottleneck_type]) \
+                .groupby([view_type]) \
                 .agg(proc_agg_dict)
         else:
             mid_level_view = low_level_view \
                 .reset_index() \
-                .groupby([bottleneck_type, 'trange']) \
+                .groupby([view_type, 'trange']) \
                 .agg(non_proc_agg_dict)
 
             high_level_view = mid_level_view \
                 .reset_index() \
-                .groupby([bottleneck_type]) \
+                .groupby([view_type]) \
                 .agg(non_proc_agg_dict)
 
         low_level_view = low_level_view \
@@ -199,13 +190,9 @@ class RecorderBottleneckDetector(BottleneckDetector):
             agg_dict = {col: max if any(x in col for x in 'duration time'.split()) else sum for col in view_columns}
         else:
             agg_dict = {col: sum for col in view_columns}
-        agg_dict['func_id'] = unique_flatten()
         agg_dict['size_min'] = min
         agg_dict['size_max'] = max
         for view_type in view_types:
             if view_type in agg_dict:
                 agg_dict.pop(view_type)
-            bottleneck_type = BOTTLENECK_TYPE[view_type]
-            if bottleneck_type in agg_dict:
-                agg_dict.pop(bottleneck_type)
         return agg_dict
