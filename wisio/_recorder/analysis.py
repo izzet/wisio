@@ -207,7 +207,7 @@ def _set_derived_columns(ddf: dd.DataFrame):
     for col_suffix, col_value in zip(['time', 'size', 'count'], ['duration_sum', 'size_sum', 'index_count']):
         for io_cat in list(IOCategory):
             col_name = f"{io_cat.name.lower()}_{col_suffix}"
-            ddf[col_name] = 0
+            ddf[col_name] = 0 if col_suffix is 'count' else 0.0
             ddf[col_name] = ddf[col_name].mask(ddf['io_cat'] == io_cat.value, ddf[col_value])
     # Derive `data` columns
     ddf['data_count'] = ddf['write_count'] + ddf['read_count']
@@ -217,12 +217,12 @@ def _set_derived_columns(ddf: dd.DataFrame):
     for col_suffix, col_value in zip(['time', 'size', 'count'], ['data_time', 'data_size', 'data_count']):
         for acc_pat in list(AccessPattern):
             col_name = f"{acc_pat.name.lower()}_{col_suffix}"
-            ddf[col_name] = 0
+            ddf[col_name] = 0 if col_suffix is 'count' else 0.0
             ddf[col_name] = ddf[col_name].mask(ddf['acc_pat'] == acc_pat.value, ddf[col_value])
     # Derive metadata operation columns
     for md_op in ['close', 'open', 'seek', 'stat']:
         col_name = f"{md_op}_time"
-        ddf[col_name] = 0
+        ddf[col_name] = 0.0
         if md_op in ['close', 'open']:
             ddf[col_name] = ddf[col_name].mask(ddf['func_id'].str.contains(md_op) & ~ddf['func_id'].str.contains('dir'), ddf['duration_sum'])
         else:
