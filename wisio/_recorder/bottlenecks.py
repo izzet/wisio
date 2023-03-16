@@ -3,6 +3,7 @@ import pandas as pd
 from dask import compute, delayed
 from logging import Logger
 from typing import Dict
+from ..base import ViewKey
 from ..bottlenecks import BottleneckDetector
 from ..utils.logger import ElapsedTimeLogger
 from .analysis import (
@@ -11,7 +12,6 @@ from .analysis import (
     set_metric_percentages,
     set_metric_scores,
 )
-from .constants import VIEW_TYPES
 
 
 BOTTLENECK_ORDER = dict(
@@ -21,17 +21,9 @@ BOTTLENECK_ORDER = dict(
 )
 
 
-def _calculate_llc(level_row: pd.Series):
-    llc = dict(level_row)
-    for view_type in VIEW_TYPES:
-        if view_type in llc:
-            llc.pop(view_type)
-    return llc
-
-
 @delayed
 def _process_bottleneck_view(
-    view_key: tuple,
+    view_key: ViewKey,
     threshold: float,
     low_level_view: pd.DataFrame,
     mid_level_view: pd.DataFrame,
@@ -51,83 +43,78 @@ def _process_bottleneck_view(
         ll_row = low_level_view.loc[(hl_id, ml_id, ll_id)]
         if hl_id not in bottlenecks:
             bottlenecks[hl_id] = {}
-            bottlenecks[hl_id]['llc'] = _calculate_llc(hl_row)
+            bottlenecks[hl_id]['llc'] = dict(hl_row)
             bottlenecks[hl_id][ml_col] = {}
         if ml_id not in bottlenecks[hl_id][ml_col]:
             bottlenecks[hl_id][ml_col][ml_id] = {}
-            bottlenecks[hl_id][ml_col][ml_id]['llc'] = _calculate_llc(ml_row)
+            bottlenecks[hl_id][ml_col][ml_id]['llc'] = dict(ml_row)
             bottlenecks[hl_id][ml_col][ml_id][ll_col] = {}
         if ll_id not in bottlenecks[hl_id][ml_col][ml_id][ll_col]:
             bottlenecks[hl_id][ml_col][ml_id][ll_col][ll_id] = {}
-            bottlenecks[hl_id][ml_col][ml_id][ll_col][ll_id]['llc'] = _calculate_llc(ll_row)
+            bottlenecks[hl_id][ml_col][ml_id][ll_col][ll_id]['llc'] = dict(ll_row)
     # Return view key & bottlenecks
     return view_key, threshold, bottlenecks
 
 
 class RecorderBottleneckDetector(BottleneckDetector):
 
-    def __init__(self, logger: Logger, log_dir: str):
-        super().__init__(logger, log_dir)
+    def __init__(self, logger: Logger):
+        super().__init__(logger)
 
     def detect_bottlenecks(
         self,
-        views: Dict[tuple, dd.DataFrame],
+        views: Dict[ViewKey, dd.DataFrame],
         view_types: list,
         max_io_time: dd.core.Scalar,
         metric='duration',
-    ) -> Dict[tuple, object]:
+    ) -> Dict[ViewKey, dd.DataFrame]:
         # Keep bottleneck views
-        bottleneck_views = {}
+        bottlenecks = {}
         # Run through views
         for view_key, view in views.items():
             # Generate bottleneck views
-            bottleneck_views[view_key] = self._generate_bottlenecks_views(
+            bottlenecks[view_key] = self._generate_bottlenecks_views(
                 view_key=view_key,
                 view=view,
                 view_types=view_types,
                 max_io_time=max_io_time,
                 metric=metric,
             )
-        # Generate bottlenecks
-        bottlenecks = self._process_bottleneck_views(
-            bottleneck_views=bottleneck_views,
-            metric=metric,
-        )
         # Return bottleneck views
         return bottlenecks
 
-    def _process_bottleneck_views(self, bottleneck_views: Dict[tuple, dd.DataFrame], metric: str):
+    def bottlenecks_to_json(self, bottlenecks: Dict[ViewKey, dd.DataFrame], metric='duration'):
         # Init bottlenecks
-        bottlenecks = {}
         bottleneck_tasks = []
+        bottlenecks_dict = {}
         # Run through bottleneck views
-        for view_key, view_dict in bottleneck_views.items():
+        for view_key, view_dict in bottlenecks.items():
             # For given thresholds
-            for th in DELTA_BINS[1:-1]:  # [0.001, 0.01, 0.1, 0.25, 0.5, 0.75]
+            for threshold in DELTA_BINS[1:-1]:  # [0.001, 0.01, 0.1, 0.25, 0.5, 0.75]
                 threshold_col = f"{metric}_th"
                 low_level_view = view_dict['low_level_view']
                 mid_level_view = view_dict['mid_level_view']
                 high_level_view = view_dict['high_level_view']
                 bottleneck_tasks.append(_process_bottleneck_view(
                     view_key=view_key,
-                    threshold=th,
-                    low_level_view=low_level_view.query(f"{threshold_col} >= @th", local_dict={'th': th}),
-                    mid_level_view=mid_level_view.query(f"{threshold_col} >= @th", local_dict={'th': th}),
-                    high_level_view=high_level_view.query(f"{threshold_col} >= @th", local_dict={'th': th})
+                    threshold=threshold,
+                    low_level_view=low_level_view,
+                    mid_level_view=mid_level_view,
+                    high_level_view=high_level_view.query(f"{threshold_col} >= @th", local_dict={'th': threshold})
                 ))
         # Compute all bottlenecks
         with ElapsedTimeLogger(logger=self.logger, message='Compute bottlenecks'):
             bottleneck_results = compute(*bottleneck_tasks)
         # Create bottlenecks dict
-        for view_key, th, result in bottleneck_results:
-            bottlenecks[view_key] = bottlenecks[view_key] if view_key in bottlenecks else {}
-            bottlenecks[view_key][f"{th:.3f}"] = result
+        for view_key, threshold, result in bottleneck_results:
+            bottlenecks_dict[view_key] = bottlenecks_dict[view_key] if view_key in bottlenecks_dict else {}
+            bottlenecks_dict[view_key][f"{threshold:.3f}"] = result
         # Return all bottlenecks
-        return bottlenecks
+        return bottlenecks_dict
 
     def _generate_bottlenecks_views(
         self,
-        view_key: tuple,
+        view_key: ViewKey,
         view: dd.DataFrame,
         view_types: list,
         max_io_time: dd.core.Scalar,

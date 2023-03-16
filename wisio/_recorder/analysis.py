@@ -3,7 +3,12 @@ import numpy as np
 import pandas as pd
 from dask.distributed import Future, get_client
 from typing import Dict, Union
-from .constants import CAT_POSIX, TIME_PRECISION, AccessPattern, IOCategory
+from .constants import (
+    CAT_POSIX,
+    TIME_PRECISION,
+    AccessPattern,
+    IOCategory,
+)
 
 
 HLM_AGG = {
@@ -32,6 +37,7 @@ DELTA_BIN_LABELS = [
     'very high',
     'critical'
 ]
+DERIVED_MD_OPS = ['close', 'open', 'seek', 'stat']
 PROC_COL = 'proc_name'
 XFER_SIZE_BINS = [
     -np.inf,
@@ -77,9 +83,10 @@ def compute_main_view(
 ):
     # Read Parquet files
     ddf = dd.read_parquet(f"{log_dir}/*.parquet")
-    # Fix types
-    ddf['acc_pat'] = ddf['acc_pat'].astype('i1')
-    ddf['io_cat'] = ddf['io_cat'].astype('i1')
+    # Fix dtypes
+    ddf['acc_pat'] = ddf['acc_pat'].astype(np.uint8)
+    ddf['duration'] = ddf['duration'].astype(np.float64)
+    ddf['io_cat'] = ddf['io_cat'].astype(np.uint8)
     # Compute tranges
     tranges = _compute_tranges(global_min_max=global_min_max)
     # Add `io_cat`, `acc_pat`, and `func_id` to groupby
@@ -207,7 +214,7 @@ def _set_derived_columns(ddf: dd.DataFrame):
     for col_suffix, col_value in zip(['time', 'size', 'count'], ['duration_sum', 'size_sum', 'index_count']):
         for io_cat in list(IOCategory):
             col_name = f"{io_cat.name.lower()}_{col_suffix}"
-            ddf[col_name] = 0 if col_suffix is 'count' else 0.0
+            ddf[col_name] = 0.0 if col_suffix is 'time' else 0
             ddf[col_name] = ddf[col_name].mask(ddf['io_cat'] == io_cat.value, ddf[col_value])
     # Derive `data` columns
     ddf['data_count'] = ddf['write_count'] + ddf['read_count']
@@ -217,10 +224,10 @@ def _set_derived_columns(ddf: dd.DataFrame):
     for col_suffix, col_value in zip(['time', 'size', 'count'], ['data_time', 'data_size', 'data_count']):
         for acc_pat in list(AccessPattern):
             col_name = f"{acc_pat.name.lower()}_{col_suffix}"
-            ddf[col_name] = 0 if col_suffix is 'count' else 0.0
+            ddf[col_name] = 0.0 if col_suffix is 'time' else 0
             ddf[col_name] = ddf[col_name].mask(ddf['acc_pat'] == acc_pat.value, ddf[col_value])
     # Derive metadata operation columns
-    for md_op in ['close', 'open', 'seek', 'stat']:
+    for md_op in DERIVED_MD_OPS:
         col_name = f"{md_op}_time"
         ddf[col_name] = 0.0
         if md_op in ['close', 'open']:

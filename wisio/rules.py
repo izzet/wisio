@@ -1,29 +1,39 @@
+import abc
 import dask.dataframe as dd
-import pandas as pd
+import dataclasses
 from enum import Enum
-from typing import Dict, List
+from typing import Dict, List, Optional
+from .base import ViewKey, ViewType
 
 
 class Rule(Enum):
-    # EXCESSIVE_IO_TIME = 10
-    # PROBLEMATIC_ACCESS_PATTERN = 11
-    TIME_RANGE_EXCESSIVE_IO_TIME = 20
-    FILE_EXCESSIVE_IO_TIME = 30
-    PROCESS_EXCESSIVE_IO_TIME = 40
-    PROCESS_WORKLOAD_IMBALANCE = 41
-    PROCESS_COLLECTIVE_IO_CONTENTION = 42
-    PROCESS_FILE_SHARING_IMBALANCE = 43
+    EXCESSIVE_IO_TIME = 10
+    WORKLOAD_IMBALANCE = 11
+    COLLECTIVE_IO_CONTENTION = 12
+    FILE_SHARING_IMBALANCE = 13
+    ACCESS_PATTERN_ISSUE = 20
+    METADATA_ACCESS_ISSUE = 21
+    SMALL_IO_ACCESS = 30
 
 
-class RuleEngine(object):
+class RuleEngine(abc.ABC):
 
-    def __init__(
-        self,
-        rules: List[Rule],
-        views: Dict[tuple, dd.DataFrame]
-    ):
+    def __init__(self, rules: Dict[ViewType, List[Rule]]) -> None:
         self.rules = rules
-        self.views = views
 
-    def process_rules(self, cut=0.5) -> Dict[tuple, pd.DataFrame]:
+    @abc.abstractmethod
+    def process_bottlenecks(self, bottlenecks: Dict[ViewKey, Dict[str, dd.DataFrame]], threshold=0.5) -> Dict[ViewKey, object]:
         raise NotImplementedError
+
+
+@dataclasses.dataclass
+class RuleReason(object):
+    description: str
+    value: Optional[float]
+
+
+@dataclasses.dataclass
+class RuleResult(object):
+    rule: Rule
+    description: str
+    reasons: Optional[List[RuleReason]]

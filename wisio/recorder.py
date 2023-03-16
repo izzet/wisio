@@ -67,7 +67,7 @@ class RecorderAnalyzer(Analyzer):
                 )
 
         # Detect bottlenecks
-        bottleneck_detector = RecorderBottleneckDetector(logger=self.logger, log_dir=log_dir)
+        bottleneck_detector = RecorderBottleneckDetector(logger=self.logger)
         with ElapsedTimeLogger(logger=self.logger, message='Detect bottlenecks'):
             bottlenecks = bottleneck_detector.detect_bottlenecks(
                 views=views,

@@ -1,8 +1,14 @@
+import abc
+from typing import Union, Tuple
 from .utils.file_utils import ensure_dir
 from .utils.logger import create_logger, format_log
 
 
-class Analyzer(object):
+ViewType = str
+ViewKey = Union[Tuple[ViewType], Tuple[ViewType, ViewType], Tuple[ViewType, ViewType, ViewType]]
+
+
+class Analyzer(abc.ABC):
 
     def __init__(
         self,
@@ -20,5 +26,6 @@ class Analyzer(object):
         self.logger = create_logger(__name__, f"{working_dir}/{name}.log")
         self.logger.info(format_log('main', f"Initializing {name} analyzer"))
 
+    @abc.abstractmethod
     def analyze_parquet(self, log_dir: str, delta=0.0001, cut=0.5):
         raise NotImplementedError
