@@ -42,8 +42,8 @@ class ClusterManager(object):
     def scale_clusters(self, n_workers: int):
         for cluster in self.clusters:
             if not isinstance(cluster, LocalCluster):
-                cluster.scale(n_workers * 2)
-                self.logger.debug(format_log(cluster.name, f"Scaling cluster to {n_workers * 2} nodes"))
+                cluster.scale(n_workers)
+                self.logger.debug(format_log(cluster.name, f"Scaling cluster to {n_workers} nodes"))
 
     def shutdown(self):
         for client in self.clients:
