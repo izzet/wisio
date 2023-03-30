@@ -76,7 +76,7 @@ class RecorderAnalyzer(Analyzer):
             )
 
         # Return views
-        return views, bottlenecks
+        return main_view, views, bottlenecks
 
     def load_global_min_max(self, log_dir: str) -> dict:
         with open(f"{log_dir}/global.json") as file:

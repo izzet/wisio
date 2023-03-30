@@ -10,11 +10,18 @@ def deepflatten(collection, ignore_types=(bytes, str)):
             yield x
 
 
-def get_intervals(values: List[int]):
-    series = pd.Series(sorted(values))
-    grouped = series.groupby(series.diff().fillna(1).ne(1).cumsum())
-    output = grouped.apply(lambda x: str(x.iloc[0]) if len(x) else str(x.iloc[0]) + '-' + str(x.iloc[-1]))
-    return output.tolist()
+def get_every_x_intervals(values: List[int]):
+    every_x = pd.Series(sorted(values)).diff().value_counts()
+    every_x_values = every_x[every_x > every_x.std()].index.astype(int).astype(str)
+    print(values, list(every_x_values))
+    return '-'.join(sorted(every_x_values))
+
+
+def get_intervals(values: list):
+    series = pd.Series(sorted(values, reverse=True))
+    grouped = series.groupby(series.diff().fillna(1).ne(-1).cumsum())
+    output = grouped.apply(lambda x: str(x.iloc[0]) if len(x) == 1 else str(x.iloc[-1]) + '-' + str(x.iloc[0]))
+    return list(reversed(output.tolist()))
 
 
 def join_with_and(values: List[str]):

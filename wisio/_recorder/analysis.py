@@ -11,6 +11,7 @@ from .constants import (
 )
 
 
+ACC_PAT_SUFFIXES = ['time', 'size', 'count']
 HLM_AGG = {
     'duration': [sum],
     'index': ['count'],
@@ -27,7 +28,7 @@ DELTA_BINS = [
     0.75,
     1
 ]
-DELTA_BIN_LABELS = [
+DELTA_BIN_NAMES = [
     'none',
     'trivial',
     'very low',
@@ -38,6 +39,7 @@ DELTA_BIN_LABELS = [
     'critical'
 ]
 DERIVED_MD_OPS = ['close', 'open', 'seek', 'stat']
+FILE_COL = 'file_name'
 PROC_COL = 'proc_name'
 XFER_SIZE_BINS = [
     -np.inf,
@@ -52,27 +54,27 @@ XFER_SIZE_BINS = [
     np.inf
 ]
 XFER_SIZE_BIN_LABELS = [
-    '<4KB',
-    '~16KB',
-    '~64KB',
-    '~256KB',
-    '~1MB',
-    '~4MB',
-    '~16MB',
-    '~64MB',
-    '>64MB'
+    '<4 KB',
+    '4-16 KB',
+    '16-64 KB',
+    '64-256 KB',
+    '256 KB-1 MB',
+    '1-4 MB',
+    '4-16 MB',
+    '16-64 MB',
+    '>64 MB',
 ]
 XFER_SIZE_BIN_NAMES = [
-    '<4KB',
-    '4KB',
-    '16KB',
-    '64KB',
-    '256KB',
-    '1MB',
-    '4MB',
-    '16MB',
-    '64MB',
-    '>64MB'
+    '<4 KB',
+    '4 KB',
+    '16 KB',
+    '64 KB',
+    '256 KB',
+    '1 MB',
+    '4 MB',
+    '16 MB',
+    '64 MB',
+    '>64 MB'
 ]
 
 
@@ -109,7 +111,6 @@ def compute_main_view(
         .drop(columns=extra_cols) \
         .groupby(view_types) \
         .sum() \
-        .reset_index() \
         .persist()
     # Delete hlm_view
     del hlm_view
@@ -188,7 +189,7 @@ def set_metric_scores(df: pd.DataFrame, metric: str, col: str):
         f"{metric}_th",
     )
     df[bin_col] = np.digitize(df[col], bins=DELTA_BINS, right=True)
-    df[score_col] = np.choose(df[bin_col] - 1, choices=DELTA_BIN_LABELS, mode='clip')
+    df[score_col] = np.choose(df[bin_col] - 1, choices=DELTA_BIN_NAMES, mode='clip')
     df[threshold_col] = np.choose(df[bin_col] - 1, choices=DELTA_BINS, mode='clip')
     return df.drop(columns=[bin_col])
 
@@ -216,23 +217,30 @@ def _set_derived_columns(ddf: dd.DataFrame):
             col_name = f"{io_cat.name.lower()}_{col_suffix}"
             ddf[col_name] = 0.0 if col_suffix is 'time' else 0
             ddf[col_name] = ddf[col_name].mask(ddf['io_cat'] == io_cat.value, ddf[col_value])
+    for io_cat in list(IOCategory):
+        min_name, max_name = f"{io_cat.name.lower()}_min", f"{io_cat.name.lower()}_max"
+        ddf[min_name] = 0
+        ddf[max_name] = 0
+        ddf[min_name] = ddf[min_name].mask(ddf['io_cat'] == io_cat.value, ddf['size_min'])
+        ddf[max_name] = ddf[max_name].mask(ddf['io_cat'] == io_cat.value, ddf['size_max'])
     # Derive `data` columns
     ddf['data_count'] = ddf['write_count'] + ddf['read_count']
     ddf['data_size'] = ddf['write_size'] + ddf['read_size']
     ddf['data_time'] = ddf['write_time'] + ddf['read_time']
     # Derive `acc_pat` columns
-    for col_suffix, col_value in zip(['time', 'size', 'count'], ['data_time', 'data_size', 'data_count']):
+    for col_suffix, col_value in zip(ACC_PAT_SUFFIXES, ['data_time', 'data_size', 'data_count']):
         for acc_pat in list(AccessPattern):
             col_name = f"{acc_pat.name.lower()}_{col_suffix}"
             ddf[col_name] = 0.0 if col_suffix is 'time' else 0
             ddf[col_name] = ddf[col_name].mask(ddf['acc_pat'] == acc_pat.value, ddf[col_value])
     # Derive metadata operation columns
-    for md_op in DERIVED_MD_OPS:
-        col_name = f"{md_op}_time"
-        ddf[col_name] = 0.0
-        if md_op in ['close', 'open']:
-            ddf[col_name] = ddf[col_name].mask(ddf['func_id'].str.contains(md_op) & ~ddf['func_id'].str.contains('dir'), ddf['duration_sum'])
-        else:
-            ddf[col_name] = ddf[col_name].mask(ddf['func_id'].str.contains(md_op), ddf['duration_sum'])
+    for col_suffix, col_value in zip(['time', 'count'], ['duration_sum', 'index_count']):
+        for md_op in DERIVED_MD_OPS:
+            col_name = f"{md_op}_{col_suffix}"
+            ddf[col_name] = 0.0 if col_suffix is 'time' else 0
+            if md_op in ['close', 'open']:
+                ddf[col_name] = ddf[col_name].mask(ddf['func_id'].str.contains(md_op) & ~ddf['func_id'].str.contains('dir'), ddf[col_value])
+            else:
+                ddf[col_name] = ddf[col_name].mask(ddf['func_id'].str.contains(md_op), ddf[col_value])
     # Return ddf
     return ddf
