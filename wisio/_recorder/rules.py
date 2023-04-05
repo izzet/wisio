@@ -11,6 +11,7 @@ from .analysis import (
     ACC_PAT_SUFFIXES,
     DERIVED_MD_OPS,
     FILE_COL,
+    IO_TYPES,
     PROC_COL,
     XFER_SIZE_BIN_LABELS,
     XFER_SIZE_BIN_NAMES,
@@ -299,11 +300,18 @@ def _process_char_access_pattern(rule: Rule, view: pd.DataFrame) -> RuleResult:
 
 @delayed
 def _process_char_io_time(rule: Rule, view: pd.DataFrame) -> RuleResult:
-    max_io_time = compute_max_io_time(main_view=view)
+    max_io_time = compute_max_io_time(main_view=view, time_col='duration_sum')
+
+    detail_list = []
+    for io_type in IO_TYPES:
+        time_col = f"{io_type}_time"
+        time = compute_max_io_time(main_view=view, time_col=time_col)
+        detail_list.append(f"{io_type.capitalize()} - {time:.2f} seconds ({time/max_io_time*100:.2f}%)")
+
     result = RuleResult(
         data_dict=None,
         description='I/O Time',
-        detail_list=None,
+        detail_list=detail_list,
         reasons=None,
         rule=rule,
         value=max_io_time,
@@ -315,10 +323,17 @@ def _process_char_io_time(rule: Rule, view: pd.DataFrame) -> RuleResult:
 @delayed
 def _process_char_io_count(rule: Rule, view: pd.DataFrame) -> RuleResult:
     total_count = int(view['index_count'].sum())
+
+    detail_list = []
+    for io_type in IO_TYPES:
+        count_col = f"{io_type}_count"
+        count = int(view[count_col].sum())
+        detail_list.append(f"{io_type.capitalize()} - {count:,} ops ({count/total_count*100:.2f}%)")
+
     result = RuleResult(
         data_dict=None,
-        description='Total I/O Ops',
-        detail_list=None,
+        description='I/O Ops',
+        detail_list=detail_list,
         reasons=None,
         rule=rule,
         value=total_count,
@@ -328,60 +343,24 @@ def _process_char_io_count(rule: Rule, view: pd.DataFrame) -> RuleResult:
 
 
 @delayed
-def _process_char_read_io_count(rule: Rule, view: pd.DataFrame, deps: Dict[Rule, RuleResult]) -> RuleResult:
-    read_count = int(view['read_count'].sum())
-    total_count = deps[Rule.CHAR_IO_COUNT].value
-    result = RuleResult(
-        data_dict=None,
-        description='Read I/O Ops',
-        detail_list=None,
-        reasons=None,
-        rule=rule,
-        value=read_count,
-        value_fmt=f"{read_count:,} ops ({read_count/total_count*100:.2f}%)",
-    )
-    return result
-
-
-@delayed
-def _process_char_write_io_count(rule: Rule, view: pd.DataFrame, deps: Dict[Rule, RuleResult]) -> RuleResult:
-    write_count = int(view['write_count'].sum())
-    total_count = deps[Rule.CHAR_IO_COUNT].value
-    result = RuleResult(
-        data_dict=None,
-        description='Write I/O Ops',
-        detail_list=None,
-        reasons=None,
-        rule=rule,
-        value=write_count,
-        value_fmt=f"{write_count:,} ops ({write_count/total_count*100:.2f}%)",
-    )
-    return result
-
-
-@delayed
-def _process_char_metadata_io_count(rule: Rule, view: pd.DataFrame, deps: Dict[Rule, RuleResult]) -> RuleResult:
-    metadata_count = int(view['metadata_count'].sum())
-    total_count = deps[Rule.CHAR_IO_COUNT].value
-    result = RuleResult(
-        data_dict=None,
-        description='Metadata I/O Ops',
-        detail_list=None,
-        reasons=None,
-        rule=rule,
-        value=metadata_count,
-        value_fmt=f"{metadata_count:,} ops ({metadata_count/total_count*100:.2f}%)",
-    )
-    return result
-
-
-@delayed
 def _process_char_io_size(rule: Rule, view: pd.DataFrame) -> RuleResult:
     total_size = view['size_sum'].sum()
+
+    detail_list = []
+    for io_type in IO_TYPES:
+        if io_type != 'metadata':
+            size_col = f"{io_type}_size"
+            size = view[size_col].sum()
+            detail_list.append((
+                f"{io_type.capitalize()} - "
+                f"{convert_bytes_to_unit(size, 'GB'):.2f} GB "
+                f"({size/total_size*100:.2f}%)"
+            ))
+
     result = RuleResult(
         data_dict=None,
-        description='Total Size',
-        detail_list=None,
+        description='I/O Size',
+        detail_list=detail_list,
         reasons=None,
         rule=rule,
         value=total_size,
@@ -391,44 +370,25 @@ def _process_char_io_size(rule: Rule, view: pd.DataFrame) -> RuleResult:
 
 
 @delayed
-def _process_char_read_io_size(rule: Rule, view: pd.DataFrame, deps: Dict[Rule, RuleResult]) -> RuleResult:
-    read_size = view['read_size'].sum()
-    total_size = deps[Rule.CHAR_IO_SIZE].value
-    result = RuleResult(
-        data_dict=None,
-        description='Read Size',
-        detail_list=None,
-        reasons=None,
-        rule=rule,
-        value=read_size,
-        value_fmt=f"{convert_bytes_to_unit(read_size, 'GB'):.2f} GB ({read_size/total_size*100:.2f}%)",
-    )
-    return result
-
-
-@delayed
-def _process_char_write_io_size(rule: Rule, view: pd.DataFrame, deps: Dict[Rule, RuleResult]) -> RuleResult:
-    write_size = view['write_size'].sum()
-    total_size = deps[Rule.CHAR_IO_SIZE].value
-    result = RuleResult(
-        data_dict=None,
-        description='Write Size',
-        detail_list=None,
-        reasons=None,
-        rule=rule,
-        value=write_size,
-        value_fmt=f"{convert_bytes_to_unit(write_size, 'GB'):.2f} GB ({write_size/total_size*100:.2f}%)",
-    )
-    return result
-
-
-@delayed
 def _process_char_file_count(rule: Rule, view: pd.DataFrame) -> RuleResult:
     file_count = len(view.index.unique(FILE_COL))
+
+    nunique_file_per_proc = view \
+        .reset_index() \
+        .groupby([PROC_COL]) \
+        .agg({FILE_COL: 'nunique'})
+
+    fpp_count = int(nunique_file_per_proc[nunique_file_per_proc[FILE_COL] == 1][FILE_COL].count())
+    shared_count = file_count - fpp_count
+
+    detail_list = []
+    detail_list.append(f"Shared: {shared_count} files ({shared_count/file_count*100:.2f}%)")
+    detail_list.append(f"FPP: {fpp_count} files ({fpp_count/file_count*100:.2f}%)")
+
     result = RuleResult(
         data_dict=None,
-        description='File Count',
-        detail_list=None,
+        description='Files',
+        detail_list=detail_list,
         reasons=None,
         rule=rule,
         value=file_count,
@@ -472,33 +432,6 @@ def _process_char_write_xfer_size(rule: Rule, view: pd.DataFrame) -> RuleResult:
         value=(min_val, max_val),
         value_fmt=value_fmt,
     )
-    return result
-
-
-@delayed
-def _process_char_fpp_count(rule: Rule, view: pd.DataFrame, deps: Dict[Rule, RuleResult]) -> RuleResult:
-    nunique_file_per_proc = view \
-        .reset_index() \
-        .groupby([PROC_COL]) \
-        .agg({FILE_COL: 'nunique'})
-
-    total_count = deps[Rule.CHAR_FILE_COUNT].value
-    fpp_count = int(nunique_file_per_proc[nunique_file_per_proc[FILE_COL] == 1][FILE_COL].count())
-    shared_count = total_count - fpp_count
-
-    result = RuleResult(
-        data_dict=None,
-        description='Shared/FPP',
-        detail_list=None,
-        reasons=None,
-        rule=rule,
-        value=fpp_count,
-        value_fmt=(
-            f"{shared_count} Shared ({shared_count/total_count*100:.2f}%) - "
-            f"{fpp_count} FPP ({fpp_count/total_count*100:.2f}%)"
-        ),
-    )
-
     return result
 
 
@@ -621,26 +554,20 @@ def _process_char_node_count(rule: Rule, view: pd.DataFrame, deps: Dict[Rule, Ru
 
 
 BOTTLENECK_FUNCTIONS = {
-    Rule.BOTT_METADATA_ACCESS: (_process_bott_metadata_access, None),
-    Rule.BOTT_SMALL_READS: (_process_bott_small_reads, None),
-    Rule.BOTT_SMALL_WRITES: (_process_bott_small_writes, None),
+    Rule.BOTT_METADATA_ACCESS: (_process_bott_metadata_access, [Rule.CHAR_IO_TIME]),
+    Rule.BOTT_SMALL_READS: (_process_bott_small_reads, [Rule.CHAR_IO_TIME]),
+    Rule.BOTT_SMALL_WRITES: (_process_bott_small_writes, [Rule.CHAR_IO_TIME]),
 }
 
 CHARACTERISTIC_FUNCTIONS = {
     Rule.CHAR_IO_TIME: (_process_char_io_time, None),
+    Rule.CHAR_IO_COUNT: (_process_char_io_count, None),
     Rule.CHAR_IO_SIZE: (_process_char_io_size, None),
-    Rule.CHAR_READ_IO_SIZE: (_process_char_read_io_size, [Rule.CHAR_IO_SIZE]),
-    Rule.CHAR_WRITE_IO_SIZE: (_process_char_write_io_size, [Rule.CHAR_IO_SIZE]),
     Rule.CHAR_READ_XFER_SIZE: (_process_char_read_xfer_size, None),
     Rule.CHAR_WRITE_XFER_SIZE: (_process_char_write_xfer_size, None),
-    Rule.CHAR_IO_COUNT: (_process_char_io_count, None),
-    Rule.CHAR_READ_IO_COUNT: (_process_char_read_io_count, [Rule.CHAR_IO_COUNT]),
-    Rule.CHAR_WRITE_IO_COUNT: (_process_char_write_io_count, [Rule.CHAR_IO_COUNT]),
-    Rule.CHAR_METADATA_IO_COUNT: (_process_char_metadata_io_count, [Rule.CHAR_IO_COUNT]),
     Rule.CHAR_APP_COUNT: (_process_char_app_count, [Rule.CHAR_IO_COUNT, Rule.CHAR_IO_SIZE, Rule.CHAR_IO_TIME]),
     Rule.CHAR_NODE_COUNT: (_process_char_node_count, [Rule.CHAR_IO_COUNT, Rule.CHAR_IO_SIZE, Rule.CHAR_IO_TIME]),
     Rule.CHAR_FILE_COUNT: (_process_char_file_count, None),
-    Rule.CHAR_FPP_COUNT: (_process_char_fpp_count, [Rule.CHAR_FILE_COUNT]),
     Rule.CHAR_ACCESS_PATTERN: (_process_char_access_pattern, None),
 }
 
