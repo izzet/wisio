@@ -12,12 +12,6 @@ from .constants import (
 
 
 ACC_PAT_SUFFIXES = ['time', 'size', 'count']
-HLM_AGG = {
-    'duration': [sum],
-    'index': ['count'],
-    'size': [min, max, sum],
-}
-IO_CATS = [io_cat.value for io_cat in list(IOCategory)]
 DELTA_BINS = [
     0,
     0.001,
@@ -40,6 +34,13 @@ DELTA_BIN_NAMES = [
 ]
 DERIVED_MD_OPS = ['close', 'open', 'seek', 'stat']
 FILE_COL = 'file_name'
+HLM_AGG = {
+    'duration': [sum],
+    'index': ['count'],
+    'size': [min, max, sum],
+}
+IO_CATS = [io_cat.value for io_cat in list(IOCategory)]
+IO_TYPES = ['read', 'write', 'metadata']
 PROC_COL = 'proc_name'
 XFER_SIZE_BINS = [
     -np.inf,
@@ -82,7 +83,7 @@ def compute_main_view(
     log_dir: str,
     global_min_max: dict,
     view_types: list,
-):
+) -> dd.DataFrame:
     # Read Parquet files
     ddf = dd.read_parquet(f"{log_dir}/*.parquet")
     # Fix dtypes
@@ -125,7 +126,7 @@ def compute_view(
     max_io_time: dd.core.Scalar,
     metric='duration',
     delta=0.0001,
-):
+) -> dd.DataFrame:
     # Read types
     parent_type = view_permutation[:-1]
     view_type = view_permutation[-1]
@@ -156,8 +157,8 @@ def compute_view(
     return view
 
 
-def compute_max_io_time(main_view: dd.DataFrame):
-    return main_view.groupby([PROC_COL]).sum()['duration_sum'].max()
+def compute_max_io_time(main_view: dd.DataFrame, time_col='duration_sum') -> dd.core.Scalar:
+    return main_view.groupby([PROC_COL]).sum()[time_col].max()
 
 
 def set_metric_deltas(df: pd.DataFrame, metric: str, max_io_time: float):
