@@ -2,23 +2,29 @@ import dask.dataframe as dd
 import numpy as np
 import pandas as pd
 from dask import compute, delayed
-from typing import Dict, List
+from typing import Any, Dict, List, Tuple, Type
 from ..base import ViewKey, ViewType
 from ..rules import Rule, RuleEngine, RuleReason, RuleResult
 from ..utils.collection_utils import get_intervals, join_with_and
 from ..utils.common_utils import convert_bytes_to_unit
 from .analysis import (
     ACC_PAT_SUFFIXES,
+    APP_NAME_COL,
     DERIVED_MD_OPS,
     FILE_COL,
+    FILE_DIR_COL,
+    FILE_REGEX_COL,
     IO_TYPES,
+    NODE_NAME_COL,
     PROC_COL,
+    RANK_COL,
+    XFER_SIZE_BINS,
     XFER_SIZE_BIN_LABELS,
     XFER_SIZE_BIN_NAMES,
-    XFER_SIZE_BINS,
     compute_max_io_time,
 )
-from .constants import AccessPattern
+from .bottlenecks import BOTTLENECK_ORDER
+from .constants import VIEW_TYPES, AccessPattern
 
 
 METADATA_ACCESS_RATIO_THRESHOLD = 0.5
@@ -26,6 +32,66 @@ SMALL_READ_SIZE_THRESHOLD = 256 * 1024
 SMALL_READ_RATIO_THRESHOLD = 0.75
 SMALL_WRITE_SIZE_THRESHOLD = 256 * 1024
 SMALL_WRITE_RATIO_THRESHOLD = 0.75
+
+
+def _describe_bottleneck(
+    row: Type[tuple],
+    view_type: str,
+    low_level_view: pd.DataFrame,
+    max_io_time: float
+) -> Tuple[Any, str]:
+
+    ix = row.Index
+    ix_low_level_view = low_level_view.loc[[ix]]
+
+    tranges = list(ix_low_level_view.index.unique(level='trange'))
+    trange_intervals = get_intervals(values=tranges)
+
+    if view_type in [FILE_COL, FILE_DIR_COL, FILE_REGEX_COL]:
+        processes = list(ix_low_level_view.index.unique(level=PROC_COL))
+        description = (
+            f"'{ix}' is accessed by {len(processes)} process(es) "
+            f"during the {join_with_and(values=trange_intervals)}th second(s) "
+            f"has an I/O time of {row.duration_sum:.2f} seconds which is "
+            f"{row.duration_sum/max_io_time*100:.2f}% of overall I/O time of the workload."
+        )
+    elif view_type in [APP_NAME_COL, NODE_NAME_COL, PROC_COL, RANK_COL]:
+        files = list(ix_low_level_view.index.unique(level=FILE_COL))
+        description = (
+            f"'{ix}' accesses {len(files)} file(s) "
+            f"during the {join_with_and(values=trange_intervals)}th second(s) "
+            f"and has an I/O time of {row.duration_sum:.2f} seconds which is "
+            f"{row.duration_sum/max_io_time*100:.2f}% of overall I/O time of the workload."
+        )
+    else:
+        files = list(ix_low_level_view.index.unique(level=FILE_COL))
+        processes = list(ix_low_level_view.index.unique(level=PROC_COL))
+        description = (
+            f"{len(processes)} process(es) access(es) {len(files)} file(s) "
+            f"during the {join_with_and(values=trange_intervals)}th second(s) "
+            f"and has an I/O time of {row.duration_sum:.2f} seconds which is "
+            f"{row.duration_sum/max_io_time*100:.2f}% of overall I/O time of the workload."
+        )
+
+    return ix, description
+
+
+def _get_data_dict(row: Type[tuple], view_type: str, low_level_view: pd.DataFrame):
+
+    ix = row.Index
+    ix_low_level_view = low_level_view.loc[[ix]]
+
+    data_dict = {}
+    data_dict['llc'] = dict(row._asdict())
+    data_dict['llc'].pop('Index')
+
+    levels = list(BOTTLENECK_ORDER[view_type])
+    levels.remove(view_type)
+
+    for level in levels:
+        data_dict[f"{level}_list"] = list(ix_low_level_view.index.unique(level=level))
+
+    return data_dict
 
 
 def _get_xfer_size(size: float):
@@ -71,91 +137,73 @@ def _process_bott_metadata_access(
     mid_level_view: pd.DataFrame,
     low_level_view: pd.DataFrame,
     threshold: float,
+    deps: Dict[Rule, RuleResult],
 ):
     view_type = view_key[-1]
+
+    max_io_time = deps[Rule.CHAR_IO_TIME].value
+
     results = {}
     # Run through high level view
-    for ix, row in high_level_view.query(f"duration_th >= {threshold}").iterrows():
+    for row in high_level_view.query(f"duration_th >= {threshold}").itertuples():
 
-        total_time, metadata_time = row['duration_sum'], row['metadata_time']
-        md_time_ratio = metadata_time / total_time
+        ix, description = _describe_bottleneck(
+            row=row,
+            view_type=view_type,
+            low_level_view=low_level_view,
+            max_io_time=max_io_time
+        )
+
+        md_time_ratio = row.metadata_time / row.duration_sum
 
         # Check metadata time ratio
         if md_time_ratio > METADATA_ACCESS_RATIO_THRESHOLD:
 
-            if view_type == 'file_name':
+            reasons = []
 
-                processes = list(low_level_view.loc[[ix]].index.unique(level='proc_name'))
-                tranges = list(low_level_view.loc[[ix]].index.unique(level='trange'))
-                trange_intervals = get_intervals(values=tranges)
+            md_ops = {}
+            for md_op in DERIVED_MD_OPS:
+                md_op_key = f"{md_op}_time"
+                md_ops[md_op_key] = getattr(row, md_op_key)
 
-                md_ops = {}
-                for md_op in DERIVED_MD_OPS:
-                    md_op_key = f"{md_op}_time"
-                    md_ops[md_op_key] = row[md_op_key]
+            max_md_op = max(md_ops, key=md_ops.get)
+            max_md_op_time = md_ops[max_md_op]
+            max_md_op_ratio = max_md_op_time / row.duration_sum
 
-                max_md_op = max(md_ops, key=md_ops.get)
-                max_md_op_time = md_ops[max_md_op]
-                max_md_op_ratio = max_md_op_time / total_time
+            reasons.append(RuleReason(
+                description=(
+                    f"Overall {md_time_ratio * 100:.2f}% ({row.metadata_time:.2f} seconds) of I/O time is spent on metadata access, "
+                    f"specifically {max_md_op_ratio * 100:.2f}% ({max_md_op_time:.2f} seconds) on the '{max_md_op.replace('_time', '')}' operation."
+                ),
+                value=max_md_op_ratio,
+            ))
 
-                description = (
-                    f"'{ix}' is accessed by {len(processes)} process(es) "
-                    f"during the {join_with_and(values=trange_intervals)}th second(s) "
-                    f"and spent {max_md_op_ratio * 100:.2f}% ({max_md_op_time:.2f} seconds) of its I/O time "
-                    f"on the '{max_md_op.replace('_time', '')}' operation(s)."
-                )
+            ix_low_level_view = low_level_view.loc[[ix]]
 
-                results[ix] = RuleResult(
-                    data_dict=dict(
-                        llc=dict(row),
-                        processes=processes,
-                        tranges=tranges,
-                    ),
-                    description=description,
-                    detail_list=None,
-                    reasons=[
-                        RuleReason(
-                            description=f"Metadata time is {md_time_ratio * 100:.2f}% ({metadata_time:.2f} seconds) of I/O time",
-                            value=md_time_ratio,
-                        )
-                    ],
-                    rule=rule,
-                    value=md_time_ratio,
-                    value_fmt=f"{md_time_ratio:.2f}%",
-                )
+            file_based_level = next((l for l in ix_low_level_view.index.names if l.startswith('file_')))
+            files = list(ix_low_level_view.index.unique(level=file_based_level))
 
-            elif view_type == 'proc_name':
+            if all(['/gpfs' in file for file in files]) and 'open' in max_md_op:
+                reasons.append(RuleReason(
+                    description=f"All files are stored on GPFS and 'open's become costly without other I/O operations.",
+                    value=None,
+                ))
 
-                files = list(low_level_view.loc[[ix]].index.unique(level='file_name'))
-                tranges = list(low_level_view.loc[[ix]].index.unique(level='trange'))
-                trange_intervals = get_intervals(values=tranges)
+            data_dict = _get_data_dict(
+                row=row,
+                view_type=view_type,
+                low_level_view=low_level_view
+            )
 
-                open_time = row['open_time']
-
-                if open_time == total_time:
-
-                    description = (
-                        f"'{ix}' accesses {len(files)} file(s) "
-                        f"during the {join_with_and(values=trange_intervals)}th second(s) "
-                        f"and spent its all I/O time on the 'open' operation(s)."
-                    )
-
-                    reasons = []
-                    if all(['/gpfs' in file for file in files]):
-                        reasons.append(RuleReason(
-                            description=f"All files are stored on GPFS and 'open's become costly without other I/O operations.",
-                            value=None,
-                        ))
-
-                    results[ix] = RuleResult(
-                        data_dict=None,
-                        description=description,
-                        detail_list=None,
-                        reasons=reasons,
-                        rule=rule,
-                        value=md_time_ratio,
-                        value_fmt=f"{md_time_ratio:.2f}%",
-                    )
+            results[ix] = RuleResult(
+                data_dict=data_dict,
+                description=description,
+                detail_list=None,
+                reasons=reasons,
+                rule=rule,
+                value=md_time_ratio,
+                value_fmt=f"{md_time_ratio*100:.2f}%",
+            )
 
     return rule, view_key, results
 
@@ -170,57 +218,57 @@ def _process_bott_small_access(
     access_type: str,
     access_ratio_threshold: float,
     access_size_threshold: float,
+    max_io_time: float,
 ):
     view_type = view_key[-1]
+
     results = {}
     # Run through high level view
-    for ix, row in high_level_view.query(f"duration_th >= {threshold}").iterrows():
+    for row in high_level_view.query(f"duration_th >= {threshold}").itertuples():
 
-        total_count, total_size, total_time, access_time = (
-            row['index_count'],
-            row['size_sum'],
-            row['duration_sum'],
-            row[f"{access_type}_time"],
+        ix, description = _describe_bottleneck(
+            row=row,
+            view_type=view_type,
+            low_level_view=low_level_view,
+            max_io_time=max_io_time
         )
-        avg_size = total_size / total_count
-        access_time_ratio = access_time / total_time
 
-        if access_time_ratio > access_ratio_threshold:
+        avg_size = row.size_sum / row.index_count
+        access_time = getattr(row, f"{access_type}_time")
+        access_time_ratio = access_time / row.duration_sum
 
-            small_accesses = low_level_view.loc[[ix]].query(f'size_max < {access_size_threshold}')
+        if access_time_ratio > access_ratio_threshold and avg_size < access_size_threshold:
 
-            if view_type == 'file_name':
+            reasons = []
 
-                processes = list(small_accesses.index.unique(level='proc_name'))
-                processes_fmt = ["'{}'".format(p) for p in processes]
-                tranges = list(small_accesses.index.unique(level='trange'))
-                trange_intervals = get_intervals(values=tranges)
+            reasons.append(RuleReason(
+                description=f"'{access_type}' time is {access_time_ratio*100:.2f}% ({access_time:.2f} seconds) of I/O time.",
+                value=access_time_ratio,
+            ))
 
-                description = (
-                    f"'{ix}' is accessed by process(es) {join_with_and(processes_fmt)} "
-                    f"during the {join_with_and(values=trange_intervals)}th second(s) "
-                    f"with a transfer size smaller than {convert_bytes_to_unit(access_size_threshold, 'KB')} KB "
-                    f"({convert_bytes_to_unit(avg_size, 'KB'):.2f} KB)."
-                )
+            reasons.append(RuleReason(
+                description=(
+                    f"Average I/O accesses are {convert_bytes_to_unit(avg_size, 'KB'):.2f} KB, "
+                    f"which is smaller than {convert_bytes_to_unit(access_size_threshold, 'KB')} KB"
+                ),
+                value=avg_size,
+            ))
 
-                reasons = [RuleReason(
-                    description=f"'{access_type}' time is {access_time_ratio * 100:.2f}% ({access_time:.2f} seconds) of I/O time.",
-                    value=access_time_ratio,
-                )]
+            data_dict = _get_data_dict(
+                row=row,
+                view_type=view_type,
+                low_level_view=low_level_view
+            )
 
-                results[ix] = RuleResult(
-                    data_dict=dict(
-                        llc=dict(row),
-                        processes=processes,
-                        tranges=tranges,
-                    ),
-                    description=description,
-                    detail_list=None,
-                    reasons=reasons,
-                    rule=rule,
-                    value=access_time_ratio,
-                    value_fmt=f"{access_time_ratio:.2f}%",
-                )
+            results[ix] = RuleResult(
+                data_dict=data_dict,
+                description=description,
+                detail_list=None,
+                reasons=reasons,
+                rule=rule,
+                value=access_time_ratio,
+                value_fmt=f"{access_time_ratio*100:.2f}%",
+            )
 
     return rule, view_key, results
 
@@ -233,6 +281,7 @@ def _process_bott_small_reads(
     mid_level_view: pd.DataFrame,
     low_level_view: pd.DataFrame,
     threshold: float,
+    deps: Dict[Rule, RuleResult],
 ):
     return _process_bott_small_access(
         rule=rule,
@@ -244,6 +293,7 @@ def _process_bott_small_reads(
         access_type='read',
         access_ratio_threshold=SMALL_READ_RATIO_THRESHOLD,
         access_size_threshold=SMALL_READ_SIZE_THRESHOLD,
+        max_io_time=deps[Rule.CHAR_IO_TIME].value,
     )
 
 
@@ -255,6 +305,7 @@ def _process_bott_small_writes(
     mid_level_view: pd.DataFrame,
     low_level_view: pd.DataFrame,
     threshold: float,
+    deps: Dict[Rule, RuleResult],
 ):
     return _process_bott_small_access(
         rule=rule,
@@ -266,6 +317,7 @@ def _process_bott_small_writes(
         access_type='write',
         access_ratio_threshold=SMALL_WRITE_RATIO_THRESHOLD,
         access_size_threshold=SMALL_WRITE_SIZE_THRESHOLD,
+        max_io_time=deps[Rule.CHAR_IO_TIME].value,
     )
 
 
@@ -613,27 +665,26 @@ class RecorderRuleEngine(RuleEngine):
             view_type = view_key[-1]
             # Run through rules
             for rule in self.rules[view_type]:
-                if rule in BOTTLENECK_FUNCTIONS:
-                    rule_func, rule_deps = BOTTLENECK_FUNCTIONS[rule]
-                    if rule_deps is None:
-                        rule_tasks.append(rule_func(
-                            rule=rule,
-                            view_key=view_key,
-                            high_level_view=bottleneck['high_level_view'],
-                            mid_level_view=bottleneck['mid_level_view'],
-                            low_level_view=bottleneck['low_level_view'],
-                            threshold=threshold,
-                        ))
-                    else:
-                        rule_tasks.append(rule_func(
-                            rule=rule,
-                            view_key=view_key,
-                            high_level_view=bottleneck['high_level_view'],
-                            mid_level_view=bottleneck['mid_level_view'],
-                            low_level_view=bottleneck['low_level_view'],
-                            threshold=threshold,
-                            deps={rule_dep: characteristics[rule_dep] for rule_dep in rule_deps}
-                        ))
+                rule_func, rule_deps = BOTTLENECK_FUNCTIONS[rule]
+                if rule_deps is None:
+                    rule_tasks.append(rule_func(
+                        rule=rule,
+                        view_key=view_key,
+                        high_level_view=bottleneck['high_level_view'],
+                        mid_level_view=bottleneck['mid_level_view'],
+                        low_level_view=bottleneck['low_level_view'],
+                        threshold=threshold,
+                    ))
+                else:
+                    rule_tasks.append(rule_func(
+                        rule=rule,
+                        view_key=view_key,
+                        high_level_view=bottleneck['high_level_view'],
+                        mid_level_view=bottleneck['mid_level_view'],
+                        low_level_view=bottleneck['low_level_view'],
+                        threshold=threshold,
+                        deps={rule_dep: characteristics[rule_dep] for rule_dep in rule_deps}
+                    ))
         # Compute tasks
         rule_results = compute(*rule_tasks)
         # Create bottlenecks
