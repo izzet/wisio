@@ -1,8 +1,9 @@
 import dask.dataframe as dd
 import numpy as np
+import os
 import pandas as pd
 from dask.distributed import Future, get_client
-from typing import Dict, Union
+from typing import Union
 from .constants import (
     CAT_POSIX,
     TIME_PRECISION,
@@ -12,6 +13,7 @@ from .constants import (
 
 
 ACC_PAT_SUFFIXES = ['time', 'size', 'count']
+APP_NAME_COL = 'app_name'
 DELTA_BINS = [
     0,
     0.001,
@@ -34,6 +36,9 @@ DELTA_BIN_NAMES = [
 ]
 DERIVED_MD_OPS = ['close', 'open', 'seek', 'stat']
 FILE_COL = 'file_name'
+FILE_DIR_COL = 'file_dir'
+FILE_REGEX_COL = 'file_regex'
+FILE_REGEX_PLACEHOLDER = '[0-9]'
 HLM_AGG = {
     'duration': [sum],
     'index': ['count'],
@@ -41,7 +46,11 @@ HLM_AGG = {
 }
 IO_CATS = [io_cat.value for io_cat in list(IOCategory)]
 IO_TYPES = ['read', 'write', 'metadata']
+NODE_NAME_COL = 'node_name'
 PROC_COL = 'proc_name'
+PROC_NAME_SEPARATOR = '#'
+RANK_COL = 'rank'
+TRANGE_COL = 'trange'
 XFER_SIZE_BINS = [
     -np.inf,
     4 * 1024.0,
@@ -120,18 +129,12 @@ def compute_main_view(
 
 
 def compute_view(
-    main_view: dd.DataFrame,
-    views: Dict[tuple, dd.DataFrame],
-    view_permutation: tuple,
+    parent_view: dd.DataFrame,
+    view_type: str,
     max_io_time: dd.core.Scalar,
     metric='duration',
     delta=0.0001,
 ) -> dd.DataFrame:
-    # Read types
-    parent_type = view_permutation[:-1]
-    view_type = view_permutation[-1]
-    # Get parent view
-    parent_view = views[parent_type] if parent_type in views else main_view
     # Create colum names
     metric_col, delta_col = f"{metric}_sum", f"{metric}_delta"
     # Check view type
@@ -159,6 +162,33 @@ def compute_view(
 
 def compute_max_io_time(main_view: dd.DataFrame, time_col='duration_sum') -> dd.core.Scalar:
     return main_view.groupby([PROC_COL]).sum()[time_col].max()
+
+
+def set_file_dir(df: pd.DataFrame):
+    return df.assign(file_dir=df[FILE_COL].apply(lambda file_name: os.path.dirname(file_name)))
+
+
+def set_file_regex(df: pd.DataFrame):
+    return df.assign(file_regex=df[FILE_COL].replace(to_replace='[0-9]+', value=FILE_REGEX_PLACEHOLDER, regex=True))
+
+
+def set_app_node_name(df: pd.DataFrame):
+    return df \
+        .assign(
+            proc_name_parts=lambda df: df[PROC_COL].str.split(PROC_NAME_SEPARATOR),
+            app_name=lambda df: df.proc_name_parts.str[0],
+            node_name=lambda df: df.proc_name_parts.str[1],
+            rank=lambda df: df.proc_name_parts.str[2],
+        ) \
+        .drop(columns=['proc_name_parts'])
+
+
+def set_logical_columns(view: dd.DataFrame) -> dd.DataFrame:
+    return view \
+        .reset_index() \
+        .map_partitions(set_app_node_name) \
+        .map_partitions(set_file_dir) \
+        .map_partitions(set_file_regex)
 
 
 def set_metric_deltas(df: pd.DataFrame, metric: str, max_io_time: float):

@@ -9,14 +9,24 @@ from ..utils.logger import ElapsedTimeLogger
 from .analysis import (
     DELTA_BINS,
     PROC_COL,
+    TRANGE_COL,
     set_metric_percentages,
     set_metric_scores,
+)
+from .constants import (
+    LOGICAL_VIEW_TYPES,
+    VIEW_TYPES
 )
 
 
 BOTTLENECK_ORDER = dict(
+    app_name=('app_name', 'trange', 'file_name'),
+    file_dir=('file_dir', 'proc_name', 'trange'),
     file_name=('file_name', 'proc_name', 'trange'),
+    file_regex=('file_regex', 'proc_name', 'trange'),
+    node_name=('node_name', 'trange', 'file_name'),
     proc_name=('proc_name', 'trange', 'file_name'),
+    rank=('rank', 'trange', 'file_name'),
     trange=('trange', 'proc_name', 'file_name'),
 )
 
@@ -64,7 +74,6 @@ class RecorderBottleneckDetector(BottleneckDetector):
     def detect_bottlenecks(
         self,
         views: Dict[ViewKey, dd.DataFrame],
-        view_types: list,
         max_io_time: dd.core.Scalar,
         metric='duration',
     ) -> Dict[ViewKey, dd.DataFrame]:
@@ -76,7 +85,6 @@ class RecorderBottleneckDetector(BottleneckDetector):
             bottlenecks[view_key] = self._generate_bottlenecks_views(
                 view_key=view_key,
                 view=view,
-                view_types=view_types,
                 max_io_time=max_io_time,
                 metric=metric,
             )
@@ -116,7 +124,6 @@ class RecorderBottleneckDetector(BottleneckDetector):
         self,
         view_key: ViewKey,
         view: dd.DataFrame,
-        view_types: list,
         max_io_time: dd.core.Scalar,
         metric: str,
     ):
@@ -129,8 +136,8 @@ class RecorderBottleneckDetector(BottleneckDetector):
             .first()
 
         # Non-proc agg columns
-        non_proc_agg_dict = self._get_agg_dict(view_types=view_types, view_columns=low_level_view.columns, is_proc=False)
-        proc_agg_dict = self._get_agg_dict(view_types=view_types, view_columns=low_level_view.columns, is_proc=True)
+        non_proc_agg_dict = self._get_agg_dict(view_columns=low_level_view.columns, is_proc=False)
+        proc_agg_dict = self._get_agg_dict(view_columns=low_level_view.columns, is_proc=True)
 
         # Create mid and high level views
         if view_type is not PROC_COL:
@@ -146,7 +153,7 @@ class RecorderBottleneckDetector(BottleneckDetector):
         else:
             mid_level_view = low_level_view \
                 .reset_index() \
-                .groupby([view_type, 'trange']) \
+                .groupby([view_type, TRANGE_COL]) \
                 .agg(non_proc_agg_dict)
 
             high_level_view = mid_level_view \
@@ -169,17 +176,17 @@ class RecorderBottleneckDetector(BottleneckDetector):
         return dict(
             low_level_view=low_level_view,
             mid_level_view=mid_level_view,
-            high_level_view=high_level_view
+            high_level_view=high_level_view,
         )
 
-    def _get_agg_dict(self, view_types: list, view_columns: list, is_proc=False):
+    def _get_agg_dict(self, view_columns: list, is_proc=False):
         if is_proc:
             agg_dict = {col: max if any(x in col for x in 'duration time'.split()) else sum for col in view_columns}
         else:
             agg_dict = {col: sum for col in view_columns}
         agg_dict['size_min'] = min
         agg_dict['size_max'] = max
-        for view_type in view_types:
+        for view_type in [*VIEW_TYPES, *LOGICAL_VIEW_TYPES]:
             if view_type in agg_dict:
                 agg_dict.pop(view_type)
         return agg_dict
