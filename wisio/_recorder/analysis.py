@@ -172,13 +172,13 @@ def set_file_regex(df: pd.DataFrame):
     return df.assign(file_regex=df[FILE_COL].replace(to_replace='[0-9]+', value=FILE_REGEX_PLACEHOLDER, regex=True))
 
 
-def set_app_node_name(df: pd.DataFrame):
+def set_proc_name_parts(df: pd.DataFrame):
     return df \
         .assign(
             proc_name_parts=lambda df: df[PROC_COL].str.split(PROC_NAME_SEPARATOR),
-            app_name=lambda df: df.proc_name_parts.str[0],
-            node_name=lambda df: df.proc_name_parts.str[1],
-            rank=lambda df: df.proc_name_parts.str[2],
+            app_name=lambda df: df.proc_name_parts.str[0].astype(str),
+            node_name=lambda df: df.proc_name_parts.str[1].astype(str),
+            rank=lambda df: df.proc_name_parts.str[2].astype(str),
         ) \
         .drop(columns=['proc_name_parts'])
 
@@ -186,7 +186,7 @@ def set_app_node_name(df: pd.DataFrame):
 def set_logical_columns(view: dd.DataFrame) -> dd.DataFrame:
     return view \
         .reset_index() \
-        .map_partitions(set_app_node_name) \
+        .map_partitions(set_proc_name_parts) \
         .map_partitions(set_file_dir) \
         .map_partitions(set_file_regex)
 
