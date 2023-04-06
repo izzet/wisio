@@ -2,7 +2,8 @@ import dask.dataframe as dd
 import itertools as it
 import json
 import os
-from typing import Dict
+from dask import compute
+from typing import Dict, Union
 from ._recorder.analysis import (
     compute_main_view,
     compute_max_io_time,
@@ -42,18 +43,17 @@ class RecorderAnalyzer(Analyzer):
         self.cluster_manager.boot()
 
     def analyze_parquet(self, log_dir: str, delta=0.0001, cut=0.5):
-        # Create dirs
-        checkpoint_dir = f"{log_dir}/checkpoints"
-        ensure_dir(checkpoint_dir)
+        # Ensure checkpoint dir
+        checkpoint_dir = self._ensure_checkpoint_dir(log_dir=log_dir)
 
         # Load global min max
         with ElapsedTimeLogger(logger=self.logger, message='Load global min/max'):
             global_min_max = self.load_global_min_max(log_dir=log_dir)
 
         # Compute main view
-        if os.path.exists(f"{checkpoint_dir}/{CHECKPOINT_MAIN_VIEW}/_metadata"):
+        if self._has_checkpoint(checkpoint_dir=checkpoint_dir, view_name=CHECKPOINT_MAIN_VIEW):
             with ElapsedTimeLogger(logger=self.logger, message='Read saved main view'):
-                main_view = dd.read_parquet(f"{checkpoint_dir}/{CHECKPOINT_MAIN_VIEW}")
+                main_view = self._read_checkpoint(checkpoint_dir=checkpoint_dir, view_name=CHECKPOINT_MAIN_VIEW)
         else:
             with ElapsedTimeLogger(logger=self.logger, message='Compute main view'):
                 main_view = compute_main_view(
@@ -62,22 +62,24 @@ class RecorderAnalyzer(Analyzer):
                     view_types=VIEW_TYPES
                 )
             with ElapsedTimeLogger(logger=self.logger, message='Save main view'):
-                main_view.to_parquet(f"{checkpoint_dir}/{CHECKPOINT_MAIN_VIEW}")
+                self._checkpoint(checkpoint_dir=checkpoint_dir, view_name=CHECKPOINT_MAIN_VIEW, view=main_view).compute()
 
         # Compute `max_io_time`
         with ElapsedTimeLogger(logger=self.logger, message='Compute max I/O time'):
             max_io_time = compute_max_io_time(main_view=main_view)
 
-        # Compute multifaceted views
-        views = {}
+        checkpoint_tasks = []
         views_need_checkpoint = []
 
-        # Loop through view permutations
+        # Keep views
+        views = {}
+
+        # Compute multifaceted views
         for view_permutation in it.chain.from_iterable(map(self._view_permutations, range(len(VIEW_TYPES)))):
-            view_name = '_'.join(view_permutation) if isinstance(view_permutation, tuple) else view_permutation
-            if os.path.exists(f"{checkpoint_dir}/{view_name}/_metadata"):
+            view_name = self._view_name(view_permutation)
+            if self._has_checkpoint(checkpoint_dir=checkpoint_dir, view_name=view_name):
                 with ElapsedTimeLogger(logger=self.logger, message=f"Read saved {view_name} view"):
-                    views[view_permutation] = dd.read_parquet(f"{checkpoint_dir}/{view_name}")
+                    views[view_permutation] = self._read_checkpoint(checkpoint_dir=checkpoint_dir, view_name=view_name)
             else:
                 with ElapsedTimeLogger(logger=self.logger, message=f"Compute {view_name} view"):
                     # Read types
@@ -94,23 +96,35 @@ class RecorderAnalyzer(Analyzer):
                     )
                     views_need_checkpoint.append(view_permutation)
 
-        for view_permutation in it.chain.from_iterable(map(self._view_permutations, range(len(VIEW_TYPES)))):
-            view_name = '_'.join(view_permutation) if isinstance(view_permutation, tuple) else view_permutation
-            if view_permutation in views_need_checkpoint:
-                with ElapsedTimeLogger(logger=self.logger, message=f"Save {view_name} view"):
-                    views[view_permutation].to_parquet(f"{checkpoint_dir}/{view_name}")
-
         # Compute logical views
         main_view_with_logical_columns = set_logical_columns(view=main_view)
         for logical_view_type in LOGICAL_VIEW_TYPES:
-            views[(logical_view_type,)] = compute_view(
-                parent_view=main_view_with_logical_columns,
-                view_type=logical_view_type,
-                max_io_time=max_io_time,
-                delta=delta,
-            )
+            view_permutation = (logical_view_type,)
+            view_name = self._view_name(view_permutation)
+            if self._has_checkpoint(checkpoint_dir=checkpoint_dir, view_name=view_name):
+                with ElapsedTimeLogger(logger=self.logger, message=f"Read saved {view_name} view"):
+                    views[view_permutation] = self._read_checkpoint(checkpoint_dir=checkpoint_dir, view_name=view_name)
+            else:
+                with ElapsedTimeLogger(logger=self.logger, message=f"Compute {view_name} view"):
+                    views[view_permutation] = compute_view(
+                        parent_view=main_view_with_logical_columns,
+                        view_type=logical_view_type,
+                        max_io_time=max_io_time,
+                        delta=delta,
+                    )
+                    views_need_checkpoint.append(view_permutation)
 
-        # Detect bottlenecks
+        # Checkpoint views
+        for view_permutation, view in views.items():
+            if view_permutation in views_need_checkpoint:
+                view_name = self._view_name(view_permutation)
+                checkpoint_task = self._checkpoint(checkpoint_dir=checkpoint_dir, view_name=view_name, view=view)
+                checkpoint_tasks.append(checkpoint_task)
+
+        with ElapsedTimeLogger(logger=self.logger, message=f"Checkpoint views"):
+            compute(*checkpoint_tasks)
+
+            # Detect bottlenecks
         bottleneck_detector = RecorderBottleneckDetector(logger=self.logger)
         with ElapsedTimeLogger(logger=self.logger, message='Detect bottlenecks'):
             bottlenecks = bottleneck_detector.detect_bottlenecks(
@@ -133,6 +147,29 @@ class RecorderAnalyzer(Analyzer):
             file_name = '_'.join(view_key) if isinstance(view_key, tuple) else view_key
             with open(f"{bottleneck_dir}/{file_name}.json", 'w') as json_file:
                 json.dump(bottleneck_dict, json_file, cls=NpEncoder, sort_keys=True)
+
+    def _checkpoint(self, checkpoint_dir: str, view_name: str, view: dd.DataFrame, partition_size='100MB') -> dd.core.Scalar:
+        try:
+            return view \
+                .repartition(partition_size) \
+                .to_parquet(f"{checkpoint_dir}/{view_name}", compute=False)
+        except:
+            pass
+
+    def _ensure_checkpoint_dir(self, log_dir):
+        checkpoint_dir = f"{log_dir}/checkpoints"
+        ensure_dir(checkpoint_dir)
+        return checkpoint_dir
+
+    def _has_checkpoint(self, checkpoint_dir: str, view_name: str):
+        return os.path.exists(f"{checkpoint_dir}/{view_name}/_metadata")
+
+    def _read_checkpoint(self, checkpoint_dir: str, view_name: str):
+        return dd.read_parquet(f"{checkpoint_dir}/{view_name}")
+
+    @staticmethod
+    def _view_name(view_permutation: Union[tuple, str]):
+        return '_'.join(view_permutation) if isinstance(view_permutation, tuple) else view_permutation
 
     @staticmethod
     def _view_permutations(r: int):
