@@ -663,7 +663,12 @@ class RecorderRuleEngine(RuleEngine):
         for view_key, bottleneck in bottlenecks.items():
             # Get view type
             view_type = view_key[-1]
-            # Run through rules
+
+            # Check if rule is defined for view type
+            if view_type not in self.rules:
+                continue
+
+            # If so, run through rules
             for rule in self.rules[view_type]:
                 rule_func, rule_deps = BOTTLENECK_FUNCTIONS[rule]
                 if rule_deps is None:
