@@ -246,7 +246,7 @@ def _set_derived_columns(ddf: dd.DataFrame):
     for col_suffix, col_value in zip(['time', 'size', 'count'], ['duration_sum', 'size_sum', 'index_count']):
         for io_cat in list(IOCategory):
             col_name = f"{io_cat.name.lower()}_{col_suffix}"
-            ddf[col_name] = 0.0 if col_suffix is 'time' else 0
+            ddf[col_name] = 0.0 if col_suffix == 'time' else 0
             ddf[col_name] = ddf[col_name].mask(ddf['io_cat'] == io_cat.value, ddf[col_value])
     for io_cat in list(IOCategory):
         min_name, max_name = f"{io_cat.name.lower()}_min", f"{io_cat.name.lower()}_max"
@@ -262,13 +262,13 @@ def _set_derived_columns(ddf: dd.DataFrame):
     for col_suffix, col_value in zip(ACC_PAT_SUFFIXES, ['data_time', 'data_size', 'data_count']):
         for acc_pat in list(AccessPattern):
             col_name = f"{acc_pat.name.lower()}_{col_suffix}"
-            ddf[col_name] = 0.0 if col_suffix is 'time' else 0
+            ddf[col_name] = 0.0 if col_suffix == 'time' else 0
             ddf[col_name] = ddf[col_name].mask(ddf['acc_pat'] == acc_pat.value, ddf[col_value])
     # Derive metadata operation columns
     for col_suffix, col_value in zip(['time', 'count'], ['duration_sum', 'index_count']):
         for md_op in DERIVED_MD_OPS:
             col_name = f"{md_op}_{col_suffix}"
-            ddf[col_name] = 0.0 if col_suffix is 'time' else 0
+            ddf[col_name] = 0.0 if col_suffix == 'time' else 0
             if md_op in ['close', 'open']:
                 ddf[col_name] = ddf[col_name].mask(ddf['func_id'].str.contains(md_op) & ~ddf['func_id'].str.contains('dir'), ddf[col_value])
             else:
