@@ -22,7 +22,7 @@ DELTA_BINS = [
     0.25,
     0.5,
     0.75,
-    1
+    0.9
 ]
 DELTA_BIN_NAMES = [
     'none',
