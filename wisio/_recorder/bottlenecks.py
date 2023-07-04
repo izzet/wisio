@@ -74,8 +74,8 @@ class RecorderBottleneckDetector(BottleneckDetector):
     def detect_bottlenecks(
         self,
         views: Dict[ViewKey, dd.DataFrame],
-        max_io_time: dd.core.Scalar,
-        metric='duration',
+        metric: str,
+        metric_maxes: Dict[ViewKey, dd.core.Scalar],
     ) -> Dict[ViewKey, dd.DataFrame]:
         # Keep bottleneck views
         bottlenecks = {}
@@ -85,13 +85,13 @@ class RecorderBottleneckDetector(BottleneckDetector):
             bottlenecks[view_key] = self._generate_bottlenecks_views(
                 view_key=view_key,
                 view=view,
-                max_io_time=max_io_time,
                 metric=metric,
+                metric_max=metric_maxes[view_key],
             )
         # Return bottleneck views
         return bottlenecks
 
-    def bottlenecks_to_json(self, bottlenecks: Dict[ViewKey, dd.DataFrame], metric='duration'):
+    def bottlenecks_to_json(self, bottlenecks: Dict[ViewKey, dd.DataFrame], metric: str):
         # Init bottlenecks
         bottleneck_tasks = []
         bottlenecks_dict = {}
@@ -124,8 +124,8 @@ class RecorderBottleneckDetector(BottleneckDetector):
         self,
         view_key: ViewKey,
         view: dd.DataFrame,
-        max_io_time: dd.core.Scalar,
         metric: str,
+        metric_max: dd.core.Scalar,
     ):
         # Get view type
         view_type = view_key[-1]
@@ -162,15 +162,15 @@ class RecorderBottleneckDetector(BottleneckDetector):
                 .agg(non_proc_agg_dict)
 
         low_level_view = low_level_view \
-            .map_partitions(set_metric_percentages, metric=metric, max_io_time=max_io_time) \
+            .map_partitions(set_metric_percentages, metric=metric, metric_max=metric_max) \
             .map_partitions(set_metric_scores, metric=metric, col=f"{metric}_pero")
 
         mid_level_view = mid_level_view \
-            .map_partitions(set_metric_percentages, metric=metric, max_io_time=max_io_time) \
+            .map_partitions(set_metric_percentages, metric=metric, metric_max=metric_max) \
             .map_partitions(set_metric_scores, metric=metric, col=f"{metric}_pero")
 
         high_level_view = high_level_view \
-            .map_partitions(set_metric_percentages, metric=metric, max_io_time=max_io_time) \
+            .map_partitions(set_metric_percentages, metric=metric, metric_max=metric_max) \
             .map_partitions(set_metric_scores, metric=metric, col=f"{metric}_pero")
 
         return dict(
@@ -186,7 +186,10 @@ class RecorderBottleneckDetector(BottleneckDetector):
             agg_dict = {col: sum for col in view_columns}
         agg_dict['size_min'] = min
         agg_dict['size_max'] = max
-        for view_type in [*VIEW_TYPES, *LOGICAL_VIEW_TYPES]:
+        for view_type in VIEW_TYPES:
+            if view_type in agg_dict:
+                agg_dict.pop(view_type)
+        for _, view_type in LOGICAL_VIEW_TYPES:
             if view_type in agg_dict:
                 agg_dict.pop(view_type)
         return agg_dict

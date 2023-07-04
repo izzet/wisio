@@ -4,12 +4,7 @@ import json
 import os
 from dask import compute
 from typing import Dict, Union
-from ._recorder.analysis import (
-    compute_main_view,
-    compute_max_io_time,
-    compute_view,
-    set_logical_columns
-)
+from ._recorder.analysis import compute_main_view, compute_view, set_logical_columns
 from ._recorder.bottlenecks import RecorderBottleneckDetector
 from ._recorder.constants import LOGICAL_VIEW_TYPES, VIEW_TYPES
 from .base import Analyzer
@@ -20,6 +15,7 @@ from .utils.logger import ElapsedTimeLogger
 
 
 CHECKPOINT_MAIN_VIEW = '_main_view'
+METRIC = 'duration'
 
 
 class RecorderAnalyzer(Analyzer):
@@ -42,7 +38,7 @@ class RecorderAnalyzer(Analyzer):
         # Boot cluster
         self.cluster_manager.boot()
 
-    def analyze_parquet(self, log_dir: str, delta=0.0001, cut=0.5, checkpoint=True, desired_view_names=[]):
+    def analyze_parquet(self, log_dir: str, cutoff=0.01, checkpoint=True, desired_view_names=[]):
         # Ensure checkpoint dir
         checkpoint_dir = None
         if checkpoint:
@@ -67,11 +63,8 @@ class RecorderAnalyzer(Analyzer):
                 with ElapsedTimeLogger(logger=self.logger, message='Save main view'):
                     self._checkpoint(checkpoint_dir=checkpoint_dir, view_name=CHECKPOINT_MAIN_VIEW, view=main_view).compute()
 
-        # Compute `max_io_time`
-        with ElapsedTimeLogger(logger=self.logger, message='Compute max I/O time'):
-            max_io_time = compute_max_io_time(main_view=main_view)
-
         # Keep views & tasks
+        metric_maxes = {}
         views = {}
         checkpoint_tasks = []
         views_need_checkpoint = []
@@ -87,22 +80,31 @@ class RecorderAnalyzer(Analyzer):
             else:
                 with ElapsedTimeLogger(logger=self.logger, message=f"Compute {view_name} view"):
                     # Read types
+                    view_type = view_permutation[-1]
+                    max_value_type = (view_type,)
                     parent_type = view_permutation[:-1]
-                    logical_view_type = view_permutation[-1]
+
                     # Get parent view
+                    parent_metric_max = metric_maxes[max_value_type] if max_value_type in metric_maxes else None
                     parent_view = views[parent_type] if parent_type in views else main_view
+
                     # Compute view
-                    views[view_permutation] = compute_view(
+                    view, metric_max = compute_view(
                         parent_view=parent_view,
-                        view_type=logical_view_type,
-                        max_io_time=max_io_time,
-                        delta=delta,
+                        view_type=view_type,
+                        metric=METRIC,
+                        metric_max=parent_metric_max,
+                        cutoff=cutoff,
                     )
+
+                    metric_maxes[view_permutation] = metric_max
+                    views[view_permutation] = view
+
                     views_need_checkpoint.append(view_permutation)
 
         # Compute logical views
         main_view_with_logical_columns = set_logical_columns(view=main_view)
-        for logical_view_type in LOGICAL_VIEW_TYPES:
+        for parent_type, logical_view_type in LOGICAL_VIEW_TYPES:
             view_permutation = (logical_view_type,)
             view_name = self._view_name(view_permutation)
             if len(desired_view_names) > 0 and view_name not in desired_view_names:
@@ -112,12 +114,20 @@ class RecorderAnalyzer(Analyzer):
                     views[view_permutation] = self._read_checkpoint(checkpoint_dir=checkpoint_dir, view_name=view_name)
             else:
                 with ElapsedTimeLogger(logger=self.logger, message=f"Compute {view_name} view"):
-                    views[view_permutation] = compute_view(
+                    # Get parent view
+                    parent_metric_max = metric_maxes[(parent_type,)]
+
+                    view, metric_max = compute_view(
                         parent_view=main_view_with_logical_columns,
                         view_type=logical_view_type,
-                        max_io_time=max_io_time,
-                        delta=delta,
+                        metric=METRIC,
+                        metric_max=parent_metric_max,
+                        cutoff=cutoff,
                     )
+
+                    metric_maxes[view_permutation] = metric_max
+                    views[view_permutation] = view
+
                     views_need_checkpoint.append(view_permutation)
 
         # Checkpoint views
@@ -136,7 +146,8 @@ class RecorderAnalyzer(Analyzer):
         with ElapsedTimeLogger(logger=self.logger, message='Detect bottlenecks'):
             bottlenecks = bottleneck_detector.detect_bottlenecks(
                 views=views,
-                max_io_time=max_io_time,
+                metric=METRIC,
+                metric_maxes=metric_maxes,
             )
 
         # Return views

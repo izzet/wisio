@@ -131,12 +131,13 @@ def compute_main_view(
 def compute_view(
     parent_view: dd.DataFrame,
     view_type: str,
-    max_io_time: dd.core.Scalar,
-    metric='duration',
-    delta=0.0001,
+    metric: str,
+    metric_max: dd.core.Scalar,
+    cutoff=0.01,
 ) -> dd.DataFrame:
     # Create colum names
     metric_col, delta_col = f"{metric}_sum", f"{metric}_delta"
+
     # Check view type
     if view_type is not PROC_COL:
         # Compute proc view first
@@ -150,14 +151,26 @@ def compute_view(
         group_view = parent_view \
             .groupby([view_type]) \
             .agg({metric_col: sum})
+
+    # Compute metric max value
+    metric_max = group_view[metric_col].sum() if metric_max is None else metric_max
+
     # Set metric scores
     group_view = group_view \
-        .map_partitions(set_metric_deltas, metric=metric, max_io_time=max_io_time) \
-        .query(f"{delta_col} > @delta", local_dict={'delta': delta})
+        .sort_values(metric_col, ascending=False) \
+        .map_partitions(set_metric_deltas, metric=metric, metric_max=metric_max)
+
+    # Get the first index in case all the records get cut off
+    first_ix = group_view.index.head(1, compute=False).to_series().min()
+
+    # Do the cutoff
+    group_view = group_view.query(f"{delta_col} <= @cutoff | index == @first_ix", local_dict={'cutoff': cutoff, 'first_ix': first_ix})
+
     # Find filtered records
     view = parent_view.query(f"{view_type} in @indices", local_dict={'indices': group_view.index.unique()})
+
     # Return view
-    return view
+    return view, metric_max
 
 
 def compute_max_io_time(main_view: dd.DataFrame, time_col='duration_sum') -> dd.core.Scalar:
@@ -191,24 +204,22 @@ def set_logical_columns(view: dd.DataFrame) -> dd.DataFrame:
         .map_partitions(set_file_regex)
 
 
-def set_metric_deltas(df: pd.DataFrame, metric: str, max_io_time: float):
-    metric_col, csp_col, delta_col = (
+def set_metric_deltas(df: pd.DataFrame, metric: str, metric_max: float):
+    metric_col, delta_col = (
         f"{metric}_sum",
-        f"{metric}_csp",
         f"{metric}_delta",
     )
-    df[csp_col] = df[metric_col].cumsum() / max_io_time
-    df[delta_col] = df[csp_col].diff().fillna(df[csp_col])
+    df[delta_col] = df[metric_col].cumsum() / metric_max
     return df
 
 
-def set_metric_percentages(df: pd.DataFrame, metric: str, max_io_time: float):
+def set_metric_percentages(df: pd.DataFrame, metric: str, metric_max: float):
     metric_col, pero_col, perr_col = (
         f"{metric}_sum",
         f"{metric}_pero",
         f"{metric}_perr"
     )
-    df[pero_col] = df[metric_col] / max_io_time
+    df[pero_col] = df[metric_col] / metric_max
     df[perr_col] = df[metric_col] / df[metric_col].sum()
     return df
 

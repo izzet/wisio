@@ -24,7 +24,7 @@ CAT_POSIX = 0
 TIME_PRECISION = 1e7
 
 VIEW_TYPES = ['trange', 'file_name', 'proc_name']
-LOGICAL_VIEW_TYPES = ['app_name', 'node_name', 'rank', 'file_dir', 'file_regex']
+LOGICAL_VIEW_TYPES = [('proc_name', 'app_name'), ('proc_name', 'node_name'), ('proc_name', 'rank'), ('file_name', 'file_dir'), ('file_name', 'file_regex')]
 
 # Copied from https://github.com/uiuc-hpc/Recorder/blob/pilgrim/include/recorder.h
 
