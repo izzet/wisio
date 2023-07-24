@@ -38,7 +38,7 @@ class RecorderAnalyzer(Analyzer):
         # Boot cluster
         self.cluster_manager.boot()
 
-    def analyze_parquet(self, log_dir: str, cutoff=0.01, checkpoint=True, desired_view_names=[]):
+    def analyze_parquet(self, log_dir: str, cutoff=0.01, checkpoint=True, persist=True, desired_view_names=[]):
         # Ensure checkpoint dir
         checkpoint_dir = None
         if checkpoint:
@@ -57,7 +57,8 @@ class RecorderAnalyzer(Analyzer):
                 main_view = compute_main_view(
                     log_dir=log_dir,
                     global_min_max=global_min_max,
-                    view_types=VIEW_TYPES
+                    view_types=VIEW_TYPES,
+                    persist=persist,
                 )
             if checkpoint:
                 with ElapsedTimeLogger(logger=self.logger, message='Save main view'):

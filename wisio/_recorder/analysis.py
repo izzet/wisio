@@ -92,6 +92,7 @@ def compute_main_view(
     log_dir: str,
     global_min_max: dict,
     view_types: list,
+    persist=True
 ) -> dd.DataFrame:
     # Read Parquet files
     ddf = dd.read_parquet(f"{log_dir}/*.parquet")
@@ -110,8 +111,9 @@ def compute_main_view(
         .map_partitions(set_tranges, tranges=tranges) \
         .groupby(groupby) \
         .agg(HLM_AGG) \
-        .reset_index() \
-        .persist()
+        .reset_index()
+    if persist:
+        hlm_view = hlm_view.persist()
     # Flatten column names
     hlm_view = _flatten_column_names(ddf=hlm_view)
     # Set derived columns
@@ -120,8 +122,9 @@ def compute_main_view(
     main_view = hlm_view \
         .drop(columns=extra_cols) \
         .groupby(view_types) \
-        .sum() \
-        .persist()
+        .sum()
+    if persist:
+        main_view = main_view.persist()
     # Delete hlm_view
     del hlm_view
     # Return main_view
