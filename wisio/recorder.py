@@ -15,7 +15,6 @@ from .utils.logger import ElapsedTimeLogger
 
 
 CHECKPOINT_MAIN_VIEW = '_main_view'
-METRIC = 'duration'
 
 
 class RecorderAnalyzer(Analyzer):
@@ -38,7 +37,16 @@ class RecorderAnalyzer(Analyzer):
         # Boot cluster
         self.cluster_manager.boot()
 
-    def analyze_parquet(self, log_dir: str, cutoff=0.01, checkpoint=True, persist=True, desired_view_names=[]):
+    def analyze_parquet(
+        self,
+        log_dir: str,
+        metrics=['duration_sum'],
+        view_names=[],
+        cutoff=0.0001,
+        checkpoint=False,
+        checkpoint_dir='',
+        persist=True,
+    ):
         # Ensure checkpoint dir
         checkpoint_dir = None
         if checkpoint:
@@ -70,66 +78,70 @@ class RecorderAnalyzer(Analyzer):
         checkpoint_tasks = []
         views_need_checkpoint = []
 
-        # Compute multifaceted views
-        for view_permutation in it.chain.from_iterable(map(self._view_permutations, range(len(VIEW_TYPES)))):
-            view_name = self._view_name(view_permutation)
-            if len(desired_view_names) > 0 and view_name not in desired_view_names:
-                continue
-            if checkpoint and self._has_checkpoint(checkpoint_dir=checkpoint_dir, view_name=view_name):
-                with ElapsedTimeLogger(logger=self.logger, message=f"Read saved {view_name} view"):
-                    views[view_permutation] = self._read_checkpoint(checkpoint_dir=checkpoint_dir, view_name=view_name)
-            else:
-                with ElapsedTimeLogger(logger=self.logger, message=f"Compute {view_name} view"):
-                    # Read types
-                    view_type = view_permutation[-1]
-                    max_value_type = (view_type,)
-                    parent_type = view_permutation[:-1]
+        # Compute multifaceted views for each metric
+        for metric in metrics:
+            metric_maxes[metric] = {}
+            views[metric] = {}
+            for view_permutation in it.chain.from_iterable(map(self._view_permutations, range(len(VIEW_TYPES)))):
+                view_name = self._view_name(view_permutation)
+                if len(view_names) > 0 and view_name not in view_names:
+                    continue
+                if checkpoint and self._has_checkpoint(checkpoint_dir=checkpoint_dir, view_name=view_name):
+                    with ElapsedTimeLogger(logger=self.logger, message=f"Read saved {view_name} view"):
+                        views[metric][view_permutation] = self._read_checkpoint(checkpoint_dir=checkpoint_dir, view_name=view_name)
+                else:
+                    with ElapsedTimeLogger(logger=self.logger, message=f"Compute {view_name} view"):
+                        # Read types
+                        view_type = view_permutation[-1]
+                        max_value_type = (view_type,)
+                        parent_type = view_permutation[:-1]
 
-                    # Get parent view
-                    parent_metric_max = metric_maxes[max_value_type] if max_value_type in metric_maxes else None
-                    parent_view = views[parent_type] if parent_type in views else main_view
+                        # Get parent view
+                        parent_metric_max = metric_maxes[metric][max_value_type] if max_value_type in metric_maxes[metric] else None
+                        parent_view = views[metric][parent_type] if parent_type in views[metric] else main_view
 
-                    # Compute view
-                    view, metric_max = compute_view(
-                        parent_view=parent_view,
-                        view_type=view_type,
-                        metric=METRIC,
-                        metric_max=parent_metric_max,
-                        cutoff=cutoff,
-                    )
+                        # Compute view
+                        view, metric_max = compute_view(
+                            parent_view=parent_view,
+                            view_type=view_type,
+                            metric_col=metric,
+                            metric_max=parent_metric_max,
+                            cutoff=cutoff,
+                        )
 
-                    metric_maxes[view_permutation] = metric_max
-                    views[view_permutation] = view
+                        metric_maxes[metric][view_permutation] = metric_max
+                        views[metric][view_permutation] = view
 
-                    views_need_checkpoint.append(view_permutation)
+                        views_need_checkpoint.append(view_permutation)
 
-        # Compute logical views
+        # Compute logical views for each metric
         main_view_with_logical_columns = set_logical_columns(view=main_view)
-        for parent_type, logical_view_type in LOGICAL_VIEW_TYPES:
-            view_permutation = (logical_view_type,)
-            view_name = self._view_name(view_permutation)
-            if len(desired_view_names) > 0 and view_name not in desired_view_names:
-                continue
-            if checkpoint and self._has_checkpoint(checkpoint_dir=checkpoint_dir, view_name=view_name):
-                with ElapsedTimeLogger(logger=self.logger, message=f"Read saved {view_name} view"):
-                    views[view_permutation] = self._read_checkpoint(checkpoint_dir=checkpoint_dir, view_name=view_name)
-            else:
-                with ElapsedTimeLogger(logger=self.logger, message=f"Compute {view_name} view"):
-                    # Get parent view
-                    parent_metric_max = metric_maxes[(parent_type,)]
+        for metric in metrics:
+            for parent_type, logical_view_type in LOGICAL_VIEW_TYPES:
+                view_permutation = (logical_view_type,)
+                view_name = self._view_name(view_permutation)
+                if len(view_names) > 0 and view_name not in view_names:
+                    continue
+                if checkpoint and self._has_checkpoint(checkpoint_dir=checkpoint_dir, view_name=view_name):
+                    with ElapsedTimeLogger(logger=self.logger, message=f"Read saved {view_name} view"):
+                        views[metric][view_permutation] = self._read_checkpoint(checkpoint_dir=checkpoint_dir, view_name=view_name)
+                else:
+                    with ElapsedTimeLogger(logger=self.logger, message=f"Compute {view_name} view"):
+                        # Get parent view
+                        parent_metric_max = metric_maxes[metric][(parent_type,)]
 
-                    view, metric_max = compute_view(
-                        parent_view=main_view_with_logical_columns,
-                        view_type=logical_view_type,
-                        metric=METRIC,
-                        metric_max=parent_metric_max,
-                        cutoff=cutoff,
-                    )
+                        view, metric_max = compute_view(
+                            parent_view=main_view_with_logical_columns,
+                            view_type=logical_view_type,
+                            metric_col=metric,
+                            metric_max=parent_metric_max,
+                            cutoff=cutoff,
+                        )
 
-                    metric_maxes[view_permutation] = metric_max
-                    views[view_permutation] = view
+                        metric_maxes[metric][view_permutation] = metric_max
+                        views[metric][view_permutation] = view
 
-                    views_need_checkpoint.append(view_permutation)
+                        views_need_checkpoint.append(view_permutation)
 
         # Checkpoint views
         if checkpoint:
@@ -147,7 +159,7 @@ class RecorderAnalyzer(Analyzer):
         with ElapsedTimeLogger(logger=self.logger, message='Detect bottlenecks'):
             bottlenecks = bottleneck_detector.detect_bottlenecks(
                 views=views,
-                metric=METRIC,
+                metrics=metrics,
                 metric_maxes=metric_maxes,
             )
 

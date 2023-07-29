@@ -2,14 +2,17 @@ import dask.dataframe as dd
 import pandas as pd
 from dask import compute, delayed
 from logging import Logger
-from typing import Dict
+from typing import Dict, List
 from ..base import ViewKey
 from ..bottlenecks import BottleneckDetector
 from ..utils.logger import ElapsedTimeLogger
 from .analysis import (
     DELTA_BINS,
+    IS_NORMALIZED,
     PROC_COL,
     TRANGE_COL,
+    _extract_metric,
+    set_bound_columns,
     set_metric_percentages,
     set_metric_scores,
 )
@@ -74,20 +77,22 @@ class RecorderBottleneckDetector(BottleneckDetector):
     def detect_bottlenecks(
         self,
         views: Dict[ViewKey, dd.DataFrame],
-        metric: str,
-        metric_maxes: Dict[ViewKey, dd.core.Scalar],
-    ) -> Dict[ViewKey, dd.DataFrame]:
+        metrics: List[str],
+        metric_maxes: Dict[str, Dict[ViewKey, dd.core.Scalar]],
+    ) -> Dict[str, Dict[ViewKey, dd.DataFrame]]:
         # Keep bottleneck views
         bottlenecks = {}
-        # Run through views
-        for view_key, view in views.items():
-            # Generate bottleneck views
-            bottlenecks[view_key] = self._generate_bottlenecks_views(
-                view_key=view_key,
-                view=view,
-                metric=metric,
-                metric_max=metric_maxes[view_key],
-            )
+        # Run through views for each metric
+        for metric in metrics:
+            bottlenecks[metric] = {}
+            for view_key, view in views[metric].items():
+                # Generate bottleneck views
+                bottlenecks[metric][view_key] = self._generate_bottlenecks_views(
+                    view_key=view_key,
+                    view=view,
+                    metric_col=metric,
+                    metric_max=metric_maxes[metric][view_key],
+                )
         # Return bottleneck views
         return bottlenecks
 
@@ -124,11 +129,14 @@ class RecorderBottleneckDetector(BottleneckDetector):
         self,
         view_key: ViewKey,
         view: dd.DataFrame,
-        metric: str,
+        metric_col: str,
         metric_max: dd.core.Scalar,
     ):
         # Get view type
         view_type = view_key[-1]
+
+        # Get metric
+        metric = _extract_metric(metric_col=metric_col)
 
         # Create lower level view
         low_level_view = view \
@@ -161,17 +169,25 @@ class RecorderBottleneckDetector(BottleneckDetector):
                 .groupby([view_type]) \
                 .agg(non_proc_agg_dict)
 
+        if metric_max is None:
+            metric_max = high_level_view[metric_col].max()
+
+        col = metric_col if IS_NORMALIZED[metric] else f"{metric}_pero"
+
         low_level_view = low_level_view \
-            .map_partitions(set_metric_percentages, metric=metric, metric_max=metric_max) \
-            .map_partitions(set_metric_scores, metric=metric, col=f"{metric}_pero")
+            .map_partitions(set_bound_columns) \
+            .map_partitions(set_metric_percentages, metric_col=metric_col, metric_max=metric_max) \
+            .map_partitions(set_metric_scores, metric_col=metric_col, col=col, metric_max=metric_max)
 
         mid_level_view = mid_level_view \
-            .map_partitions(set_metric_percentages, metric=metric, metric_max=metric_max) \
-            .map_partitions(set_metric_scores, metric=metric, col=f"{metric}_pero")
+            .map_partitions(set_bound_columns) \
+            .map_partitions(set_metric_percentages, metric_col=metric_col, metric_max=metric_max) \
+            .map_partitions(set_metric_scores, metric_col=metric_col, col=col, metric_max=metric_max)
 
         high_level_view = high_level_view \
-            .map_partitions(set_metric_percentages, metric=metric, metric_max=metric_max) \
-            .map_partitions(set_metric_scores, metric=metric, col=f"{metric}_pero")
+            .map_partitions(set_bound_columns) \
+            .map_partitions(set_metric_percentages, metric_col=metric_col, metric_max=metric_max) \
+            .map_partitions(set_metric_scores, metric_col=metric_col, col=col, metric_max=metric_max)
 
         return dict(
             low_level_view=low_level_view,

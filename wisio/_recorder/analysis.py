@@ -14,6 +14,16 @@ from .constants import (
 
 ACC_PAT_SUFFIXES = ['time', 'size', 'count']
 APP_NAME_COL = 'app_name'
+BW_BINS = [  # bw_ranges = [0, 1, 128, 1024, 1024*64]
+    0,  # -- 'critical'
+    1024 ** 2,  # 1MB -- 'very high'
+    1024 ** 2 * 16,  # 16MB -- 'high',
+    1024 ** 2 * 16 * 16,  # 256MB -- 'medium',
+    1024 ** 3,  # 1GB -- 'low',
+    1024 ** 3 * 16,  # 16GB -- 'very low',
+    1024 ** 3 * 16 * 4,  # 64GB -- 'trivial',
+    1024 ** 4  # 1TB
+]
 DELTA_BINS = [
     0,
     0.001,
@@ -46,46 +56,33 @@ HLM_AGG = {
 }
 IO_CATS = [io_cat.value for io_cat in list(IOCategory)]
 IO_TYPES = ['read', 'write', 'metadata']
+IS_NORMALIZED = dict(
+    duration=False,
+    bw=True,
+    iops=True,
+    intensity=True,
+    att_perf=True
+)
+IS_REVERSED = dict(
+    duration=False,
+    bw=True,
+    iops=True,
+    intensity=False,
+    att_perf=True
+)
 NODE_NAME_COL = 'node_name'
 PROC_COL = 'proc_name'
 PROC_NAME_SEPARATOR = '#'
 RANK_COL = 'rank'
 TRANGE_COL = 'trange'
-XFER_SIZE_BINS = [
-    -np.inf,
-    4 * 1024.0,
-    16 * 1024.0,
-    64 * 1024.0,
-    256 * 1024.0,
-    1 * 1024.0 * 1024.0,
-    4 * 1024.0 * 1024.0,
-    16 * 1024.0 * 1024.0,
-    64 * 1024.0 * 1024.0,
-    np.inf
-]
-XFER_SIZE_BIN_LABELS = [
-    '<4 KB',
-    '4-16 KB',
-    '16-64 KB',
-    '64-256 KB',
-    '256 KB-1 MB',
-    '1-4 MB',
-    '4-16 MB',
-    '16-64 MB',
-    '>64 MB',
-]
-XFER_SIZE_BIN_NAMES = [
-    '<4 KB',
-    '4 KB',
-    '16 KB',
-    '64 KB',
-    '256 KB',
-    '1 MB',
-    '4 MB',
-    '16 MB',
-    '64 MB',
-    '>64 MB'
-]
+VIEW_AGG = {
+    'bw': max,
+    'duration_sum': sum,
+    'index_count': sum,
+    'intensity': max,
+    'iops': max,
+    'size_sum': sum,
+}
 
 
 def compute_main_view(
@@ -131,53 +128,103 @@ def compute_main_view(
     return main_view
 
 
-def compute_view(
+def compute_group_view(
     parent_view: dd.DataFrame,
     view_type: str,
-    metric: str,
+    metric_col: str,
     metric_max: dd.core.Scalar,
-    cutoff=0.01,
-) -> dd.DataFrame:
-    # Create colum names
-    metric_col, delta_col = f"{metric}_sum", f"{metric}_delta"
-
+) -> tuple[dd.DataFrame, dd.core.Scalar]:
     # Check view type
     if view_type is not PROC_COL:
         # Compute proc view first
         group_view = parent_view \
             .groupby([view_type, PROC_COL]) \
-            .agg({metric_col: sum}) \
+            .agg(VIEW_AGG) \
+            .map_partitions(set_bound_columns) \
             .groupby([view_type]) \
             .max()
     else:
         # Compute group view
         group_view = parent_view \
             .groupby([view_type]) \
-            .agg({metric_col: sum})
+            .agg(VIEW_AGG) \
+            .map_partitions(set_bound_columns)
 
-    # Compute metric max value
-    metric_max = group_view[metric_col].sum() if metric_max is None else metric_max
+    # Compute metric max
+    if metric_max is None:
+        metric_max = group_view[metric_col].max()
 
-    # Set metric scores
-    group_view = group_view \
-        .sort_values(metric_col, ascending=False) \
-        .map_partitions(set_metric_deltas, metric=metric, metric_max=metric_max)
+    # Set metric deltas
+    group_view = group_view.map_partitions(
+        set_metric_deltas,
+        metric_col=metric_col,
+        metric_max=metric_max,
+    )
+
+    # Return group view & metric max
+    return group_view, metric_max
+
+
+def compute_view(
+    parent_view: dd.DataFrame,
+    view_type: str,
+    metric_col: str,
+    metric_max: dd.core.Scalar,
+    cutoff=0.0001,
+) -> dd.DataFrame:
+    # Compute group view
+    group_view, metric_max = compute_group_view(
+        parent_view=parent_view,
+        view_type=view_type,
+        metric_col=metric_col,
+        metric_max=metric_max,
+    )
+
+    # Create query column
+    metric = _extract_metric(metric_col=metric_col)
+    query_col = f"{metric}_norm" if IS_NORMALIZED[metric] else f"{metric}_delta"
 
     # Get the first index in case all the records get cut off
     first_ix = group_view.index.head(1, compute=False).to_series().min()
 
-    # Do the cutoff
-    group_view = group_view.query(f"{delta_col} <= @cutoff | index == @first_ix", local_dict={'cutoff': cutoff, 'first_ix': first_ix})
+    if IS_REVERSED[metric]:
+        # group_view = group_view.query(f"{query_col} < @cutoff | index == @first_ix", local_dict={'cutoff': 1 - cutoff, 'first_ix': first_ix})
+        group_view = group_view.query(f"{query_col} < @cutoff", local_dict={'cutoff': 1 - cutoff})
+    else:
+        # group_view = group_view.query(f"{query_col} > @cutoff | index == @first_ix", local_dict={'cutoff': cutoff, 'first_ix': first_ix})
+        group_view = group_view.query(f"{query_col} > @cutoff", local_dict={'cutoff': cutoff})
 
     # Find filtered records
     view = parent_view.query(f"{view_type} in @indices", local_dict={'indices': group_view.index.unique()})
 
-    # Return view
+    # Return view & metric max
     return view, metric_max
 
 
 def compute_max_io_time(main_view: dd.DataFrame, time_col='duration_sum') -> dd.core.Scalar:
     return main_view.groupby([PROC_COL]).sum()[time_col].max()
+
+
+def set_bound_columns(ddf: dd.DataFrame, is_initial=False):
+    # Min(Peak IOPS, Peak I/O BW x I/O intensity) == higher the better
+    # less than 25% of peak attainable performance -- reversed
+    if not is_initial:
+        ddf['bw_intensity'] = ddf['bw'] * ddf['intensity']
+        ddf['att_perf'] = ddf[['iops', 'bw_intensity']].min(axis=1)
+
+    # records less than %10 of attainable BW -- reversed
+    ddf['bw'] = ddf['size_sum'] / ddf['duration_sum']
+
+    # less than 25% of records -- reversed
+    ddf['iops'] = ddf['index_count'] / ddf['duration_sum']
+
+    # records which tend towards 1 >> 0.9
+    ddf['intensity'] = 0.0
+    ddf['intensity'] = ddf['intensity'].mask(ddf['size_sum'] > 0, ddf['index_count'] / ddf['size_sum'])
+
+    if not is_initial:
+        return ddf.drop(columns=['bw_intensity'])
+    return ddf
 
 
 def set_file_dir(df: pd.DataFrame):
@@ -207,35 +254,68 @@ def set_logical_columns(view: dd.DataFrame) -> dd.DataFrame:
         .map_partitions(set_file_regex)
 
 
-def set_metric_deltas(df: pd.DataFrame, metric: str, metric_max: float):
-    metric_col, delta_col = (
-        f"{metric}_sum",
+def set_metric_deltas(df: pd.DataFrame, metric_col: str, metric_max: float):
+    metric = _extract_metric(metric_col=metric_col)
+
+    csp_col, delta_col, norm_col = (
+        f"{metric}_csp",
         f"{metric}_delta",
+        f"{metric}_norm",
     )
-    df[delta_col] = df[metric_col].cumsum() / metric_max
+
+    if IS_NORMALIZED[metric]:
+        if IS_REVERSED[metric]:
+            df[norm_col] = 1 - df[metric_col] / metric_max
+            return df
+        else:
+            df[norm_col] = df[metric_col] / metric_max
+            return df
+
+    df[csp_col] = df[metric_col].cumsum() / metric_max
+    df[delta_col] = df[csp_col].diff().fillna(df[csp_col])
+
     return df
 
 
-def set_metric_percentages(df: pd.DataFrame, metric: str, metric_max: float):
-    metric_col, pero_col, perr_col = (
-        f"{metric}_sum",
+def set_metric_percentages(df: pd.DataFrame, metric_col: str, metric_max: float):
+    metric = _extract_metric(metric_col=metric_col)
+
+    pero_col, perr_col, norm_col = (
         f"{metric}_pero",
-        f"{metric}_perr"
+        f"{metric}_perr",
+        f"{metric}_norm"
     )
+
+    if IS_REVERSED[metric]:
+        df[norm_col] = 1 - df[metric_col] / metric_max
+        return df
+
     df[pero_col] = df[metric_col] / metric_max
     df[perr_col] = df[metric_col] / df[metric_col].sum()
+
     return df
 
 
-def set_metric_scores(df: pd.DataFrame, metric: str, col: str):
-    bin_col, score_col, threshold_col = (
+def set_metric_scores(df: pd.DataFrame, metric_col: str, col: str, metric_max=None):
+    metric = _extract_metric(metric_col=metric_col)
+
+    bin_col, score_col, th_col = (
         f"{metric}_bin",
         f"{metric}_score",
         f"{metric}_th",
     )
-    df[bin_col] = np.digitize(df[col], bins=DELTA_BINS, right=True)
-    df[score_col] = np.choose(df[bin_col] - 1, choices=DELTA_BIN_NAMES, mode='clip')
-    df[threshold_col] = np.choose(df[bin_col] - 1, choices=DELTA_BINS, mode='clip')
+
+    bins = np.multiply(DELTA_BINS, metric_max) if IS_NORMALIZED[metric] else DELTA_BINS
+    if metric == 'bw':
+        bins = BW_BINS
+
+    bin_names = np.flip(DELTA_BIN_NAMES) if IS_REVERSED[metric] else DELTA_BIN_NAMES
+    th_bins = np.flip(DELTA_BINS) if IS_REVERSED[metric] else DELTA_BINS
+
+    df[bin_col] = np.digitize(df[col], bins=bins, right=True)
+    df[score_col] = np.choose(df[bin_col] - 1, choices=bin_names, mode='clip')
+    df[th_col] = np.choose(df[bin_col] - 1, choices=th_bins, mode='clip')
+
     return df.drop(columns=[bin_col])
 
 
@@ -248,6 +328,10 @@ def _compute_tranges(global_min_max: dict, precision=TIME_PRECISION):
     tmid_min, tmid_max = global_min_max['tmid']
     tranges = np.arange(tmid_min, tmid_max, precision)
     return get_client().scatter(tranges)
+
+
+def _extract_metric(metric_col: str):
+    return metric_col.replace('_sum', '') if '_sum' in metric_col else metric_col
 
 
 def _flatten_column_names(ddf: dd.DataFrame):
@@ -287,5 +371,7 @@ def _set_derived_columns(ddf: dd.DataFrame):
                 ddf[col_name] = ddf[col_name].mask(ddf['func_id'].str.contains(md_op) & ~ddf['func_id'].str.contains('dir'), ddf[col_value])
             else:
                 ddf[col_name] = ddf[col_name].mask(ddf['func_id'].str.contains(md_op), ddf[col_value])
+    # Set bound columns
+    set_bound_columns(ddf=ddf, is_initial=True)
     # Return ddf
     return ddf

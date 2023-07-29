@@ -18,9 +18,6 @@ from .analysis import (
     NODE_NAME_COL,
     PROC_COL,
     RANK_COL,
-    XFER_SIZE_BINS,
-    XFER_SIZE_BIN_LABELS,
-    XFER_SIZE_BIN_NAMES,
     compute_max_io_time,
 )
 from .bottlenecks import BOTTLENECK_ORDER
@@ -32,6 +29,41 @@ SMALL_READ_SIZE_THRESHOLD = 256 * 1024
 SMALL_READ_RATIO_THRESHOLD = 0.75
 SMALL_WRITE_SIZE_THRESHOLD = 256 * 1024
 SMALL_WRITE_RATIO_THRESHOLD = 0.75
+XFER_SIZE_BINS = [
+    -np.inf,
+    4 * 1024.0,
+    16 * 1024.0,
+    64 * 1024.0,
+    256 * 1024.0,
+    1 * 1024.0 * 1024.0,
+    4 * 1024.0 * 1024.0,
+    16 * 1024.0 * 1024.0,
+    64 * 1024.0 * 1024.0,
+    np.inf
+]
+XFER_SIZE_BIN_LABELS = [
+    '<4 KB',
+    '4-16 KB',
+    '16-64 KB',
+    '64-256 KB',
+    '256 KB-1 MB',
+    '1-4 MB',
+    '4-16 MB',
+    '16-64 MB',
+    '>64 MB',
+]
+XFER_SIZE_BIN_NAMES = [
+    '<4 KB',
+    '4 KB',
+    '16 KB',
+    '64 KB',
+    '256 KB',
+    '1 MB',
+    '4 MB',
+    '16 MB',
+    '64 MB',
+    '>64 MB'
+]
 
 
 def _describe_bottleneck(
@@ -131,6 +163,7 @@ def _get_xfer_dist(view: pd.DataFrame, io_op: str):
 
 @delayed
 def _process_bott_metadata_access(
+    metric: str,
     rule: Rule,
     view_key: ViewKey,
     high_level_view: pd.DataFrame,
@@ -205,10 +238,11 @@ def _process_bott_metadata_access(
                 value_fmt=f"{md_time_ratio*100:.2f}%",
             )
 
-    return rule, view_key, results
+    return metric, rule, view_key, results
 
 
 def _process_bott_small_access(
+    metric: str,
     rule: Rule,
     view_key: ViewKey,
     high_level_view: pd.DataFrame,
@@ -270,11 +304,12 @@ def _process_bott_small_access(
                 value_fmt=f"{access_time_ratio*100:.2f}%",
             )
 
-    return rule, view_key, results
+    return metric, rule, view_key, results
 
 
 @delayed
 def _process_bott_small_reads(
+    metric: str,
     rule: Rule,
     view_key: ViewKey,
     high_level_view: pd.DataFrame,
@@ -284,6 +319,7 @@ def _process_bott_small_reads(
     deps: Dict[Rule, RuleResult],
 ):
     return _process_bott_small_access(
+        metric=metric,
         rule=rule,
         view_key=view_key,
         high_level_view=high_level_view,
@@ -299,6 +335,7 @@ def _process_bott_small_reads(
 
 @delayed
 def _process_bott_small_writes(
+    metric: str,
     rule: Rule,
     view_key: ViewKey,
     high_level_view: pd.DataFrame,
@@ -308,6 +345,7 @@ def _process_bott_small_writes(
     deps: Dict[Rule, RuleResult],
 ):
     return _process_bott_small_access(
+        metric=metric,
         rule=rule,
         view_key=view_key,
         high_level_view=high_level_view,
@@ -653,49 +691,53 @@ class RecorderRuleEngine(RuleEngine):
 
     def process_bottlenecks(
         self,
-        bottlenecks: Dict[ViewKey, Dict[str, dd.DataFrame]],
+        bottlenecks: Dict[str, Dict[ViewKey, Dict[str, dd.DataFrame]]],
         characteristics: Dict[Rule, RuleResult],
         threshold=0.5
     ) -> Dict[ViewKey, object]:
         # Keep rule tasks
         rule_tasks = []
         # Run through bottlenecks
-        for view_key, bottleneck in bottlenecks.items():
-            # Get view type
-            view_type = view_key[-1]
+        for metric, bottleneck_views in bottlenecks.items():
+            for view_key, bottleneck_view in bottleneck_views.items():
+                # Get view type
+                view_type = view_key[-1]
 
-            # Check if rule is defined for view type
-            if view_type not in self.rules:
-                continue
+                # Check if rule is defined for view type
+                if view_type not in self.rules:
+                    continue
 
-            # If so, run through rules
-            for rule in self.rules[view_type]:
-                rule_func, rule_deps = BOTTLENECK_FUNCTIONS[rule]
-                if rule_deps is None:
-                    rule_tasks.append(rule_func(
-                        rule=rule,
-                        view_key=view_key,
-                        high_level_view=bottleneck['high_level_view'],
-                        mid_level_view=bottleneck['mid_level_view'],
-                        low_level_view=bottleneck['low_level_view'],
-                        threshold=threshold,
-                    ))
-                else:
-                    rule_tasks.append(rule_func(
-                        rule=rule,
-                        view_key=view_key,
-                        high_level_view=bottleneck['high_level_view'],
-                        mid_level_view=bottleneck['mid_level_view'],
-                        low_level_view=bottleneck['low_level_view'],
-                        threshold=threshold,
-                        deps={rule_dep: characteristics[rule_dep] for rule_dep in rule_deps}
-                    ))
+                # If so, run through rules
+                for rule in self.rules[view_type]:
+                    rule_func, rule_deps = BOTTLENECK_FUNCTIONS[rule]
+                    if rule_deps is None:
+                        rule_tasks.append(rule_func(
+                            metric=metric,
+                            rule=rule,
+                            view_key=view_key,
+                            high_level_view=bottleneck_view['high_level_view'],
+                            mid_level_view=bottleneck_view['mid_level_view'],
+                            low_level_view=bottleneck_view['low_level_view'],
+                            threshold=threshold,
+                        ))
+                    else:
+                        rule_tasks.append(rule_func(
+                            metric=metric,
+                            rule=rule,
+                            view_key=view_key,
+                            high_level_view=bottleneck_view['high_level_view'],
+                            mid_level_view=bottleneck_view['mid_level_view'],
+                            low_level_view=bottleneck_view['low_level_view'],
+                            threshold=threshold,
+                            deps={rule_dep: characteristics[rule_dep] for rule_dep in rule_deps}
+                        ))
         # Compute tasks
         rule_results = compute(*rule_tasks)
         # Create bottlenecks
         bottlenecks = {}
-        for rule, view_key, result in rule_results:
-            bottlenecks[view_key] = bottlenecks[view_key] if view_key in bottlenecks else {}
-            bottlenecks[view_key][rule] = result
+        for metric, rule, view_key, result in rule_results:
+            bottlenecks[metric] = bottlenecks[metric] if metric in bottlenecks else {}
+            bottlenecks[metric][view_key] = bottlenecks[metric][view_key] if view_key in bottlenecks[metric] else {}
+            bottlenecks[metric][view_key][rule] = result
         # Return bottlenecks
         return bottlenecks
