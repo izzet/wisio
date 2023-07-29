@@ -1,11 +1,6 @@
 import abc
-from typing import Union, Tuple
 from .utils.file_utils import ensure_dir
 from .utils.logger import create_logger, format_log
-
-
-ViewType = str
-ViewKey = Union[Tuple[ViewType], Tuple[ViewType, ViewType], Tuple[ViewType, ViewType, ViewType]]
 
 
 class Analyzer(abc.ABC):

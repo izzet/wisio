@@ -23,7 +23,14 @@ CAT_POSIX = 0
 
 TIME_PRECISION = 1e7
 
-VIEW_TYPES = ['trange', 'file_name', 'proc_name']
+METRIC_COLS = dict(
+    att_perf='att_perf',
+    bw='bw',
+    duration='duration_sum',
+    intensity='intensity',
+    iops='iops',
+)
+VIEW_TYPES = ['file_name', 'proc_name', 'time_range']
 LOGICAL_VIEW_TYPES = [('proc_name', 'app_name'), ('proc_name', 'node_name'), ('proc_name', 'rank'), ('file_name', 'file_dir'), ('file_name', 'file_regex')]
 
 # Copied from https://github.com/uiuc-hpc/Recorder/blob/pilgrim/include/recorder.h

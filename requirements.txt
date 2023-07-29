@@ -9,6 +9,7 @@ fastparquet
 graphviz
 networkx
 numpy
+upsetplot
 pandas
 panel
 portion
@@ -18,3 +19,4 @@ scikit-learn
 scipy
 seaborn
 tqdm
+venn

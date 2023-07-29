@@ -3,25 +3,28 @@ import numpy as np
 import pandas as pd
 from dask import compute, delayed
 from typing import Any, Dict, List, Tuple, Type
-from ..base import ViewKey, ViewType
 from ..rules import Rule, RuleEngine, RuleReason, RuleResult
+from ..types import (
+    COL_APP_NAME,
+    COL_FILE_DIR,
+    COL_FILE_NAME,
+    COL_FILE_REGEX,
+    COL_NODE_NAME,
+    COL_PROC_NAME,
+    COL_RANK,
+    ViewKey,
+    ViewType,
+)
 from ..utils.collection_utils import get_intervals, join_with_and
 from ..utils.common_utils import convert_bytes_to_unit
 from .analysis import (
     ACC_PAT_SUFFIXES,
-    APP_NAME_COL,
     DERIVED_MD_OPS,
-    FILE_COL,
-    FILE_DIR_COL,
-    FILE_REGEX_COL,
     IO_TYPES,
-    NODE_NAME_COL,
-    PROC_COL,
-    RANK_COL,
     compute_max_io_time,
 )
 from .bottlenecks import BOTTLENECK_ORDER
-from .constants import VIEW_TYPES, AccessPattern
+from .constants import AccessPattern
 
 
 METADATA_ACCESS_RATIO_THRESHOLD = 0.5
@@ -76,31 +79,31 @@ def _describe_bottleneck(
     ix = row.Index
     ix_low_level_view = low_level_view.loc[[ix]]
 
-    tranges = list(ix_low_level_view.index.unique(level='trange'))
-    trange_intervals = get_intervals(values=tranges)
+    time_ranges = list(ix_low_level_view.index.unique(level='time_range'))
+    time_range_intervals = get_intervals(values=time_ranges)
 
-    if view_type in [FILE_COL, FILE_DIR_COL, FILE_REGEX_COL]:
-        processes = list(ix_low_level_view.index.unique(level=PROC_COL))
+    if view_type in [COL_FILE_NAME, COL_FILE_DIR, COL_FILE_REGEX]:
+        processes = list(ix_low_level_view.index.unique(level=COL_PROC_NAME))
         description = (
             f"'{ix}' is accessed by {len(processes)} process(es) "
-            f"during the {join_with_and(values=trange_intervals)}th second(s) "
+            f"during the {join_with_and(values=time_range_intervals)}th second(s) "
             f"has an I/O time of {row.duration_sum:.2f} seconds which is "
             f"{row.duration_sum/max_io_time*100:.2f}% of overall I/O time of the workload."
         )
-    elif view_type in [APP_NAME_COL, NODE_NAME_COL, PROC_COL, RANK_COL]:
-        files = list(ix_low_level_view.index.unique(level=FILE_COL))
+    elif view_type in [COL_APP_NAME, COL_NODE_NAME, COL_PROC_NAME, COL_RANK]:
+        files = list(ix_low_level_view.index.unique(level=COL_FILE_NAME))
         description = (
             f"'{ix}' accesses {len(files)} file(s) "
-            f"during the {join_with_and(values=trange_intervals)}th second(s) "
+            f"during the {join_with_and(values=time_range_intervals)}th second(s) "
             f"and has an I/O time of {row.duration_sum:.2f} seconds which is "
             f"{row.duration_sum/max_io_time*100:.2f}% of overall I/O time of the workload."
         )
     else:
-        files = list(ix_low_level_view.index.unique(level=FILE_COL))
-        processes = list(ix_low_level_view.index.unique(level=PROC_COL))
+        files = list(ix_low_level_view.index.unique(level=COL_FILE_NAME))
+        processes = list(ix_low_level_view.index.unique(level=COL_PROC_NAME))
         description = (
             f"{len(processes)} process(es) access(es) {len(files)} file(s) "
-            f"during the {join_with_and(values=trange_intervals)}th second(s) "
+            f"during the {join_with_and(values=time_range_intervals)}th second(s) "
             f"and has an I/O time of {row.duration_sum:.2f} seconds which is "
             f"{row.duration_sum/max_io_time*100:.2f}% of overall I/O time of the workload."
         )
@@ -461,14 +464,14 @@ def _process_char_io_size(rule: Rule, view: pd.DataFrame) -> RuleResult:
 
 @delayed
 def _process_char_file_count(rule: Rule, view: pd.DataFrame) -> RuleResult:
-    file_count = len(view.index.unique(FILE_COL))
+    file_count = len(view.index.unique(COL_FILE_NAME))
 
     nunique_file_per_proc = view \
         .reset_index() \
-        .groupby([PROC_COL]) \
-        .agg({FILE_COL: 'nunique'})
+        .groupby([COL_PROC_NAME]) \
+        .agg({COL_FILE_NAME: 'nunique'})
 
-    fpp_count = int(nunique_file_per_proc[nunique_file_per_proc[FILE_COL] == 1][FILE_COL].count())
+    fpp_count = int(nunique_file_per_proc[nunique_file_per_proc[COL_FILE_NAME] == 1][COL_FILE_NAME].count())
     shared_count = file_count - fpp_count
 
     detail_list = []
@@ -537,10 +540,10 @@ def _process_char_app_count(rule: Rule, view: pd.DataFrame, deps: Dict[Rule, Rul
     apps = view \
         .reset_index() \
         .assign(
-            proc_name_parts=lambda df: df[PROC_COL].str.split('#'),
+            proc_name_parts=lambda df: df[COL_PROC_NAME].str.split('#'),
             app_name=lambda df: df.proc_name_parts.str[0]
         ) \
-        .groupby([app_col, PROC_COL]) \
+        .groupby([app_col, COL_PROC_NAME]) \
         .agg({
             'index_count': sum,
             'duration_sum': sum,
@@ -596,10 +599,10 @@ def _process_char_node_count(rule: Rule, view: pd.DataFrame, deps: Dict[Rule, Ru
     nodes = view \
         .reset_index() \
         .assign(
-            proc_name_parts=lambda df: df[PROC_COL].str.split('#'),
+            proc_name_parts=lambda df: df[COL_PROC_NAME].str.split('#'),
             node_name=lambda df: df.proc_name_parts.str[1]
         ) \
-        .groupby([node_col, PROC_COL]) \
+        .groupby([node_col, COL_PROC_NAME]) \
         .agg({
             'index_count': sum,
             'duration_sum': sum,

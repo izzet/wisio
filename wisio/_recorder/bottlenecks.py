@@ -3,14 +3,12 @@ import pandas as pd
 from dask import compute, delayed
 from logging import Logger
 from typing import Dict, List
-from ..base import ViewKey
 from ..bottlenecks import BottleneckDetector
+from ..types import COL_PROC_NAME, COL_TIME_RANGE, ViewKey
 from ..utils.logger import ElapsedTimeLogger
 from .analysis import (
     DELTA_BINS,
     IS_NORMALIZED,
-    PROC_COL,
-    TRANGE_COL,
     _extract_metric,
     set_bound_columns,
     set_metric_percentages,
@@ -18,19 +16,20 @@ from .analysis import (
 )
 from .constants import (
     LOGICAL_VIEW_TYPES,
+    METRIC_COLS,
     VIEW_TYPES
 )
 
 
 BOTTLENECK_ORDER = dict(
-    app_name=('app_name', 'trange', 'file_name'),
-    file_dir=('file_dir', 'proc_name', 'trange'),
-    file_name=('file_name', 'proc_name', 'trange'),
-    file_regex=('file_regex', 'proc_name', 'trange'),
-    node_name=('node_name', 'trange', 'file_name'),
-    proc_name=('proc_name', 'trange', 'file_name'),
-    rank=('rank', 'trange', 'file_name'),
-    trange=('trange', 'proc_name', 'file_name'),
+    app_name=('app_name', 'time_range', 'file_name'),
+    file_dir=('file_dir', 'proc_name', 'time_range'),
+    file_name=('file_name', 'proc_name', 'time_range'),
+    file_regex=('file_regex', 'proc_name', 'time_range'),
+    node_name=('node_name', 'time_range', 'file_name'),
+    proc_name=('proc_name', 'time_range', 'file_name'),
+    rank=('rank', 'time_range', 'file_name'),
+    time_range=('time_range', 'proc_name', 'file_name'),
 )
 
 
@@ -90,7 +89,7 @@ class RecorderBottleneckDetector(BottleneckDetector):
                 bottlenecks[metric][view_key] = self._generate_bottlenecks_views(
                     view_key=view_key,
                     view=view,
-                    metric_col=metric,
+                    metric_col=METRIC_COLS[metric],
                     metric_max=metric_maxes[metric][view_key],
                 )
         # Return bottleneck views
@@ -148,10 +147,10 @@ class RecorderBottleneckDetector(BottleneckDetector):
         proc_agg_dict = self._get_agg_dict(view_columns=low_level_view.columns, is_proc=True)
 
         # Create mid and high level views
-        if view_type is not PROC_COL:
+        if view_type is not COL_PROC_NAME:
             mid_level_view = low_level_view \
                 .reset_index() \
-                .groupby([view_type, PROC_COL]) \
+                .groupby([view_type, COL_PROC_NAME]) \
                 .agg(non_proc_agg_dict)
 
             high_level_view = mid_level_view \
@@ -161,7 +160,7 @@ class RecorderBottleneckDetector(BottleneckDetector):
         else:
             mid_level_view = low_level_view \
                 .reset_index() \
-                .groupby([view_type, TRANGE_COL]) \
+                .groupby([view_type, COL_TIME_RANGE]) \
                 .agg(non_proc_agg_dict)
 
             high_level_view = mid_level_view \

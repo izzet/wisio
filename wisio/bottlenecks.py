@@ -2,7 +2,7 @@ import abc
 import dask.dataframe as dd
 from logging import Logger
 from typing import Dict
-from .base import ViewKey
+from .types import ViewKey
 
 
 class BottleneckDetector(abc.ABC):

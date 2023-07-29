@@ -6,9 +6,11 @@ from dask import compute
 from typing import Dict, Union
 from ._recorder.analysis import compute_main_view, compute_view, set_logical_columns
 from ._recorder.bottlenecks import RecorderBottleneckDetector
-from ._recorder.constants import LOGICAL_VIEW_TYPES, VIEW_TYPES
+from ._recorder.constants import LOGICAL_VIEW_TYPES, METRIC_COLS, VIEW_TYPES
+from .analysis_result import AnalysisResult
 from .base import Analyzer
 from .dask import ClusterManager
+from .types import _view_name
 from .utils.file_utils import ensure_dir
 from .utils.json_encoders import NpEncoder
 from .utils.logger import ElapsedTimeLogger
@@ -83,7 +85,7 @@ class RecorderAnalyzer(Analyzer):
             metric_maxes[metric] = {}
             views[metric] = {}
             for view_permutation in it.chain.from_iterable(map(self._view_permutations, range(len(VIEW_TYPES)))):
-                view_name = self._view_name(view_permutation)
+                view_name = _view_name(view_permutation)
                 if len(view_names) > 0 and view_name not in view_names:
                     continue
                 if checkpoint and self._has_checkpoint(checkpoint_dir=checkpoint_dir, view_name=view_name):
@@ -104,7 +106,7 @@ class RecorderAnalyzer(Analyzer):
                         view, metric_max = compute_view(
                             parent_view=parent_view,
                             view_type=view_type,
-                            metric_col=metric,
+                            metric_col=METRIC_COLS[metric],
                             metric_max=parent_metric_max,
                             cutoff=cutoff,
                         )
@@ -119,7 +121,7 @@ class RecorderAnalyzer(Analyzer):
         for metric in metrics:
             for parent_type, logical_view_type in LOGICAL_VIEW_TYPES:
                 view_permutation = (logical_view_type,)
-                view_name = self._view_name(view_permutation)
+                view_name = _view_name(view_permutation)
                 if len(view_names) > 0 and view_name not in view_names:
                     continue
                 if checkpoint and self._has_checkpoint(checkpoint_dir=checkpoint_dir, view_name=view_name):
@@ -133,7 +135,7 @@ class RecorderAnalyzer(Analyzer):
                         view, metric_max = compute_view(
                             parent_view=main_view_with_logical_columns,
                             view_type=logical_view_type,
-                            metric_col=metric,
+                            metric_col=METRIC_COLS[metric],
                             metric_max=parent_metric_max,
                             cutoff=cutoff,
                         )
@@ -147,7 +149,7 @@ class RecorderAnalyzer(Analyzer):
         if checkpoint:
             for view_permutation, view in views.items():
                 if view_permutation in views_need_checkpoint:
-                    view_name = self._view_name(view_permutation)
+                    view_name = _view_name(view_permutation)
                     checkpoint_task = self._checkpoint(checkpoint_dir=checkpoint_dir, view_name=view_name, view=view)
                     checkpoint_tasks.append(checkpoint_task)
 
@@ -164,7 +166,11 @@ class RecorderAnalyzer(Analyzer):
             )
 
         # Return views
-        return main_view, views, bottlenecks
+        return AnalysisResult(
+            main_view=main_view,
+            views=views,
+            bottlenecks=bottlenecks
+        )
 
     def load_global_min_max(self, log_dir: str) -> dict:
         with open(f"{log_dir}/global.json") as file:
@@ -194,10 +200,6 @@ class RecorderAnalyzer(Analyzer):
 
     def _read_checkpoint(self, checkpoint_dir: str, view_name: str):
         return dd.read_parquet(f"{checkpoint_dir}/{view_name}")
-
-    @staticmethod
-    def _view_name(view_permutation: Union[tuple, str]):
-        return '_'.join(view_permutation) if isinstance(view_permutation, tuple) else view_permutation
 
     @staticmethod
     def _view_permutations(r: int):

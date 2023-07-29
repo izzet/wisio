@@ -4,6 +4,7 @@ import os
 import pandas as pd
 from dask.distributed import Future, get_client
 from typing import Union
+from ..types import COL_FILE_NAME, COL_PROC_NAME
 from .constants import (
     CAT_POSIX,
     TIME_PRECISION,
@@ -13,7 +14,6 @@ from .constants import (
 
 
 ACC_PAT_SUFFIXES = ['time', 'size', 'count']
-APP_NAME_COL = 'app_name'
 BW_BINS = [  # bw_ranges = [0, 1, 128, 1024, 1024*64]
     0,  # -- 'critical'
     1024 ** 2,  # 1MB -- 'very high'
@@ -45,9 +45,6 @@ DELTA_BIN_NAMES = [
     'critical'
 ]
 DERIVED_MD_OPS = ['close', 'open', 'seek', 'stat']
-FILE_COL = 'file_name'
-FILE_DIR_COL = 'file_dir'
-FILE_REGEX_COL = 'file_regex'
 FILE_REGEX_PLACEHOLDER = '[0-9]'
 HLM_AGG = {
     'duration': [sum],
@@ -70,11 +67,7 @@ IS_REVERSED = dict(
     intensity=False,
     att_perf=True
 )
-NODE_NAME_COL = 'node_name'
-PROC_COL = 'proc_name'
 PROC_NAME_SEPARATOR = '#'
-RANK_COL = 'rank'
-TRANGE_COL = 'trange'
 VIEW_AGG = {
     'bw': max,
     'duration_sum': sum,
@@ -98,14 +91,14 @@ def compute_main_view(
     ddf['duration'] = ddf['duration'].astype(np.float64)
     ddf['io_cat'] = ddf['io_cat'].astype(np.uint8)
     # Compute tranges
-    tranges = _compute_tranges(global_min_max=global_min_max)
+    time_ranges = _compute_time_ranges(global_min_max=global_min_max)
     # Add `io_cat`, `acc_pat`, and `func_id` to groupby
     extra_cols = ['io_cat', 'acc_pat', 'func_id']
     groupby = view_types.copy()
     groupby.extend(extra_cols)
     # Compute high-level metrics
     hlm_view = ddf[(ddf['cat'] == CAT_POSIX) & (ddf['io_cat'].isin(IO_CATS))] \
-        .map_partitions(set_tranges, tranges=tranges) \
+        .map_partitions(set_time_ranges, time_ranges=time_ranges) \
         .groupby(groupby) \
         .agg(HLM_AGG) \
         .reset_index()
@@ -122,6 +115,8 @@ def compute_main_view(
         .sum()
     if persist:
         main_view = main_view.persist()
+    # Set hashed ids
+    main_view['id'] = main_view.index.map(hash)
     # Delete hlm_view
     del hlm_view
     # Return main_view
@@ -135,10 +130,10 @@ def compute_group_view(
     metric_max: dd.core.Scalar,
 ) -> tuple[dd.DataFrame, dd.core.Scalar]:
     # Check view type
-    if view_type is not PROC_COL:
+    if view_type is not COL_PROC_NAME:
         # Compute proc view first
         group_view = parent_view \
-            .groupby([view_type, PROC_COL]) \
+            .groupby([view_type, COL_PROC_NAME]) \
             .agg(VIEW_AGG) \
             .map_partitions(set_bound_columns) \
             .groupby([view_type]) \
@@ -202,7 +197,7 @@ def compute_view(
 
 
 def compute_max_io_time(main_view: dd.DataFrame, time_col='duration_sum') -> dd.core.Scalar:
-    return main_view.groupby([PROC_COL]).sum()[time_col].max()
+    return main_view.groupby([COL_PROC_NAME]).sum()[time_col].max()
 
 
 def set_bound_columns(ddf: dd.DataFrame, is_initial=False):
@@ -228,17 +223,17 @@ def set_bound_columns(ddf: dd.DataFrame, is_initial=False):
 
 
 def set_file_dir(df: pd.DataFrame):
-    return df.assign(file_dir=df[FILE_COL].apply(lambda file_name: os.path.dirname(file_name)))
+    return df.assign(file_dir=df[COL_FILE_NAME].apply(lambda file_name: os.path.dirname(file_name)))
 
 
 def set_file_regex(df: pd.DataFrame):
-    return df.assign(file_regex=df[FILE_COL].replace(to_replace='[0-9]+', value=FILE_REGEX_PLACEHOLDER, regex=True))
+    return df.assign(file_regex=df[COL_FILE_NAME].replace(to_replace='[0-9]+', value=FILE_REGEX_PLACEHOLDER, regex=True))
 
 
 def set_proc_name_parts(df: pd.DataFrame):
     return df \
         .assign(
-            proc_name_parts=lambda df: df[PROC_COL].str.split(PROC_NAME_SEPARATOR),
+            proc_name_parts=lambda df: df[COL_PROC_NAME].str.split(PROC_NAME_SEPARATOR),
             app_name=lambda df: df.proc_name_parts.str[0].astype(str),
             node_name=lambda df: df.proc_name_parts.str[1].astype(str),
             rank=lambda df: df.proc_name_parts.str[2].astype(str),
@@ -319,15 +314,15 @@ def set_metric_scores(df: pd.DataFrame, metric_col: str, col: str, metric_max=No
     return df.drop(columns=[bin_col])
 
 
-def set_tranges(df: pd.DataFrame, tranges: Union[Future, np.ndarray]):
-    tranges = tranges.result() if isinstance(tranges, Future) else tranges
-    return df.assign(trange=np.digitize(df['tmid'], bins=tranges, right=True))
+def set_time_ranges(df: pd.DataFrame, time_ranges: Union[Future, np.ndarray]):
+    time_ranges = time_ranges.result() if isinstance(time_ranges, Future) else time_ranges
+    return df.assign(time_range=np.digitize(df['tmid'], bins=time_ranges, right=True))
 
 
-def _compute_tranges(global_min_max: dict, precision=TIME_PRECISION):
+def _compute_time_ranges(global_min_max: dict, precision=TIME_PRECISION):
     tmid_min, tmid_max = global_min_max['tmid']
-    tranges = np.arange(tmid_min, tmid_max, precision)
-    return get_client().scatter(tranges)
+    time_ranges = np.arange(tmid_min, tmid_max, precision)
+    return get_client().scatter(time_ranges)
 
 
 def _extract_metric(metric_col: str):
