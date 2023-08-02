@@ -176,17 +176,17 @@ class RecorderBottleneckDetector(BottleneckDetector):
         low_level_view = low_level_view \
             .map_partitions(set_bound_columns) \
             .map_partitions(set_metric_percentages, metric_col=metric_col, metric_max=metric_max) \
-            .map_partitions(set_metric_scores, metric_col=metric_col, col=col, metric_max=metric_max)
+            .map_partitions(set_metric_scores, view_type=view_type, metric_col=metric_col, col=col, metric_max=metric_max)
 
         mid_level_view = mid_level_view \
             .map_partitions(set_bound_columns) \
             .map_partitions(set_metric_percentages, metric_col=metric_col, metric_max=metric_max) \
-            .map_partitions(set_metric_scores, metric_col=metric_col, col=col, metric_max=metric_max)
+            .map_partitions(set_metric_scores, view_type=view_type, metric_col=metric_col, col=col, metric_max=metric_max)
 
         high_level_view = high_level_view \
             .map_partitions(set_bound_columns) \
             .map_partitions(set_metric_percentages, metric_col=metric_col, metric_max=metric_max) \
-            .map_partitions(set_metric_scores, metric_col=metric_col, col=col, metric_max=metric_max)
+            .map_partitions(set_metric_scores, view_type=view_type, metric_col=metric_col, col=col, metric_max=metric_max)
 
         return dict(
             low_level_view=low_level_view,

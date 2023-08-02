@@ -4,7 +4,7 @@ import os
 import pandas as pd
 from dask.distributed import Future, get_client
 from typing import Union
-from ..types import COL_FILE_NAME, COL_PROC_NAME
+from ..types import COL_FILE_NAME, COL_PROC_NAME, ViewType
 from .constants import (
     CAT_POSIX,
     TIME_PRECISION,
@@ -22,7 +22,17 @@ BW_BINS = [  # bw_ranges = [0, 1, 128, 1024, 1024*64]
     1024 ** 3,  # 1GB -- 'low',
     1024 ** 3 * 16,  # 16GB -- 'very low',
     1024 ** 3 * 16 * 4,  # 64GB -- 'trivial',
-    1024 ** 4  # 1TB
+    1024 ** 4  # 1TB -- 'none
+]
+BW_BINS_PER_PROC = [
+    1,  # -- 'critical'
+    1024 ** 2,  # 1MB -- 'very high'
+    1024 ** 2 * 10,  # 10MB -- 'high'
+    1024 ** 2 * 128,  # 128MB -- 'medium' --- fast hd
+    1024 ** 2 * 256,  # 256MB -- 'low', --- nvme perf
+    1024 ** 2 * 512,  # 512MB -- 'very low', --- hbm memory
+    1024 ** 3,  # 1GB 'trivial' --- single thread bw for memory
+    1024 ** 3 * 64,  # 64GB -- 'none', -- agg bw for memory
 ]
 DELTA_BINS = [
     0,
@@ -70,6 +80,7 @@ IS_REVERSED = dict(
 PROC_NAME_SEPARATOR = '#'
 VIEW_AGG = {
     'bw': max,
+    'data_count': sum,
     'duration_sum': sum,
     'index_count': sum,
     'intensity': max,
@@ -211,7 +222,7 @@ def set_bound_columns(ddf: dd.DataFrame, is_initial=False):
     ddf['bw'] = ddf['size_sum'] / ddf['duration_sum']
 
     # less than 25% of records -- reversed
-    ddf['iops'] = ddf['index_count'] / ddf['duration_sum']
+    ddf['iops'] = ddf['data_count'] / ddf['duration_sum']
 
     # records which tend towards 1 >> 0.9
     ddf['intensity'] = 0.0
@@ -281,17 +292,17 @@ def set_metric_percentages(df: pd.DataFrame, metric_col: str, metric_max: float)
         f"{metric}_norm"
     )
 
-    if IS_REVERSED[metric]:
-        df[norm_col] = 1 - df[metric_col] / metric_max
-        return df
-
+    df[norm_col] = df[metric_col] / metric_max
     df[pero_col] = df[metric_col] / metric_max
     df[perr_col] = df[metric_col] / df[metric_col].sum()
+
+    if IS_REVERSED[metric]:
+        df[norm_col] = 1 - df[metric_col] / metric_max
 
     return df
 
 
-def set_metric_scores(df: pd.DataFrame, metric_col: str, col: str, metric_max=None):
+def set_metric_scores(df: pd.DataFrame, view_type: ViewType, metric_col: str, col: str, metric_max=None):
     metric = _extract_metric(metric_col=metric_col)
 
     bin_col, score_col, th_col = (
@@ -301,8 +312,12 @@ def set_metric_scores(df: pd.DataFrame, metric_col: str, col: str, metric_max=No
     )
 
     bins = np.multiply(DELTA_BINS, metric_max) if IS_NORMALIZED[metric] else DELTA_BINS
+
     if metric == 'bw':
-        bins = BW_BINS
+        bins = BW_BINS_PER_PROC if view_type == COL_PROC_NAME else BW_BINS
+
+    if metric in ['bw', 'iops']:
+        df = df.query(f"{metric} > 0")
 
     bin_names = np.flip(DELTA_BIN_NAMES) if IS_REVERSED[metric] else DELTA_BIN_NAMES
     th_bins = np.flip(DELTA_BINS) if IS_REVERSED[metric] else DELTA_BINS

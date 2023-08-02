@@ -7,6 +7,7 @@ from matplotlib.axes import Axes
 from matplotlib.lines import Line2D
 from typing import List, Set, Tuple
 from .types import (
+    COL_PROC_NAME,
     COL_TIME_RANGE,
     Metric,
     ResultBottlenecks,
@@ -32,12 +33,80 @@ class AnalysisResultPlot(object):
 
     def __init__(
         self,
+        main_view: ResultMainView,
         views: ResultViews,
         bottlenecks: ResultBottlenecks,
     ):
+        self.main_view = main_view
         self.bottlenecks = bottlenecks
         self.views = views
         self._cmap = plt.cm.get_cmap('RdYlGn')
+
+    def bottleneck_bar(
+        self,
+        figsize: Tuple[int, int],
+        metrics: List[Metric],
+        thresholds: List[float],
+        markers: List[str],
+        colors: List[str],
+        labels: List[str] = [],
+        marker_size=72,
+    ):
+        proc_names = list(self.main_view.reset_index()[COL_PROC_NAME].unique())
+        proc_names.sort(key=lambda x: int(x.split('#')[2]))  # order by rank
+
+        dur_mlv = self.bottlenecks['duration'][(COL_PROC_NAME,)]['mid_level_view']
+        dur_col = next(col for col in dur_mlv.columns if 'duration' in col)
+        dur_data = dur_mlv.compute()
+
+        fig, ax = plt.subplots(figsize=figsize)
+        
+        bar_h = 1
+
+        for y, proc_name in enumerate(proc_names):
+            try:
+                ax.broken_barh(dur_data.loc[proc_name][dur_col].to_dict().items(), (y, bar_h), facecolors='C0', alpha=0.8)
+            except KeyError:
+                continue
+
+        for m, metric in enumerate(metrics):
+            data = self.bottlenecks[metric][(COL_PROC_NAME,)]['mid_level_view'].compute()
+            for y, proc_name in enumerate(proc_names):
+                try:
+                    for time_range, threshold in data.loc[proc_name][f"{metric}_th"].to_dict().items():
+                        # print(proc_name, y, time_range, threshold)
+                        if threshold >= thresholds[m]:
+                            ax.scatter(
+                                x=time_range,
+                                y=y + (bar_h / 2),
+                                s=marker_size,
+                                c=colors[m],
+                                marker=markers[m],
+                                alpha=0.6,
+                            )
+                except KeyError:
+                    continue
+
+        ax.set_ylim(0, len(proc_names))  # len(bot_dur_proc_ml.index.get_level_values(0).unique()))
+        ax.set_xlim(0, max(dur_data.index.get_level_values(1)))
+        ax.set_ylabel('Ranks')
+        ax.set_xlabel('Job Time')
+
+        legend_handles = [Line2D([0], [0], color='C0', label='I/O Op')]
+        for m, metric in enumerate(metrics):
+            legend_handles.append(Line2D(
+                xdata=[0],
+                ydata=[0],
+                color='w',
+                label=metric if len(labels) == 0 else labels[m],
+                marker=markers[m],
+                markerfacecolor=colors[m],
+                markersize=marker_size / 8,
+            ))
+
+        plt.legend(handles=legend_handles, loc='upper right')
+
+        return fig, ax
 
     def bottleneck_timeline(self, metric: Metric):
         return self._bottleneck_timeline_plot(metric=metric, figsize=(10, 5), title=metric)
@@ -54,7 +123,7 @@ class AnalysisResultPlot(object):
         threshold=0.0,
         sample_count=0,
     ):
-        plt.style.use('seaborn-poster')
+        # plt.style.use('seaborn-poster')
         fig = plt.figure()
 
         ax1_line, _ = self._bottleneck_timeline_plot(
@@ -122,16 +191,11 @@ class AnalysisResultPlot(object):
         colorbar.set_ticklabels(['critical', 'medium', 'trivial'])
         colorbar.ax.tick_params(labelsize=12, pad=2)  # Adjust the font size as needed
 
-
         # Add a label to the colorbar
         # colorbar.set_label('Colorbar Label')
         colorbar_label = 'Bottleneck Severity'
         colorbar.ax.xaxis.set_label_position('top')  # Position the label at the top of the colorbar
         colorbar.ax.set_xlabel(colorbar_label, fontsize=12, labelpad=4)  # Adjust font size and labelpad as needed
-        
-
-
-        # print(ax1_scatter_legend)
 
         return fig
 
@@ -153,7 +217,7 @@ class AnalysisResultPlot(object):
         hlv = self.bottlenecks[metric][(COL_TIME_RANGE,)]['high_level_view']
         metric_col = next(col for col in hlv.columns if metric in col)
         data = hlv.compute()
-        ax_line = data[metric_col].plot(ax=ax, color=color, figsize=figsize, title=title)
+        ax_line = data[metric_col].plot(ax=ax, color=color, figsize=figsize, title=title, alpha=0.8)
         if yaxis_formatter is not None:
             ax_line.yaxis.set_major_formatter(yaxis_formatter)
         if yaxis_label is not None:
@@ -325,6 +389,7 @@ class AnalysisResult(object):
         self.bottlenecks = bottlenecks
 
         self.plot = AnalysisResultPlot(
+            main_view=main_view,
             bottlenecks=bottlenecks,
             views=views,
         )

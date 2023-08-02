@@ -30,7 +30,7 @@ METRIC_COLS = dict(
     intensity='intensity',
     iops='iops',
 )
-VIEW_TYPES = ['file_name', 'proc_name', 'time_range']
+VIEW_TYPES = ['time_range', 'file_name', 'proc_name'] # Order matters!
 LOGICAL_VIEW_TYPES = [('proc_name', 'app_name'), ('proc_name', 'node_name'), ('proc_name', 'rank'), ('file_name', 'file_dir'), ('file_name', 'file_regex')]
 
 # Copied from https://github.com/uiuc-hpc/Recorder/blob/pilgrim/include/recorder.h
