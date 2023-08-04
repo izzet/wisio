@@ -60,23 +60,38 @@ class AnalysisResultPlot(object):
         dur_data = dur_mlv.compute()
 
         fig, ax = plt.subplots(figsize=figsize)
-        
+
+        bar_data = []
         bar_h = 1
 
         for y, proc_name in enumerate(proc_names):
             try:
-                ax.broken_barh(dur_data.loc[proc_name][dur_col].to_dict().items(), (y, bar_h), facecolors='C0', alpha=0.8)
+                bar_args = dict(
+                    xranges=dur_data.loc[proc_name][dur_col].to_dict().items(),
+                    yrange=(y, bar_h),
+                    facecolors='C0',
+                    alpha=0.8,
+                )
+
+                ax.broken_barh(**bar_args)
+
+                bar_data.append(bar_args)
             except KeyError:
                 continue
 
+        scatter_data = {}
+
         for m, metric in enumerate(metrics):
+            scatter_data[metric] = []
+
             data = self.bottlenecks[metric][(COL_PROC_NAME,)]['mid_level_view'].compute()
+
             for y, proc_name in enumerate(proc_names):
                 try:
                     for time_range, threshold in data.loc[proc_name][f"{metric}_th"].to_dict().items():
                         # print(proc_name, y, time_range, threshold)
                         if threshold >= thresholds[m]:
-                            ax.scatter(
+                            scatter_args = dict(
                                 x=time_range,
                                 y=y + (bar_h / 2),
                                 s=marker_size,
@@ -84,6 +99,10 @@ class AnalysisResultPlot(object):
                                 marker=markers[m],
                                 alpha=0.6,
                             )
+                            ax.scatter(**scatter_args)
+
+                            scatter_data[metric].append(scatter_args)
+
                 except KeyError:
                     continue
 
@@ -106,7 +125,7 @@ class AnalysisResultPlot(object):
 
         plt.legend(handles=legend_handles, loc='upper right')
 
-        return fig, ax
+        return fig, ax, bar_data, scatter_data
 
     def bottleneck_timeline(self, metric: Metric):
         return self._bottleneck_timeline_plot(metric=metric, figsize=(10, 5), title=metric)
