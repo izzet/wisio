@@ -9,11 +9,11 @@ from typing import List, Set, Tuple
 from .types import (
     COL_PROC_NAME,
     COL_TIME_RANGE,
+    BottlenecksPerViewPerMetric,
+    MainView,
     Metric,
-    ResultBottlenecks,
-    ResultMainView,
-    ResultViews,
     ViewKey,
+    ViewResultsPerViewPerMetric,
     _view_name,
 )
 
@@ -33,13 +33,13 @@ class AnalysisResultPlot(object):
 
     def __init__(
         self,
-        main_view: ResultMainView,
-        views: ResultViews,
-        bottlenecks: ResultBottlenecks,
+        main_view: MainView,
+        view_results: ViewResultsPerViewPerMetric,
+        bottlenecks: BottlenecksPerViewPerMetric,
     ):
         self.main_view = main_view
+        self.view_results = view_results
         self.bottlenecks = bottlenecks
-        self.views = views
         self._cmap = plt.cm.get_cmap('RdYlGn')
 
     def bottleneck_bar(
@@ -55,7 +55,8 @@ class AnalysisResultPlot(object):
         proc_names = list(self.main_view.reset_index()[COL_PROC_NAME].unique())
         proc_names.sort(key=lambda x: int(x.split('#')[2]))  # order by rank
 
-        dur_mlv = self.bottlenecks['duration'][(COL_PROC_NAME,)]['mid_level_view']
+        dur_mlv = self.bottlenecks['duration'][(
+            COL_PROC_NAME,)]['mid_level_view']
         dur_col = next(col for col in dur_mlv.columns if 'duration' in col)
         dur_data = dur_mlv.compute()
 
@@ -84,7 +85,8 @@ class AnalysisResultPlot(object):
         for m, metric in enumerate(metrics):
             scatter_data[metric] = []
 
-            data = self.bottlenecks[metric][(COL_PROC_NAME,)]['mid_level_view'].compute()
+            data = self.bottlenecks[metric][(
+                COL_PROC_NAME,)]['mid_level_view'].compute()
 
             for y, proc_name in enumerate(proc_names):
                 try:
@@ -106,7 +108,8 @@ class AnalysisResultPlot(object):
                 except KeyError:
                     continue
 
-        ax.set_ylim(0, len(proc_names))  # len(bot_dur_proc_ml.index.get_level_values(0).unique()))
+        # len(bot_dur_proc_ml.index.get_level_values(0).unique()))
+        ax.set_ylim(0, len(proc_names))
         ax.set_xlim(0, max(dur_data.index.get_level_values(1)))
         ax.set_ylabel('Ranks')
         ax.set_xlabel('Job Time')
@@ -200,21 +203,27 @@ class AnalysisResultPlot(object):
         # You can adjust the position and size of the colorbar as desired
         cmap = plt.cm.RdYlGn  # Choose the RdYlGn colormap
         norm = plt.Normalize(vmin=0, vmax=1)  # Normalize the data
-        mappable = plt.cm.ScalarMappable(norm=norm, cmap=cmap)  # Create the mappable
+        mappable = plt.cm.ScalarMappable(
+            norm=norm, cmap=cmap)  # Create the mappable
         mappable.set_array(DELTA_BINS)  # Set the data for the colorbar
 
         # Position the colorbar within the figure
         # Left, bottom, width, and height are in fractions of the figure size (0 to 1)
-        colorbar_ax = fig.add_axes([0.68, 0.1, 0.2, 0.03])  # You can adjust these values
-        colorbar = plt.colorbar(mappable, cax=colorbar_ax, orientation='horizontal')
+        # You can adjust these values
+        colorbar_ax = fig.add_axes([0.68, 0.1, 0.2, 0.03])
+        colorbar = plt.colorbar(
+            mappable, cax=colorbar_ax, orientation='horizontal')
         colorbar.set_ticklabels(['critical', 'medium', 'trivial'])
-        colorbar.ax.tick_params(labelsize=12, pad=2)  # Adjust the font size as needed
+        # Adjust the font size as needed
+        colorbar.ax.tick_params(labelsize=12, pad=2)
 
         # Add a label to the colorbar
         # colorbar.set_label('Colorbar Label')
         colorbar_label = 'Bottleneck Severity'
-        colorbar.ax.xaxis.set_label_position('top')  # Position the label at the top of the colorbar
-        colorbar.ax.set_xlabel(colorbar_label, fontsize=12, labelpad=4)  # Adjust font size and labelpad as needed
+        # Position the label at the top of the colorbar
+        colorbar.ax.xaxis.set_label_position('top')
+        # Adjust font size and labelpad as needed
+        colorbar.ax.set_xlabel(colorbar_label, fontsize=12, labelpad=4)
 
         return fig
 
@@ -236,14 +245,16 @@ class AnalysisResultPlot(object):
         hlv = self.bottlenecks[metric][(COL_TIME_RANGE,)]['high_level_view']
         metric_col = next(col for col in hlv.columns if metric in col)
         data = hlv.compute()
-        ax_line = data[metric_col].plot(ax=ax, color=color, figsize=figsize, title=title, alpha=0.8)
+        ax_line = data[metric_col].plot(
+            ax=ax, color=color, figsize=figsize, title=title, alpha=0.8)
         if yaxis_formatter is not None:
             ax_line.yaxis.set_major_formatter(yaxis_formatter)
         if yaxis_label is not None:
             ax_line.yaxis.set_label(yaxis_label)
         filtered_data = data.query(f"{metric}_th >= {threshold}").reset_index()
         if sample_count > 0:
-            filtered_data = filtered_data.sort_values(f"{metric}_th", ascending=False).head(sample_count)
+            filtered_data = filtered_data.sort_values(
+                f"{metric}_th", ascending=False).head(sample_count)
         colors = np.vectorize(self._color_map)(filtered_data[f"{metric}_th"])
         ax_scatter = filtered_data.plot.scatter(
             ax=ax_line,
@@ -319,7 +330,8 @@ class AnalysisResultPlot(object):
         )
 
     def _metric_relations(self, view_key: ViewKey, metrics: List[Metric], labels: List[str]):
-        sets = [set(self.views[metric][view_key]['id'].unique().compute()) for metric in metrics]
+        sets = [set(self.view_results[metric][view_key].view['id'].unique().compute())
+                for metric in metrics]
         labels = self._venn_labels(sets, labels, metrics)
         fig, ax = venn.venn3(labels, names=metrics, figsize=(5, 5))
         # ax.get_legend().remove()
@@ -327,8 +339,10 @@ class AnalysisResultPlot(object):
         return fig, ax
 
     def _view_relations(self, metric: Metric, view_keys: List[ViewKey], labels: List[str]):
-        names = [_view_name(view_key).replace('_', '\_') for view_key in view_keys]
-        sets = [set(self.views[metric][view_key]['id'].unique().compute()) for view_key in view_keys]
+        names = [_view_name(view_key).replace('_', '\_')
+                 for view_key in view_keys]
+        sets = [set(self.view_results[metric][view_key].view['id'].unique().compute())
+                for view_key in view_keys]
         labels = self._venn_labels(sets, labels, names)
         fig, ax = venn.venn3(labels, names=names, figsize=(5, 5))
         # ax.get_legend().remove()
@@ -391,7 +405,8 @@ class AnalysisResultPlot(object):
         pos_arr = ['10', '01'] if len(sets) == 2 else ['100', '010', '001']
         for index, pos in enumerate(pos_arr):
             bold_label = names[index] if labels[index] == None else labels[index]
-            fixed_labels[pos] = f"{fixed_labels[pos]}\n" + rf"$\bf{{{bold_label}}}$"
+            fixed_labels[pos] = f"{fixed_labels[pos]}\n" + \
+                rf"$\bf{{{bold_label}}}$"
         return fixed_labels
 
 
@@ -399,16 +414,16 @@ class AnalysisResult(object):
 
     def __init__(
         self,
-        main_view: ResultMainView,
-        views: ResultViews,
-        bottlenecks: ResultBottlenecks,
+        main_view: MainView,
+        view_results: ViewResultsPerViewPerMetric,
+        bottlenecks: BottlenecksPerViewPerMetric,
     ):
         self.main_view = main_view
-        self.views = views
+        self.view_results = view_results
         self.bottlenecks = bottlenecks
 
         self.plot = AnalysisResultPlot(
             main_view=main_view,
+            view_results=view_results,
             bottlenecks=bottlenecks,
-            views=views,
         )

@@ -1,4 +1,5 @@
 from dask.dataframe import DataFrame
+from dataclasses import dataclass
 from typing import Dict, Literal, Union, Tuple
 
 
@@ -30,12 +31,32 @@ ViewType = Literal[
     'proc_name',
     'time_range',
 ]
-ViewKey = Union[Tuple[ViewType], Tuple[ViewType, ViewType], Tuple[ViewType, ViewType, ViewType]]
+ViewKey = Union[Tuple[ViewType], Tuple[ViewType, ViewType],
+                Tuple[ViewType, ViewType, ViewType]]
 
 
-ResultBottlenecks = Dict[Metric, Dict[ViewKey, Dict[BottleneckType, DataFrame]]]
-ResultMainView = DataFrame
-ResultViews = Dict[Metric, Dict[ViewKey, DataFrame]]
+@dataclass
+class ViewNormalizationData:
+    index_sum: int
+    metric_max: float
+
+
+@dataclass
+class ViewResult:
+    group_view: DataFrame
+    metric_col: str
+    norm_data: ViewNormalizationData
+    view: DataFrame
+    view_type: ViewType
+
+
+MainView = DataFrame
+
+ViewResultsPerView = Dict[ViewKey, ViewResult]
+ViewResultsPerViewPerMetric = Dict[Metric, ViewResultsPerView]
+
+BottlenecksPerView = Dict[ViewKey, DataFrame]
+BottlenecksPerViewPerMetric = Dict[Metric, BottlenecksPerView]
 
 
 def _view_name(view_key_type: Union[ViewKey, ViewType]):

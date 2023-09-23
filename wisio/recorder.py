@@ -60,8 +60,10 @@ class RecorderAnalyzer(Analyzer):
 
         # Compute main view
         if checkpoint and self._has_checkpoint(checkpoint_dir=checkpoint_dir, view_name=CHECKPOINT_MAIN_VIEW):
+            raise NotImplementedError
             with ElapsedTimeLogger(logger=self.logger, message='Read saved main view'):
-                main_view = self._read_checkpoint(checkpoint_dir=checkpoint_dir, view_name=CHECKPOINT_MAIN_VIEW)
+                main_view = self._read_checkpoint(
+                    checkpoint_dir=checkpoint_dir, view_name=CHECKPOINT_MAIN_VIEW)
         else:
             with ElapsedTimeLogger(logger=self.logger, message='Compute main view'):
                 main_view = compute_main_view(
@@ -72,47 +74,56 @@ class RecorderAnalyzer(Analyzer):
                 )
             if checkpoint:
                 with ElapsedTimeLogger(logger=self.logger, message='Save main view'):
-                    self._checkpoint(checkpoint_dir=checkpoint_dir, view_name=CHECKPOINT_MAIN_VIEW, view=main_view).compute()
+                    self._checkpoint(checkpoint_dir=checkpoint_dir,
+                                     view_name=CHECKPOINT_MAIN_VIEW, view=main_view).compute()
 
         # Keep views & tasks
-        metric_maxes = {}
-        views = {}
+
         checkpoint_tasks = []
         views_need_checkpoint = []
 
+        norm_data = {}
+        view_results = {}
+
         # Compute multifaceted views for each metric
         for metric in metrics:
-            metric_maxes[metric] = {}
-            views[metric] = {}
+
+            norm_data[metric] = {}
+            view_results[metric] = {}
+
             for view_permutation in it.chain.from_iterable(map(self._view_permutations, range(len(VIEW_TYPES)))):
                 view_name = _view_name(view_permutation)
                 if len(view_names) > 0 and view_name not in view_names:
                     continue
                 if checkpoint and self._has_checkpoint(checkpoint_dir=checkpoint_dir, view_name=view_name):
+                    raise NotImplementedError
                     with ElapsedTimeLogger(logger=self.logger, message=f"Read saved {view_name} view"):
-                        views[metric][view_permutation] = self._read_checkpoint(checkpoint_dir=checkpoint_dir, view_name=view_name)
+                        views[metric][view_permutation] = self._read_checkpoint(
+                            checkpoint_dir=checkpoint_dir, view_name=view_name)
                 else:
                     with ElapsedTimeLogger(logger=self.logger, message=f"Compute {view_name} view"):
                         # Read types
                         view_type = view_permutation[-1]
-                        max_value_type = (view_type,)
+                        norm_data_type = (view_type,)
                         parent_type = view_permutation[:-1]
 
-                        # Get parent view
-                        parent_metric_max = metric_maxes[metric][max_value_type] if max_value_type in metric_maxes[metric] else None
-                        parent_view = views[metric][parent_type] if parent_type in views[metric] else main_view
+                        # Get parent view & normalization data
+                        parent_norm_data = norm_data[metric][norm_data_type] if norm_data_type in norm_data[metric] else None
+                        parent_view = view_results[metric][parent_type].view if parent_type in view_results[metric] else main_view
 
                         # Compute view
-                        view, metric_max = compute_view(
+                        view_result = compute_view(
                             parent_view=parent_view,
                             view_type=view_type,
                             metric_col=METRIC_COLS[metric],
-                            metric_max=parent_metric_max,
+                            norm_data=parent_norm_data,
                             cutoff=cutoff,
                         )
 
-                        metric_maxes[metric][view_permutation] = metric_max
-                        views[metric][view_permutation] = view
+                        norm_data[metric][view_permutation] = view_result.norm_data
+                        view_results[metric][view_permutation] = view_result
+
+                        print(norm_data)
 
                         views_need_checkpoint.append(view_permutation)
 
@@ -125,32 +136,33 @@ class RecorderAnalyzer(Analyzer):
                 if len(view_names) > 0 and view_name not in view_names:
                     continue
                 if checkpoint and self._has_checkpoint(checkpoint_dir=checkpoint_dir, view_name=view_name):
+                    raise NotImplementedError
                     with ElapsedTimeLogger(logger=self.logger, message=f"Read saved {view_name} view"):
-                        views[metric][view_permutation] = self._read_checkpoint(checkpoint_dir=checkpoint_dir, view_name=view_name)
+                        views[metric][view_permutation] = self._read_checkpoint(
+                            checkpoint_dir=checkpoint_dir, view_name=view_name)
                 else:
                     with ElapsedTimeLogger(logger=self.logger, message=f"Compute {view_name} view"):
-                        # Get parent view
-                        parent_metric_max = metric_maxes[metric][(parent_type,)]
-
-                        view, metric_max = compute_view(
+                        view_result = compute_view(
                             parent_view=main_view_with_logical_columns,
                             view_type=logical_view_type,
                             metric_col=METRIC_COLS[metric],
-                            metric_max=parent_metric_max,
+                            norm_data=norm_data[metric][(parent_type,)],
                             cutoff=cutoff,
                         )
 
-                        metric_maxes[metric][view_permutation] = metric_max
-                        views[metric][view_permutation] = view
+                        norm_data[metric][view_permutation] = view_result.norm_data
+                        view_results[metric][view_permutation] = view_result
 
                         views_need_checkpoint.append(view_permutation)
 
         # Checkpoint views
         if checkpoint:
-            for view_permutation, view in views.items():
+            raise NotImplementedError
+            for view_permutation, view_result in view_results.items():
                 if view_permutation in views_need_checkpoint:
                     view_name = _view_name(view_permutation)
-                    checkpoint_task = self._checkpoint(checkpoint_dir=checkpoint_dir, view_name=view_name, view=view)
+                    checkpoint_task = self._checkpoint(
+                        checkpoint_dir=checkpoint_dir, view_name=view_name, view=view_result.view)
                     checkpoint_tasks.append(checkpoint_task)
 
             with ElapsedTimeLogger(logger=self.logger, message=f"Checkpoint views"):
@@ -160,15 +172,14 @@ class RecorderAnalyzer(Analyzer):
         bottleneck_detector = RecorderBottleneckDetector(logger=self.logger)
         with ElapsedTimeLogger(logger=self.logger, message='Detect bottlenecks'):
             bottlenecks = bottleneck_detector.detect_bottlenecks(
-                views=views,
+                view_results=view_results,
                 metrics=metrics,
-                metric_maxes=metric_maxes,
             )
 
         # Return views
         return AnalysisResult(
             main_view=main_view,
-            views=views,
+            view_results=view_results,
             bottlenecks=bottlenecks
         )
 
@@ -181,9 +192,11 @@ class RecorderAnalyzer(Analyzer):
         bottleneck_dir = f"{log_dir}/bottlenecks"
         ensure_dir(bottleneck_dir)
         for view_key, bottleneck_dict in bottlenecks.items():
-            file_name = '_'.join(view_key) if isinstance(view_key, tuple) else view_key
+            file_name = '_'.join(view_key) if isinstance(
+                view_key, tuple) else view_key
             with open(f"{bottleneck_dir}/{file_name}.json", 'w') as json_file:
-                json.dump(bottleneck_dict, json_file, cls=NpEncoder, sort_keys=True)
+                json.dump(bottleneck_dict, json_file,
+                          cls=NpEncoder, sort_keys=True)
 
     def _checkpoint(self, checkpoint_dir: str, view_name: str, view: dd.DataFrame, partition_size='100MB') -> dd.core.Scalar:
         return view \

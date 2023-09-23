@@ -4,7 +4,15 @@ from dask import compute, delayed
 from logging import Logger
 from typing import Dict, List
 from ..bottlenecks import BottleneckDetector
-from ..types import COL_PROC_NAME, COL_TIME_RANGE, ViewKey
+from ..types import (
+    COL_PROC_NAME,
+    COL_TIME_RANGE,
+    BottlenecksPerViewPerMetric,
+    Metric,
+    ViewKey,
+    ViewResult,
+    ViewResultsPerViewPerMetric,
+)
 from ..utils.logger import ElapsedTimeLogger
 from .analysis import (
     DELTA_BINS,
@@ -63,7 +71,8 @@ def _process_bottleneck_view(
             bottlenecks[hl_id][ml_col][ml_id][ll_col] = {}
         if ll_id not in bottlenecks[hl_id][ml_col][ml_id][ll_col]:
             bottlenecks[hl_id][ml_col][ml_id][ll_col][ll_id] = {}
-            bottlenecks[hl_id][ml_col][ml_id][ll_col][ll_id]['llc'] = dict(ll_row)
+            bottlenecks[hl_id][ml_col][ml_id][ll_col][ll_id]['llc'] = dict(
+                ll_row)
     # Return view key & bottlenecks
     return view_key, threshold, bottlenecks
 
@@ -75,34 +84,33 @@ class RecorderBottleneckDetector(BottleneckDetector):
 
     def detect_bottlenecks(
         self,
-        views: Dict[ViewKey, dd.DataFrame],
-        metrics: List[str],
-        metric_maxes: Dict[str, Dict[ViewKey, dd.core.Scalar]],
-    ) -> Dict[str, Dict[ViewKey, dd.DataFrame]]:
+        view_results: ViewResultsPerViewPerMetric,
+        metrics: List[Metric],
+    ) -> BottlenecksPerViewPerMetric:
         # Keep bottleneck views
         bottlenecks = {}
         # Run through views for each metric
         for metric in metrics:
             bottlenecks[metric] = {}
-            for view_key, view in views[metric].items():
+            for view_key, view_result in view_results[metric].items():
                 # Generate bottleneck views
                 bottlenecks[metric][view_key] = self._generate_bottlenecks_views(
                     view_key=view_key,
-                    view=view,
+                    view_result=view_result,
                     metric_col=METRIC_COLS[metric],
-                    metric_max=metric_maxes[metric][view_key],
                 )
         # Return bottleneck views
         return bottlenecks
 
-    def bottlenecks_to_json(self, bottlenecks: Dict[ViewKey, dd.DataFrame], metric: str):
+    def bottlenecks_to_json(self, bottlenecks: Dict[ViewKey, dd.DataFrame], metric: Metric):
         # Init bottlenecks
         bottleneck_tasks = []
         bottlenecks_dict = {}
         # Run through bottleneck views
         for view_key, view_dict in bottlenecks.items():
             # For given thresholds
-            for threshold in DELTA_BINS[1:-1]:  # [0.001, 0.01, 0.1, 0.25, 0.5, 0.75]
+            # [0.001, 0.01, 0.1, 0.25, 0.5, 0.75]
+            for threshold in DELTA_BINS[1:-1]:
                 threshold_col = f"{metric}_th"
                 low_level_view = view_dict['low_level_view']
                 mid_level_view = view_dict['mid_level_view']
@@ -112,14 +120,16 @@ class RecorderBottleneckDetector(BottleneckDetector):
                     threshold=threshold,
                     low_level_view=low_level_view,
                     mid_level_view=mid_level_view,
-                    high_level_view=high_level_view.query(f"{threshold_col} >= @th", local_dict={'th': threshold})
+                    high_level_view=high_level_view.query(
+                        f"{threshold_col} >= @th", local_dict={'th': threshold})
                 ))
         # Compute all bottlenecks
         with ElapsedTimeLogger(logger=self.logger, message='Compute bottlenecks'):
             bottleneck_results = compute(*bottleneck_tasks)
         # Create bottlenecks dict
         for view_key, threshold, result in bottleneck_results:
-            bottlenecks_dict[view_key] = bottlenecks_dict[view_key] if view_key in bottlenecks_dict else {}
+            bottlenecks_dict[view_key] = bottlenecks_dict[view_key] if view_key in bottlenecks_dict else {
+            }
             bottlenecks_dict[view_key][f"{threshold:.3f}"] = result
         # Return all bottlenecks
         return bottlenecks_dict
@@ -127,9 +137,8 @@ class RecorderBottleneckDetector(BottleneckDetector):
     def _generate_bottlenecks_views(
         self,
         view_key: ViewKey,
-        view: dd.DataFrame,
+        view_result: ViewResult,
         metric_col: str,
-        metric_max: dd.core.Scalar,
     ):
         # Get view type
         view_type = view_key[-1]
@@ -138,13 +147,15 @@ class RecorderBottleneckDetector(BottleneckDetector):
         metric = _extract_metric(metric_col=metric_col)
 
         # Create lower level view
-        low_level_view = view \
+        low_level_view = view_result.view \
             .groupby(list(BOTTLENECK_ORDER[view_type])) \
             .first()
 
         # Non-proc agg columns
-        non_proc_agg_dict = self._get_agg_dict(view_columns=low_level_view.columns, is_proc=False)
-        proc_agg_dict = self._get_agg_dict(view_columns=low_level_view.columns, is_proc=True)
+        non_proc_agg_dict = self._get_agg_dict(
+            view_columns=low_level_view.columns, is_proc=False)
+        proc_agg_dict = self._get_agg_dict(
+            view_columns=low_level_view.columns, is_proc=True)
 
         # Create mid and high level views
         if view_type is not COL_PROC_NAME:
@@ -168,6 +179,7 @@ class RecorderBottleneckDetector(BottleneckDetector):
                 .groupby([view_type]) \
                 .agg(non_proc_agg_dict)
 
+        metric_max = view_result.norm_data.metric_max
         if metric_max is None:
             metric_max = high_level_view[metric_col].max()
 
@@ -196,7 +208,8 @@ class RecorderBottleneckDetector(BottleneckDetector):
 
     def _get_agg_dict(self, view_columns: list, is_proc=False):
         if is_proc:
-            agg_dict = {col: max if any(x in col for x in 'duration time'.split()) else sum for col in view_columns}
+            agg_dict = {col: max if any(
+                x in col for x in 'duration time'.split()) else sum for col in view_columns}
         else:
             agg_dict = {col: sum for col in view_columns}
         agg_dict['size_min'] = min
