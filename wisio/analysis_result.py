@@ -299,6 +299,15 @@ class AnalysisResultPlot(object):
             labels=[label1, label2, label3],
         )
 
+    def _metric_relations(self, view_key: ViewKey, metrics: List[Metric], labels: List[str]):
+        sets = [set(self.view_results[metric][view_key].view['id'].unique().compute())
+                for metric in metrics]
+        labels = self._venn_labels(sets, labels, metrics)
+        fig, ax = venn.venn3(labels, names=metrics, figsize=(5, 5))
+        # ax.get_legend().remove()
+        # fig.tight_layout()
+        return fig, ax
+
     def view_relations2(
         self,
         metric: Metric,
@@ -328,15 +337,6 @@ class AnalysisResultPlot(object):
             view_keys=[view_key1, view_key2, view_key3],
             labels=[label1, label2, label3],
         )
-
-    def _metric_relations(self, view_key: ViewKey, metrics: List[Metric], labels: List[str]):
-        sets = [set(self.view_results[metric][view_key].view['id'].unique().compute())
-                for metric in metrics]
-        labels = self._venn_labels(sets, labels, metrics)
-        fig, ax = venn.venn3(labels, names=metrics, figsize=(5, 5))
-        # ax.get_legend().remove()
-        # fig.tight_layout()
-        return fig, ax
 
     def _view_relations(self, metric: Metric, view_keys: List[ViewKey], labels: List[str]):
         names = [_view_name(view_key).replace('_', '\_')
