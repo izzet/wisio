@@ -44,7 +44,7 @@ class RecorderAnalyzer(Analyzer):
         log_dir: str,
         metrics=['duration_sum'],
         view_names=[],
-        cutoff=0.0001,
+        slope_threshold=45,
         checkpoint=False,
         checkpoint_dir='',
         persist=True,
@@ -117,13 +117,11 @@ class RecorderAnalyzer(Analyzer):
                             view_type=view_type,
                             metric_col=METRIC_COLS[metric],
                             norm_data=parent_norm_data,
-                            cutoff=cutoff,
+                            slope_threshold=slope_threshold,
                         )
 
                         norm_data[metric][view_permutation] = view_result.norm_data
                         view_results[metric][view_permutation] = view_result
-
-                        print(norm_data)
 
                         views_need_checkpoint.append(view_permutation)
 
@@ -147,7 +145,7 @@ class RecorderAnalyzer(Analyzer):
                             view_type=logical_view_type,
                             metric_col=METRIC_COLS[metric],
                             norm_data=norm_data[metric][(parent_type,)],
-                            cutoff=cutoff,
+                            slope_threshold=slope_threshold,
                         )
 
                         norm_data[metric][view_permutation] = view_result.norm_data
