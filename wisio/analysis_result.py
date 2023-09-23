@@ -308,6 +308,53 @@ class AnalysisResultPlot(object):
         # fig.tight_layout()
         return fig, ax
 
+    def slope(
+        self,
+        metric: Metric,
+        view_keys: List[ViewKey],
+        legends: List[str] = [],
+        slope_threshold: int = 45,
+        ax: Axes = None,
+        xlabel: str = None,
+        ylabel: str = None,
+        figsize: Tuple[int, int] = None,
+        color: str = None,
+    ):
+        if ax is None:
+            _, ax = plt.subplots(figsize=figsize)
+        legend_handles = []
+        x_col = f"{metric}_per_rev_cs"
+        y_col = 'index_cs_per_rev'
+        for i, view_key in enumerate(view_keys):
+            view_result = self.view_results[metric][view_key]
+            group_view = view_result.group_view.compute()
+            slope_cond = group_view[f"{metric}_slope"] < slope_threshold
+            group_view.loc[slope_cond, f"{x_col}_line"] = group_view[x_col]
+            line = group_view[f"{x_col}_line"].to_numpy()
+            x = group_view[x_col].to_numpy()
+            y = group_view[y_col].to_numpy()
+            last_non_nan_index = np.where(~np.isnan(line))[0][-1]
+            dotted = np.copy(line)
+            if np.all(np.isnan(line[last_non_nan_index + 1:])):
+                # complete dotted line if all values after last non-nan are nan
+                dotted[last_non_nan_index + 1:] = x[last_non_nan_index + 1:]
+            mask = np.isfinite(dotted)
+            color = f"C{i}" if color is None else color
+            ax.plot(dotted[mask], y[mask], c=color, ls='--')
+            ax.plot(line, y, c=color)
+            if len(legends) > 0:
+                legend_handles.append(
+                    Line2D([0], [0], color=color, label=legends[i]))
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        if xlabel is not None:
+            ax.set_xlabel(xlabel)
+        if ylabel is not None:
+            ax.set_ylabel(ylabel)
+        if len(legend_handles) > 0:
+            ax.legend(handles=legend_handles)
+        return ax, group_view
+
     def view_relations2(
         self,
         metric: Metric,
@@ -367,6 +414,10 @@ class AnalysisResultPlot(object):
             return 'limegreen'
         else:
             return 'green'
+
+    @staticmethod
+    def _extract_metric(metric_col: str):
+        return metric_col.replace('_sum', '') if '_sum' in metric_col else metric_col
 
     def _ticker_for_metric(self, metric: Metric):
         if metric == 'bw':
