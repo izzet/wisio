@@ -75,7 +75,7 @@ class ClusterManager(object):
         if self.force_local:
             return [
                 LocalCluster(
-                    dashboard_address=f"{host}:{dashboard_port + i}",
+                    dashboard_address=None if dashboard_port is None else f"{host}:{dashboard_port + i}",
                     host=host,
                     local_directory=f"{local_directory}/cluster-{i}-local",
                     memory_limit=0,
