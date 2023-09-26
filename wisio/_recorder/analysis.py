@@ -1,4 +1,5 @@
 import dask.dataframe as dd
+import math
 import numpy as np
 import os
 import pandas as pd
@@ -99,7 +100,6 @@ def compute_main_view(
     log_dir: str,
     global_min_max: dict,
     view_types: list,
-    persist=True
 ) -> dd.DataFrame:
     # Read Parquet files
     ddf = dd.read_parquet(f"{log_dir}/*.parquet")
@@ -117,10 +117,9 @@ def compute_main_view(
     hlm_view = ddf[(ddf['cat'] == CAT_POSIX) & (ddf['io_cat'].isin(IO_CATS))] \
         .map_partitions(set_time_ranges, time_ranges=time_ranges) \
         .groupby(groupby) \
-        .agg(HLM_AGG) \
-        .reset_index()
-    if persist:
-        hlm_view = hlm_view.persist()
+        .agg(HLM_AGG, split_out=ddf.npartitions) \
+        .reset_index() \
+        .persist()
     # Flatten column names
     hlm_view = _flatten_column_names(ddf=hlm_view)
     # Set derived columns
@@ -129,11 +128,11 @@ def compute_main_view(
     main_view = hlm_view \
         .drop(columns=extra_cols) \
         .groupby(view_types) \
-        .sum()
-    if persist:
-        main_view = main_view.persist()
+        .sum(split_out=math.ceil(math.sqrt(ddf.npartitions)))
     # Set hashed ids
     main_view['id'] = main_view.index.map(hash)
+    # Persist main view
+    main_view = main_view.persist()
     # Delete hlm_view
     del hlm_view
     # Return main_view

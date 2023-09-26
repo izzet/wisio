@@ -66,11 +66,11 @@ class RecorderAnalyzer(Analyzer):
                     checkpoint_dir=checkpoint_dir, view_name=CHECKPOINT_MAIN_VIEW)
         else:
             with ElapsedTimeLogger(logger=self.logger, message='Compute main view'):
+                # Compute main view
                 main_view = compute_main_view(
                     log_dir=log_dir,
                     global_min_max=global_min_max,
                     view_types=VIEW_TYPES,
-                    persist=persist,
                 )
             if checkpoint:
                 with ElapsedTimeLogger(logger=self.logger, message='Save main view'):
