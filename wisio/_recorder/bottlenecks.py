@@ -8,6 +8,7 @@ from ..types import (
     COL_PROC_NAME,
     COL_TIME_RANGE,
     BottlenecksPerViewPerMetric,
+    BottleneckViews,
     Metric,
     ViewKey,
     ViewResult,
@@ -200,7 +201,7 @@ class RecorderBottleneckDetector(BottleneckDetector):
             .map_partitions(set_metric_percentages, metric_col=metric_col, metric_max=metric_max) \
             .map_partitions(set_metric_scores, view_type=view_type, metric_col=metric_col, col=col, metric_max=metric_max)
 
-        return dict(
+        return BottleneckViews(
             low_level_view=low_level_view,
             mid_level_view=mid_level_view,
             high_level_view=high_level_view,

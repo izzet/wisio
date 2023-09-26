@@ -36,6 +36,13 @@ ViewKey = Union[Tuple[ViewType], Tuple[ViewType, ViewType],
 
 
 @dataclass
+class BottleneckViews:
+    low_level_view: DataFrame
+    mid_level_view: DataFrame
+    high_level_view: DataFrame
+
+
+@dataclass
 class ViewNormalizationData:
     index_sum: int
     metric_max: float
@@ -55,7 +62,7 @@ MainView = DataFrame
 ViewResultsPerView = Dict[ViewKey, ViewResult]
 ViewResultsPerViewPerMetric = Dict[Metric, ViewResultsPerView]
 
-BottlenecksPerView = Dict[ViewKey, DataFrame]
+BottlenecksPerView = Dict[ViewKey, BottleneckViews]
 BottlenecksPerViewPerMetric = Dict[Metric, BottlenecksPerView]
 
 
