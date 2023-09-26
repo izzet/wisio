@@ -3,7 +3,7 @@ import dask.dataframe as dd
 from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional, Union
-from .base import ViewKey, ViewType
+from .types import ViewKey, ViewType
 
 
 class Rule(Enum):
