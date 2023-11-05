@@ -4,6 +4,7 @@ import numpy as np
 import os
 import pandas as pd
 from dask.distributed import Future, get_client
+from datetime import datetime
 from typing import Tuple, Union
 from ..types import (
     COL_FILE_NAME,
@@ -63,6 +64,7 @@ DELTA_BIN_NAMES = [
 ]
 DERIVED_MD_OPS = ['close', 'open', 'seek', 'stat']
 FILE_REGEX_PLACEHOLDER = '[0-9]'
+EXTRA_COLS = ['io_cat', 'acc_pat', 'func_id']
 HLM_AGG = {
     'duration': [sum],
     'index': ['count'],
@@ -96,13 +98,14 @@ VIEW_AGG = {
 }
 
 
-def compute_main_view(
-    log_dir: str,
+def compute_high_level_metrics(
+    trace_path: str,
     global_min_max: dict,
     view_types: list,
+    partition_size: str = '256MB',
 ) -> dd.DataFrame:
     # Read Parquet files
-    ddf = dd.read_parquet(f"{log_dir}/*.parquet")
+    ddf = dd.read_parquet(f"{trace_path}/*.parquet")
     # Fix dtypes
     ddf['acc_pat'] = ddf['acc_pat'].astype(np.uint8)
     ddf['duration'] = ddf['duration'].astype(np.float64)
@@ -110,31 +113,35 @@ def compute_main_view(
     # Compute tranges
     time_ranges = _compute_time_ranges(global_min_max=global_min_max)
     # Add `io_cat`, `acc_pat`, and `func_id` to groupby
-    extra_cols = ['io_cat', 'acc_pat', 'func_id']
     groupby = view_types.copy()
-    groupby.extend(extra_cols)
+    groupby.extend(EXTRA_COLS)
     # Compute high-level metrics
-    hlm_view = ddf[(ddf['cat'] == CAT_POSIX) & (ddf['io_cat'].isin(IO_CATS))] \
+    print('computing hlm', datetime.now())
+    hlm = ddf[(ddf['cat'] == CAT_POSIX) & (ddf['io_cat'].isin(IO_CATS))] \
         .map_partitions(set_time_ranges, time_ranges=time_ranges) \
         .groupby(groupby) \
         .agg(HLM_AGG, split_out=ddf.npartitions) \
         .reset_index() \
+        .repartition(partition_size) \
         .persist()
-    # Flatten column names
-    hlm_view = _flatten_column_names(ddf=hlm_view)
+    hlm = _flatten_column_names(hlm)
+    return hlm
+
+
+def compute_main_view(
+    hlm: dd.DataFrame,
+    view_types: list,
+) -> dd.DataFrame:
     # Set derived columns
-    hlm_view = _set_derived_columns(ddf=hlm_view)
+    hlm = _set_derived_columns(ddf=hlm)
     # Compute agg_view
-    main_view = hlm_view \
-        .drop(columns=extra_cols) \
+    main_view = hlm \
+        .drop(columns=EXTRA_COLS) \
         .groupby(view_types) \
-        .sum(split_out=math.ceil(math.sqrt(ddf.npartitions)))
+        .sum(split_out=hlm.npartitions) \
+        .persist()
     # Set hashed ids
     main_view['id'] = main_view.index.map(hash)
-    # Persist main view
-    main_view = main_view.persist()
-    # Delete hlm_view
-    del hlm_view
     # Return main_view
     return main_view
 
@@ -195,11 +202,13 @@ def compute_view(
 
     # Create columns
     metric = _extract_metric(metric_col=metric_col)
-    query_col = f"{metric}_norm" if IS_NORMALIZED[metric] else f"{metric}_delta"
+    # query_col = f"{metric}_norm" if IS_NORMALIZED[metric] else f"{metric}_delta"
     slope_col = f"{metric}_slope"
 
     # Filter by slope
-    filtered_view = group_view.query(f"{slope_col} < {slope_threshold}")
+    filtered_view = group_view
+    if slope_threshold > 0:
+        filtered_view = group_view.query(f"{slope_col} < {slope_threshold}")
 
     # Find filtered records
     view = parent_view.query(
@@ -278,6 +287,12 @@ def set_metric_deltas(df: pd.DataFrame, metric_col: str, norm_data: ViewNormaliz
         f"{metric}_delta",
         f"{metric}_norm",
     )
+
+    # print('set_metric_deltas', metric, type(norm_data), norm_data.metric_max if norm_data is not None else -1)
+
+    # fix: The columns in the computed data do not match the columns in the provided metadata
+    df[csp_col] = 0.0
+    df[delta_col] = 0.0
 
     if IS_NORMALIZED[metric]:
         if IS_REVERSED[metric]:

@@ -1,7 +1,6 @@
 import dask.dataframe as dd
 import pandas as pd
 from dask import compute, delayed
-from logging import Logger
 from typing import Dict, List
 from ..bottlenecks import BottleneckDetector
 from ..types import (
@@ -80,9 +79,6 @@ def _process_bottleneck_view(
 
 class RecorderBottleneckDetector(BottleneckDetector):
 
-    def __init__(self, logger: Logger):
-        super().__init__(logger)
-
     def detect_bottlenecks(
         self,
         view_results: ViewResultsPerViewPerMetric,
@@ -125,7 +121,7 @@ class RecorderBottleneckDetector(BottleneckDetector):
                         f"{threshold_col} >= @th", local_dict={'th': threshold})
                 ))
         # Compute all bottlenecks
-        with ElapsedTimeLogger(logger=self.logger, message='Compute bottlenecks'):
+        with ElapsedTimeLogger(message='Compute bottlenecks'):
             bottleneck_results = compute(*bottleneck_tasks)
         # Create bottlenecks dict
         for view_key, threshold, result in bottleneck_results:

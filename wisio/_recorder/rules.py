@@ -12,6 +12,8 @@ from ..types import (
     COL_NODE_NAME,
     COL_PROC_NAME,
     COL_RANK,
+    BottlenecksPerViewPerMetric,
+    BottleneckViews,
     ViewKey,
     ViewType,
 )
@@ -175,6 +177,7 @@ def _process_bott_metadata_access(
     threshold: float,
     deps: Dict[Rule, RuleResult],
 ):
+    print('here')
     view_type = view_key[-1]
 
     max_io_time = deps[Rule.CHAR_IO_TIME].value
@@ -694,10 +697,31 @@ class RecorderRuleEngine(RuleEngine):
 
     def process_bottlenecks(
         self,
-        bottlenecks: Dict[str, Dict[ViewKey, Dict[str, dd.DataFrame]]],
+        bottlenecks: BottlenecksPerViewPerMetric,
         characteristics: Dict[Rule, RuleResult],
         threshold=0.5
     ) -> Dict[ViewKey, object]:
+        
+
+        z1 = bottlenecks['duration'][('time_range',)].high_level_view
+        z2 = bottlenecks['duration'][('time_range',)].mid_level_view
+        z3 = bottlenecks['duration'][('time_range',)].low_level_view
+
+        print(_process_bott_metadata_access)
+        x = _process_bott_metadata_access(
+            metric='duration',
+            rule=Rule.BOTT_METADATA_ACCESS,
+            view_key=('time_range',),
+            high_level_view=z1,
+            mid_level_view=None,
+            low_level_view=z3,
+            threshold=0.5,
+            deps={Rule.CHAR_IO_TIME: characteristics[Rule.CHAR_IO_TIME]},
+        )
+
+        y = compute(x)
+        print(y)
+
         # Keep rule tasks
         rule_tasks = []
         # Run through bottlenecks
@@ -713,14 +737,15 @@ class RecorderRuleEngine(RuleEngine):
                 # If so, run through rules
                 for rule in self.rules[view_type]:
                     rule_func, rule_deps = BOTTLENECK_FUNCTIONS[rule]
+                    print(rule, metric, view_key, rule_deps)
                     if rule_deps is None:
                         rule_tasks.append(rule_func(
                             metric=metric,
                             rule=rule,
                             view_key=view_key,
-                            high_level_view=bottleneck_view['high_level_view'],
-                            mid_level_view=bottleneck_view['mid_level_view'],
-                            low_level_view=bottleneck_view['low_level_view'],
+                            high_level_view=bottleneck_view.high_level_view,
+                            mid_level_view=bottleneck_view.mid_level_view,
+                            low_level_view=bottleneck_view.low_level_view,
                             threshold=threshold,
                         ))
                     else:
@@ -728,14 +753,29 @@ class RecorderRuleEngine(RuleEngine):
                             metric=metric,
                             rule=rule,
                             view_key=view_key,
-                            high_level_view=bottleneck_view['high_level_view'],
-                            mid_level_view=bottleneck_view['mid_level_view'],
-                            low_level_view=bottleneck_view['low_level_view'],
+                            high_level_view=bottleneck_view.high_level_view,
+                            mid_level_view=bottleneck_view.mid_level_view,
+                            low_level_view=bottleneck_view.low_level_view,
                             threshold=threshold,
                             deps={rule_dep: characteristics[rule_dep] for rule_dep in rule_deps}
                         ))
+                        # print(rule_func)
+                        # rrr = rule_func(
+                        #     metric=metric,
+                        #     rule=rule,
+                        #     view_key='hey',
+                        #     high_level_view=bottleneck_view.high_level_view,
+                        #     mid_level_view=bottleneck_view.mid_level_view,
+                        #     low_level_view=bottleneck_view.low_level_view,
+                        #     threshold=threshold,
+                        #     deps=[] #{rule_dep: characteristics[rule_dep] for rule_dep in rule_deps}
+                        # )
+                        # print(rrr.compute())
+                break
         # Compute tasks
+        print(rule_tasks)
         rule_results = compute(*rule_tasks)
+        print(rule_results)
         # Create bottlenecks
         bottlenecks = {}
         for metric, rule, view_key, result in rule_results:

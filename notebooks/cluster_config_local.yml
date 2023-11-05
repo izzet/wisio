@@ -1,0 +1,5 @@
+cluster_type: "local"
+debug: false
+n_workers: 8
+memory: 0
+local_dir: "/var/tmp/cluster"

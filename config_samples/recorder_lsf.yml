@@ -1,0 +1,28 @@
+checkpoint: true
+checkpoint_dir: "/checkpoint/path"
+cluster_config:
+  cluster_type: "lsf"
+  header_skip:
+    - "-n"
+    - "-R"
+    - "-M"
+    - "-P"
+    - "-W 00:30"
+  job_extra:
+    - "-nnodes 1"
+    - "-G asccasc"
+    - "-q pdebug"
+    - "-W 120"
+    - "-o %J.log"
+    - "-e %J.log"
+  local_directory: "/var/tmp/cluster"
+  memory: 1600
+  n_workers: 8
+  n_threads_per_worker: 16
+  use_stdin: true
+  debug: false
+debug: true
+metrics:
+  - "duration"
+trace_path: "/trace/path"
+working_dir: ".wisio"

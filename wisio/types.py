@@ -14,6 +14,7 @@ COL_RANK = 'rank'
 COL_TIME_RANGE = 'time_range'
 
 
+AnalysisAccuracy = Literal['accurate', 'optimistic', 'pessimistic']
 BottleneckType = Literal[
     'high_level_view',
     'mid_level_view',
@@ -66,5 +67,5 @@ BottlenecksPerView = Dict[ViewKey, BottleneckViews]
 BottlenecksPerViewPerMetric = Dict[Metric, BottlenecksPerView]
 
 
-def _view_name(view_key_type: Union[ViewKey, ViewType]):
+def view_name(view_key_type: Union[ViewKey, ViewType]):
     return '_'.join(view_key_type) if isinstance(view_key_type, tuple) else view_key_type

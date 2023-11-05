@@ -1,0 +1,11 @@
+cluster_config:
+  cluster_type: "local"
+  local_directory: "/var/tmp/cluster"
+  memory: 0
+  n_workers: 8
+  debug: false
+debug: true
+metrics:
+  - "duration"
+trace_path: "/trace/path"
+working_dir: ".wisio"

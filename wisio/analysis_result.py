@@ -14,7 +14,7 @@ from .types import (
     Metric,
     ViewKey,
     ViewResultsPerViewPerMetric,
-    _view_name,
+    view_name,
 )
 
 DELTA_BINS = [
@@ -29,7 +29,7 @@ DELTA_BINS = [
 ]
 
 
-class AnalysisResultPlot(object):
+class AnalysisResultPlots(object):
 
     def __init__(
         self,
@@ -242,7 +242,7 @@ class AnalysisResultPlot(object):
         sample_count=0,
         scatter_zorder=0,
     ):
-        hlv = self.bottlenecks[metric][(COL_TIME_RANGE,)]['high_level_view']
+        hlv = self.bottlenecks[metric][(COL_TIME_RANGE,)].high_level_view
         metric_col = next(col for col in hlv.columns if metric in col)
         data = hlv.compute()
         ax_line = data[metric_col].plot(
@@ -386,7 +386,7 @@ class AnalysisResultPlot(object):
         )
 
     def _view_relations(self, metric: Metric, view_keys: List[ViewKey], labels: List[str]):
-        names = [_view_name(view_key).replace('_', '\_')
+        names = [view_name(view_key).replace('_', '\_')
                  for view_key in view_keys]
         sets = [set(self.view_results[metric][view_key].view['id'].unique().compute())
                 for view_key in view_keys]
@@ -473,7 +473,7 @@ class AnalysisResult(object):
         self.view_results = view_results
         self.bottlenecks = bottlenecks
 
-        self.plot = AnalysisResultPlot(
+        self.plots = AnalysisResultPlots(
             main_view=main_view,
             view_results=view_results,
             bottlenecks=bottlenecks,

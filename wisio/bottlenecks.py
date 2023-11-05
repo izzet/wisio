@@ -1,14 +1,10 @@
 import abc
 import dask.dataframe as dd
-from logging import Logger
 from typing import Dict
 from .types import ViewKey
 
 
 class BottleneckDetector(abc.ABC):
-
-    def __init__(self, logger: Logger):
-        self.logger = logger
 
     @abc.abstractmethod
     def detect_bottlenecks(

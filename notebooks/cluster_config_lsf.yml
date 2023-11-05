@@ -1,0 +1,20 @@
+cluster_type: "lsf"
+debug: false
+n_workers: 8
+n_threads_per_worker: 16
+memory: 1600
+header_skip:
+  - "-n"
+  - "-R"
+  - "-M"
+  - "-P"
+  - "-W 00:30"
+job_extra:
+  - "-nnodes 1"
+  - "-G asccasc"
+  - "-q pdebug"
+  - "-W 120"
+  - "-o %J.log"
+  - "-e %J.log"
+local_dir: "/var/tmp/cluster"
+use_stdin: true
