@@ -52,7 +52,7 @@ class ClusterManager(object):
             dashboard_address = f"{self.config.host}:{self.config.dashboard_port}"
         if self.config.cluster_type == 'local':
             return LocalCluster(
-                dashboard_address=dashboard_address,
+                # dashboard_address=dashboard_address,
                 host=self.config.host,
                 local_directory=self.config.local_dir,
                 memory_limit=self.config.memory,

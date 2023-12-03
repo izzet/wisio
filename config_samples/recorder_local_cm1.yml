@@ -1,12 +1,16 @@
 checkpoint: false
 cluster_config:
   cluster_type: "local"
-  local_dir: "/var/tmp/izzet/clusters/cm1"
-  memory: 0
-  n_workers: 8
   debug: false
+  n_workers: 8
+  memory: 0
+  local_dir: "/var/tmp/wisio-recorder-cm1"
 debug: true
 metrics:
-  - "duration"
+  - "time"
 trace_path: "/p/vast1/iopp/recorder_app_logs/cm1/nodes-32/workflow-4/_parquet"
-working_dir: ".wisio/cm1"
+view_types:
+  - "time_range"
+  - "proc_name"
+  - "file_name"
+working_dir: ".wisio/recorder-cm1"

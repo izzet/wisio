@@ -1,22 +1,22 @@
 anytree
-bokeh
 click==8.0.4
-dask
-dask_jobqueue
-distributed
-#durable_rules
-fastparquet
-graphviz
-networkx
-numpy
-upsetplot
-pandas
+dask>=2022.3.0
+dask_jobqueue==0.8.2
+dask-sql
+distributed>=2022.3.0
+# fastparquet
+inflect==7.0.0
+jinja2>=3.0
+numpy==1.24.3
+matplotlib==3.2.1
+# networkx
+# pandas<2
+pandas>=2.0
 panel
 portion
-#pyarrow
+# pyarrow
+python-intervals
 pyyaml
-scikit-learn
-scipy
-seaborn
-tqdm
+rich==13.6.0
+# tqdm
 venn

@@ -1,32 +1,17 @@
-from dask.dataframe import DataFrame
+import dask.dataframe as dd
 from dataclasses import dataclass
-from typing import Dict, Literal, Union, Tuple
-
-
-COL_APP_NAME = 'app_name'
-COL_FILE_DIR = 'file_dir'
-COL_FILE_NAME = 'file_name'
-COL_FILE_REGEX = 'file_regex'
-COL_HOST_NAME = 'host_name'
-COL_NODE_NAME = 'node_name'
-COL_PROC_NAME = 'proc_name'
-COL_RANK = 'rank'
-COL_TIME_RANGE = 'time_range'
+from typing import Dict, List, Literal, Optional, Union, Tuple
 
 
 AnalysisAccuracy = Literal['accurate', 'optimistic', 'pessimistic']
-BottleneckType = Literal[
-    'high_level_view',
-    'mid_level_view',
-    'low_level_view',
-]
 Metric = Literal[
     'att_perf',
     'bw',
-    'duration',
     'intensity',
     'iops',
+    'time',
 ]
+OutputType = Literal['console', 'html', 'json']
 ViewType = Literal[
     'file_name',
     'proc_name',
@@ -37,35 +22,62 @@ ViewKey = Union[Tuple[ViewType], Tuple[ViewType, ViewType],
 
 
 @dataclass
-class BottleneckViews:
-    low_level_view: DataFrame
-    mid_level_view: DataFrame
-    high_level_view: DataFrame
+class BottleneckResult:
+    bottlenecks: dd.DataFrame
+    details: dd.DataFrame
 
 
 @dataclass
-class ViewNormalizationData:
-    index_sum: int
-    metric_max: float
+class RuleReason:
+    condition: str
+    message: str
+
+
+@dataclass
+class Rule:
+    name: str
+    condition: str
+    reasons: Optional[List[RuleReason]]
+    # source: Optional[str]
+
+
+@dataclass
+class RuleResultReason:
+    description: str
+    # value: Optional[float]
+
+
+@dataclass
+class RuleResult:
+    description: str
+    detail_list: Optional[List[str]]
+    extra_data: Optional[dict]
+    reasons: Optional[List[RuleResultReason]]
+    value: Optional[Union[float, int, tuple]]
+    value_fmt: Optional[str]
 
 
 @dataclass
 class ViewResult:
-    group_view: DataFrame
-    metric_col: str
-    norm_data: ViewNormalizationData
-    view: DataFrame
+    group_view: dd.DataFrame
+    metric: str
+    view: dd.DataFrame
     view_type: ViewType
 
 
-MainView = DataFrame
+MainView = dd.DataFrame
+
+BottlenecksPerView = Dict[ViewKey, BottleneckResult]
+BottlenecksPerViewPerMetric = Dict[Metric, BottlenecksPerView]
+
+Characteristics = Dict[str, RuleResult]
+
+RuleResultsPerView = Dict[ViewKey, List[RuleResult]]
+RuleResultsPerViewPerMetric = Dict[Metric, RuleResultsPerView]
 
 ViewResultsPerView = Dict[ViewKey, ViewResult]
 ViewResultsPerViewPerMetric = Dict[Metric, ViewResultsPerView]
 
-BottlenecksPerView = Dict[ViewKey, BottleneckViews]
-BottlenecksPerViewPerMetric = Dict[Metric, BottlenecksPerView]
 
-
-def view_name(view_key_type: Union[ViewKey, ViewType]):
-    return '_'.join(view_key_type) if isinstance(view_key_type, tuple) else view_key_type
+def view_name(view_key_type: Union[ViewKey, ViewType], separator='_'):
+    return separator.join(view_key_type) if isinstance(view_key_type, tuple) else view_key_type

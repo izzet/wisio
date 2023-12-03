@@ -1,0 +1,7 @@
+# graphviz
+ipykernel
+ipython-autotime
+# jupyterlab
+# jupyterthemes
+# qtconsole
+# seaborn

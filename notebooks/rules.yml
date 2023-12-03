@@ -1,0 +1,26 @@
+- excessive_metadata_access:
+    name: Excessive metadata access
+    condition: time_threshold > 0.01 & (metadata_time / time) > 0.5
+    reasons:
+      - condition: (open_time > close_time) & (open_time > seek_time)
+        message: >-
+          Overall {{ "%.2f" | format((metadata_time / time) * 100) }}% ({{ "%.2f" | format(metadata_time) }} seconds) of I/O time is spent on metadata access,
+          specifically {{ "%.2f" | format((open_time / time) * 100) }}% ({{ "%.2f" | format(open_time) }} seconds) on the 'open' operation.
+      - condition: (close_time > open_time) & (close_time > seek_time)
+        message: >-
+          Overall {{ "%.2f" | format((metadata_time / time) * 100) }}% ({{ "%.2f" | format(metadata_time) }} seconds) of I/O time is spent on metadata access,
+          specifically {{ "%.2f" | format((close_time / time) * 100) }}% ({{ "%.2f" | format(close_time) }} seconds) on the 'close' operation.
+      - condition: (seek_time > open_time) & (seek_time > close_time)
+        message: >-
+          Overall {{ "%.2f" | format((metadata_time / time) * 100) }}% ({{ "%.2f" | format(metadata_time) }} seconds) of I/O time is spent on metadata access,
+          specifically {{ "%.2f" | format((seek_time / time) * 100) }}% ({{ "%.2f" | format(seek_time) }} seconds) on the 'seek' operation.
+- small_writes:
+    name: Small writes
+    condition: time_threshold > 0.01 & (write_time / time) > 0.75 & (size / count) < 262144
+    reasons:
+      - condition: (write_time / time) > 0.75
+        message: >-
+          'write' time is {{ "%.2f" | format((write_time / time) * 100) }}% ({{ "%.2f" | format(write_time) }} seconds) of I/O time.
+      - condition: (size / count) < 262144
+        message: >-
+          Average I/O accesses are {{ "%.2f" | format(size / count / 1024) }} KB, which is smaller than 256 KB
