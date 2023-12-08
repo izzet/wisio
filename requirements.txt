@@ -1,22 +1,23 @@
 anytree
 click==8.0.4
-dask>=2022.3.0
+darshan>=3.4.0
+dask>=2023.9.0
 dask_jobqueue==0.8.2
-dask-sql
-distributed>=2022.3.0
-# fastparquet
+# dask-sql
+distributed>=2023.9.0
+fastparquet>=2023.10.0
 inflect==7.0.0
 jinja2>=3.0
 numpy==1.24.3
 matplotlib==3.2.1
-# networkx
 # pandas<2
-pandas>=2.0
+pandas>=2.1.0
 panel
 portion
-# pyarrow
+# pyarrow>=13.0.0
 python-intervals
 pyyaml
 rich==13.6.0
+scipy>=1.10.0
 # tqdm
 venn
