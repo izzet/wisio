@@ -1,0 +1,31 @@
+checkpoint: false
+cluster_config:
+  cluster_type: "lsf"
+  debug: false
+  header_skip:
+    - "-n"
+    - "-R"
+    - "-M"
+    - "-P"
+    - "-W 00:30"
+  job_extra:
+    - "-nnodes 1"
+    - "-G asccasc"
+    - "-q pdebug"
+    - "-W 120"
+    - "-o %J.log"
+    - "-e %J.log"
+  local_dir: "/var/tmp/wisio/recorder_cm1_32_4_lsf"
+  memory: 1600
+  n_threads_per_worker: 16
+  n_workers: 8
+  use_stdin: true
+debug: false
+metrics:
+  - "time"
+trace_path: "/usr/workspace/iopp/wisio_logs/recorder_cm1_32_4/_parquet"
+view_types:
+  - "time_range"
+  - "proc_name"
+  - "file_name"
+working_dir: ".wisio/recorder_cm1_32_4_lsf"

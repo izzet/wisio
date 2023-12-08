@@ -64,9 +64,8 @@ class AnalyzerResultOutput(object):
                         }
                         tree_dict[rule_key][view_key] = tree_dict[rule_key][view_key] if rule_key in tree_dict[rule_key] else [
                         ]
-                        for bott in self.bottlenecks[metric][view_key][rule_key]:
-                            tree_dict[rule_key][view_key].append(
-                                bott.description)
+                        for result in self.bottlenecks[metric][view_key][rule_key]:
+                            tree_dict[rule_key][view_key].append(result)
                     # print(metric, view_key, rule_key)
 
         bott_table = Table(box=None, show_header=False)
@@ -75,8 +74,14 @@ class AnalyzerResultOutput(object):
             for view_key in tree_dict[rule_key]:
                 view_tree = Tree(view_name(view_key, ' > '))
                 if len(tree_dict[rule_key][view_key]) > 0:
-                    for bott in tree_dict[rule_key][view_key]:
-                        view_tree.add(bott)
+                    for result in tree_dict[rule_key][view_key]:
+                        if result.reasons is None or len(result.reasons) == 0:
+                            view_tree.add(result.description)
+                        else:
+                            bott_tree = Tree(result.description)
+                            for reason in result.reasons:
+                                bott_tree.add(reason.description)
+                            view_tree.add(bott_tree)
                     rule_tree.add(view_tree)
             bott_table.add_row(rule_tree)
 

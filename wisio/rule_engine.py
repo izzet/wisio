@@ -38,6 +38,7 @@ class RuleEngine(object):
             CharacteristicXferSizeRule(rule_key=kc.WRITE_XFER_SIZE.value),
             CharacteristicProcessCount(rule_key=kc.NODE_COUNT.value),
             CharacteristicProcessCount(rule_key=kc.APP_COUNT.value),
+            CharacteristicProcessCount(rule_key=kc.PROC_COUNT.value),
             CharacteristicFileCountRule(),
             CharacteristicAccessPatternRule(),
         ]

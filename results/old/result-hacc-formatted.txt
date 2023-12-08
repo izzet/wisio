@@ -1,0 +1,89 @@
+Analysis
+├── Timeline - Read
+│   └── [0.000-33.702] Size=10 790.00000GB 100.0% | Time=10 0.64205s/p 100.0% | Ops=10 12800 100.0% | Files=1 1280 100.0% | Bandwidth=1 2.22892GB/s 100.0% | Parallelism=10 1280 100.0% | Xfer=5 63.20000MB 49.4% | Confidence=67.1%
+│       ├── [0.000-16.851] Size=1 52.35938GB 6.6% | Time=6 0.32624s/p 50.8% | Ops=1 919 7.2% | Files=9 194 15.2% | Bandwidth=2 1.80099GB/s 80.8% | Parallelism=8 194 15.2% | Xfer=5 58.34168MB 45.6% | Confidence=45.7%
+│       │   ├── [0.000-8.426] Size=1 0.39844GB 0.1% | Time=1 0.00987s/p 1.5% | Ops=1 17 0.1% | Files=10 17 1.3% | Bandwidth=1 2.41608GB/s 108.4% | Parallelism=10 17 1.3% | Xfer=2 24.00000MB 18.8% | Confidence=37.1%
+│       │   │   ├── [0.000-4.213] Size= | Time= | Ops= | Files= | Bandwidth= | Parallelism= | Xfer= | Confidence=nan%
+│       │   │   └── [4.213-8.426] Size=1 0.39844GB 0.1% | Time=1 0.00987s/p 1.5% | Ops=1 17 0.1% | Files=10 17 1.3% | Bandwidth=1 2.41608GB/s 108.4% | Parallelism=10 17 1.3% | Xfer=2 24.00000MB 18.8% | Confidence=37.1%
+│       │   │       ├── [4.213-6.319] Size= | Time= | Ops= | Files= | Bandwidth= | Parallelism= | Xfer= | Confidence=nan%
+│       │   │       └── [6.319-8.426] Size=1 0.39844GB 0.1% | Time=1 0.00987s/p 1.5% | Ops=1 17 0.1% | Files=10 17 1.3% | Bandwidth=1 2.41608GB/s 108.4% | Parallelism=10 17 1.3% | Xfer=2 24.00000MB 18.8% | Confidence=37.1%
+│       │   └── [8.426-16.851] Size=1 51.96094GB 6.6% | Time=6 0.32537s/p 50.7% | Ops=1 902 7.0% | Files=9 194 15.2% | Bandwidth=2 1.78940GB/s 80.3% | Parallelism=8 194 15.2% | Xfer=5 58.98891MB 46.1% | Confidence=45.7%
+│       │       ├── [8.426-12.638] Size=1 8.16406GB 1.0% | Time=6 0.36768s/p 57.3% | Ops=1 145 1.1% | Files=10 40 3.1% | Bandwidth=6 0.99380GB/s 44.6% | Parallelism=10 40 3.1% | Xfer=5 57.65517MB 45.0% | Confidence=55.7%
+│       │       │   ├── [8.426-10.532] Size=1 0.53906GB 0.1% | Time=1 0.01004s/p 1.6% | Ops=1 23 0.2% | Files=10 23 1.8% | Bandwidth=1 2.42036GB/s 108.6% | Parallelism=10 23 1.8% | Xfer=2 24.00000MB 18.8% | Confidence=37.1%
+│       │       │   └── [10.532-12.638] Size=1 7.62500GB 1.0% | Time=6 0.38096s/p 59.3% | Ops=1 122 1.0% | Files=10 38 3.0% | Bandwidth=7 0.72485GB/s 32.5% | Parallelism=10 38 3.0% | Xfer=5 64.00000MB 50.0% | Confidence=57.1%
+│       │       └── [12.638-16.851] Size=1 43.79688GB 5.5% | Time=4 0.24956s/p 38.9% | Ops=1 757 5.9% | Files=9 194 15.2% | Bandwidth=2 1.94180GB/s 87.1% | Parallelism=8 194 15.2% | Xfer=5 59.24439MB 46.3% | Confidence=42.9%
+│       │           ├── [12.638-14.745] Size=1 17.08594GB 2.2% | Time=5 0.26326s/p 41.0% | Ops=1 279 2.2% | Files=10 81 6.3% | Bandwidth=4 1.39854GB/s 62.7% | Parallelism=10 81 6.3% | Xfer=5 62.70968MB 49.0% | Confidence=51.4%
+│       │           └── [14.745-16.851] Size=1 26.71094GB 3.4% | Time=3 0.17706s/p 27.6% | Ops=1 478 3.7% | Files=9 153 12.0% | Bandwidth=1 2.25889GB/s 101.3% | Parallelism=9 153 12.0% | Xfer=5 57.22176MB 44.7% | Confidence=41.4%
+│       └── [16.851-33.702] Size=10 737.64062GB 93.4% | Time=10 0.63211s/p 98.5% | Ops=10 11881 92.8% | Files=1 1200 93.8% | Bandwidth=1 2.26202GB/s 101.5% | Parallelism=9 1200 93.8% | Xfer=5 63.57579MB 49.7% | Confidence=65.7%
+│           ├── [16.851-25.277] Size=9 684.92188GB 86.7% | Time=10 0.63451s/p 98.8% | Ops=9 11032 86.2% | Files=2 1120 87.5% | Bandwidth=1 2.26444GB/s 101.6% | Parallelism=7 1120 87.5% | Xfer=5 63.57505MB 49.7% | Confidence=61.4%
+│           │   ├── [16.851-21.064] Size=3 230.07031GB 29.1% | Time=6 0.37272s/p 58.1% | Ops=3 3768 29.4% | Files=6 529 41.3% | Bandwidth=1 2.32863GB/s 104.5% | Parallelism=1 529 41.3% | Xfer=5 62.52442MB 48.8% | Confidence=35.7%
+│           │   │   ├── [16.851-18.957] Size=1 63.99219GB 8.1% | Time=4 0.25536s/p 39.8% | Ops=1 1105 8.6% | Files=8 265 20.7% | Bandwidth=1 2.19298GB/s 98.4% | Parallelism=7 265 20.7% | Xfer=5 59.30136MB 46.3% | Confidence=38.6%
+│           │   │   └── [18.957-21.064] Size=3 166.07812GB 21.0% | Time=5 0.29633s/p 46.2% | Ops=3 2663 20.8% | Files=7 437 34.1% | Bandwidth=1 2.38492GB/s 107.0% | Parallelism=3 437 34.1% | Xfer=5 63.86181MB 49.9% | Confidence=38.6%
+│           │   └── [21.064-25.277] Size=6 454.85156GB 57.6% | Time=10 0.64916s/p 101.1% | Ops=6 7264 56.8% | Files=4 791 61.8% | Bandwidth=1 2.23115GB/s 100.1% | Parallelism=2 791 61.8% | Xfer=6 64.12004MB 50.1% | Confidence=50.0%
+│           │       ├── [21.064-23.170] Size=3 178.70312GB 22.6% | Time=5 0.31445s/p 49.0% | Ops=3 2942 23.0% | Files=6 554 43.3% | Bandwidth=1 2.39298GB/s 107.4% | Parallelism=1 554 43.3% | Xfer=5 62.19986MB 48.6% | Confidence=34.3%
+│           │       └── [23.170-25.277] Size=4 276.14844GB 35.0% | Time=10 0.65751s/p 102.4% | Ops=4 4322 33.8% | Files=6 516 40.3% | Bandwidth=1 2.12099GB/s 95.2% | Parallelism=2 516 40.3% | Xfer=6 65.42712MB 51.1% | Confidence=47.1%
+│           └── [25.277-33.702] Size=1 52.71875GB 6.7% | Time=8 0.49360s/p 76.9% | Ops=1 849 6.6% | Files=10 97 7.6% | Bandwidth=1 2.23055GB/s 100.1% | Parallelism=10 97 7.6% | Xfer=5 63.58539MB 49.7% | Confidence=51.4%
+│               ├── [25.277-29.489] Size=1 28.03125GB 3.5% | Time=6 0.35716s/p 55.6% | Ops=1 449 3.5% | Files=10 57 4.5% | Bandwidth=1 2.41361GB/s 108.3% | Parallelism=10 57 4.5% | Xfer=5 63.92873MB 49.9% | Confidence=48.6%
+│               │   ├── [25.277-27.383] Size=1 4.28125GB 0.5% | Time=1 0.03578s/p 5.6% | Ops=1 89 0.7% | Files=10 57 4.5% | Bandwidth=1 2.59986GB/s 116.6% | Parallelism=10 57 4.5% | Xfer=4 49.25843MB 38.5% | Confidence=40.0%
+│               │   └── [27.383-29.489] Size=1 23.75000GB 3.0% | Time=8 0.45797s/p 71.3% | Ops=1 360 2.8% | Files=10 40 3.1% | Bandwidth=1 2.36756GB/s 106.2% | Parallelism=10 40 3.1% | Xfer=6 67.55556MB 52.8% | Confidence=52.9%
+│               └── [29.489-33.702] Size=1 24.68750GB 3.1% | Time=10 0.68803s/p 107.2% | Ops=1 400 3.1% | Files=10 40 3.1% | Bandwidth=1 2.02506GB/s 90.9% | Parallelism=10 40 3.1% | Xfer=5 63.20000MB 49.4% | Confidence=54.3%
+│                   ├── [29.489-31.596] Size=1 24.68750GB 3.1% | Time=10 0.68803s/p 107.2% | Ops=1 400 3.1% | Files=10 40 3.1% | Bandwidth=1 2.02506GB/s 90.9% | Parallelism=10 40 3.1% | Xfer=5 63.20000MB 49.4% | Confidence=54.3%
+│                   └── [31.596-33.702] Size= | Time= | Ops= | Files= | Bandwidth= | Parallelism= | Xfer= | Confidence=nan%
+├── Timeline - Write
+│   └── [0.000-33.702] Size=10 790.00000GB 100.0% | Time=10 0.76425s/p 100.0% | Ops=10 12800 100.0% | Files=1 1280 100.0% | Bandwidth=1 3.93644GB/s 100.0% | Parallelism=10 1280 100.0% | Xfer=5 63.20000MB 49.4% | Confidence=67.1%
+│       ├── [0.000-16.851] Size=7 509.33594GB 64.5% | Time=10 0.81988s/p 107.3% | Ops=7 8223 64.2% | Files=4 839 65.5% | Bandwidth=2 3.48416GB/s 88.5% | Parallelism=2 839 65.5% | Xfer=5 63.42697MB 49.6% | Confidence=52.9%
+│       │   ├── [0.000-8.426] Size=1 24.68750GB 3.1% | Time=10 1.10476s/p 144.6% | Ops=1 400 3.1% | Files=10 40 3.1% | Bandwidth=7 1.49791GB/s 38.1% | Parallelism=10 40 3.1% | Xfer=5 63.20000MB 49.4% | Confidence=62.9%
+│       │   │   ├── [0.000-4.213] Size= | Time= | Ops= | Files= | Bandwidth= | Parallelism= | Xfer= | Confidence=nan%
+│       │   │   └── [4.213-8.426] Size=1 24.68750GB 3.1% | Time=10 1.10476s/p 144.6% | Ops=1 400 3.1% | Files=10 40 3.1% | Bandwidth=7 1.49791GB/s 38.1% | Parallelism=10 40 3.1% | Xfer=5 63.20000MB 49.4% | Confidence=62.9%
+│       │   │       ├── [4.213-6.319] Size=1 23.75000GB 3.0% | Time=10 1.07547s/p 140.7% | Ops=1 360 2.8% | Files=10 40 3.1% | Bandwidth=7 1.20268GB/s 30.6% | Parallelism=10 40 3.1% | Xfer=6 67.55556MB 52.8% | Confidence=64.3%
+│       │   │       └── [6.319-8.426] Size=1 0.93750GB 0.1% | Time=1 0.02929s/p 3.8% | Ops=1 40 0.3% | Files=10 40 3.1% | Bandwidth=1 4.15497GB/s 105.6% | Parallelism=10 40 3.1% | Xfer=2 24.00000MB 18.8% | Confidence=37.1%
+│       │   └── [8.426-16.851] Size=7 484.64844GB 61.3% | Time=10 0.80561s/p 105.4% | Ops=7 7823 61.1% | Files=4 799 62.4% | Bandwidth=1 3.58572GB/s 91.1% | Parallelism=2 799 62.4% | Xfer=5 63.43858MB 49.6% | Confidence=51.4%
+│       │       ├── [8.426-12.638] Size=4 255.40625GB 32.3% | Time=10 0.91214s/p 119.4% | Ops=4 4015 31.4% | Files=7 444 34.7% | Bandwidth=4 2.75549GB/s 70.0% | Parallelism=3 444 34.7% | Xfer=6 65.13973MB 50.9% | Confidence=54.3%
+│       │       │   ├── [8.426-10.532] Size=1 58.68750GB 7.4% | Time=10 0.84638s/p 110.7% | Ops=1 904 7.1% | Files=10 98 7.7% | Bandwidth=6 1.76510GB/s 44.8% | Parallelism=10 98 7.7% | Xfer=6 66.47788MB 51.9% | Confidence=62.9%
+│       │       │   └── [10.532-12.638] Size=3 196.71875GB 24.9% | Time=10 0.76677s/p 100.3% | Ops=3 3111 24.3% | Files=7 420 32.8% | Bandwidth=3 3.04328GB/s 77.3% | Parallelism=4 420 32.8% | Xfer=6 64.75088MB 50.6% | Confidence=51.4%
+│       │       └── [12.638-16.851] Size=3 229.24219GB 29.0% | Time=6 0.41512s/p 54.3% | Ops=3 3808 29.8% | Files=6 575 44.9% | Bandwidth=1 4.46109GB/s 113.3% | Parallelism=1 575 44.9% | Xfer=5 61.64496MB 48.2% | Confidence=35.7%
+│       │           ├── [12.638-14.745] Size=2 111.50781GB 14.1% | Time=5 0.34717s/p 45.4% | Ops=2 1872 14.6% | Files=7 391 30.5% | Bandwidth=1 4.16352GB/s 105.8% | Parallelism=4 391 30.5% | Xfer=5 60.99573MB 47.7% | Confidence=37.1%
+│       │           └── [14.745-16.851] Size=2 117.73438GB 14.9% | Time=5 0.34318s/p 44.9% | Ops=2 1936 15.1% | Files=8 300 23.4% | Bandwidth=1 4.74882GB/s 120.6% | Parallelism=7 300 23.4% | Xfer=5 62.27273MB 48.7% | Confidence=42.9%
+│       └── [16.851-33.702] Size=4 280.66406GB 35.5% | Time=8 0.57272s/p 74.9% | Ops=4 4577 35.8% | Files=7 507 39.6% | Bandwidth=1 4.74900GB/s 120.6% | Parallelism=2 507 39.6% | Xfer=5 62.79222MB 49.1% | Confidence=44.3%
+│           ├── [16.851-25.277] Size=4 273.87500GB 34.7% | Time=8 0.57936s/p 75.8% | Ops=4 4467 34.9% | Files=7 496 38.8% | Bandwidth=1 4.70881GB/s 119.6% | Parallelism=2 496 38.8% | Xfer=5 62.78218MB 49.0% | Confidence=44.3%
+│           │   ├── [16.851-21.064] Size=3 205.47656GB 26.0% | Time=8 0.60824s/p 79.6% | Ops=3 3307 25.8% | Files=7 404 31.6% | Bandwidth=1 4.36716GB/s 110.9% | Parallelism=4 404 31.6% | Xfer=5 63.62504MB 49.7% | Confidence=44.3%
+│           │   │   ├── [16.851-18.957] Size=2 96.25000GB 12.2% | Time=6 0.40235s/p 52.6% | Ops=2 1557 12.2% | Files=9 256 20.0% | Bandwidth=1 4.14128GB/s 105.2% | Parallelism=7 256 20.0% | Xfer=5 63.30122MB 49.5% | Confidence=45.7%
+│           │   │   └── [18.957-21.064] Size=2 109.22656GB 13.8% | Time=7 0.50974s/p 66.7% | Ops=2 1750 13.7% | Files=8 280 21.9% | Bandwidth=1 4.56812GB/s 116.0% | Parallelism=7 280 21.9% | Xfer=5 63.91314MB 49.9% | Confidence=45.7%
+│           │   └── [21.064-25.277] Size=1 68.39844GB 8.7% | Time=3 0.21134s/p 27.7% | Ops=1 1160 9.1% | Files=9 197 15.4% | Bandwidth=1 5.68283GB/s 144.4% | Parallelism=8 197 15.4% | Xfer=5 60.37931MB 47.2% | Confidence=40.0%
+│           │       ├── [21.064-23.170] Size=1 61.50781GB 7.8% | Time=3 0.20932s/p 27.4% | Ops=1 1037 8.1% | Files=9 188 14.7% | Bandwidth=1 5.72487GB/s 145.4% | Parallelism=9 188 14.7% | Xfer=5 60.73674MB 47.5% | Confidence=41.4%
+│           │       └── [23.170-25.277] Size=1 6.89062GB 0.9% | Time=1 0.07610s/p 10.0% | Ops=1 123 1.0% | Files=10 30 2.3% | Bandwidth=1 5.32834GB/s 135.4% | Parallelism=10 30 2.3% | Xfer=5 57.36585MB 44.8% | Confidence=41.4%
+│           └── [25.277-33.702] Size=1 6.78906GB 0.9% | Time=4 0.27303s/p 35.7% | Ops=1 110 0.9% | Files=10 11 0.9% | Bandwidth=1 6.38116GB/s 162.1% | Parallelism=10 11 0.9% | Xfer=5 63.20000MB 49.4% | Confidence=45.7%
+│               ├── [25.277-29.489] Size=1 6.78906GB 0.9% | Time=4 0.27303s/p 35.7% | Ops=1 110 0.9% | Files=10 11 0.9% | Bandwidth=1 6.38116GB/s 162.1% | Parallelism=10 11 0.9% | Xfer=5 63.20000MB 49.4% | Confidence=45.7%
+│               │   ├── [25.277-27.383] Size=1 6.78906GB 0.9% | Time=4 0.27303s/p 35.7% | Ops=1 110 0.9% | Files=10 11 0.9% | Bandwidth=1 6.38116GB/s 162.1% | Parallelism=10 11 0.9% | Xfer=5 63.20000MB 49.4% | Confidence=45.7%
+│               │   └── [27.383-29.489] Size= | Time= | Ops= | Files= | Bandwidth= | Parallelism= | Xfer= | Confidence=nan%
+│               └── [29.489-33.702] Size= | Time= | Ops= | Files= | Bandwidth= | Parallelism= | Xfer= | Confidence=nan%
+└── Timeline - Metadata
+    └── [0.000-33.702] Time=10 3.24979s/p 100.0% | Ops=10 47328 100.0% | Files=1 2562 100.0% | Parallelism=10 1280 100.0% | Confidence=77.5%
+        ├── [0.000-16.851] Time=10 3.24631s/p 99.9% | Ops=6 25822 54.6% | Files=1 2561 100.0% | Parallelism=10 1280 100.0% | Confidence=67.5%
+        │   ├── [0.000-8.426] Time=7 2.14731s/p 66.1% | Ops=3 14008 29.6% | Files=2 2282 89.1% | Parallelism=10 1280 100.0% | Confidence=55.0%
+        │   │   ├── [0.000-4.213] Time= | Ops= | Files= | Parallelism= | Confidence=nan%
+        │   │   └── [4.213-8.426] Time=7 2.14731s/p 66.1% | Ops=3 14008 29.6% | Files=2 2282 89.1% | Parallelism=10 1280 100.0% | Confidence=55.0%
+        │   │       ├── [4.213-6.319] Time=3 0.88204s/p 27.1% | Ops=3 12223 25.8% | Files=3 1817 70.9% | Parallelism=10 1280 100.0% | Confidence=47.5%
+        │   │       └── [6.319-8.426] Time=6 1.67309s/p 51.5% | Ops=1 1785 3.8% | Files=7 969 37.8% | Parallelism=4 968 75.6% | Confidence=45.0%
+        │   └── [8.426-16.851] Time=4 1.10072s/p 33.9% | Ops=3 11814 25.0% | Files=6 1277 49.8% | Parallelism=10 1278 99.8% | Confidence=57.5%
+        │       ├── [8.426-12.638] Time=3 0.92271s/p 28.4% | Ops=2 5954 12.6% | Files=7 984 38.4% | Parallelism=9 1183 92.4% | Confidence=52.5%
+        │       │   ├── [8.426-10.532] Time=5 1.53781s/p 47.3% | Ops=1 1758 3.7% | Files=8 537 21.0% | Parallelism=1 610 47.7% | Confidence=37.5%
+        │       │   └── [10.532-12.638] Time=1 0.18144s/p 5.6% | Ops=1 4196 8.9% | Files=8 563 22.0% | Parallelism=2 846 66.1% | Confidence=30.0%
+        │       └── [12.638-16.851] Time=2 0.36308s/p 11.2% | Ops=2 5860 12.4% | Files=7 798 31.1% | Parallelism=3 868 67.8% | Confidence=35.0%
+        │           ├── [12.638-14.745] Time=2 0.46986s/p 14.5% | Ops=1 2864 6.1% | Files=8 523 20.4% | Parallelism=1 644 50.3% | Confidence=30.0%
+        │           └── [14.745-16.851] Time=1 0.02656s/p 0.8% | Ops=1 2996 6.3% | Files=9 391 15.3% | Parallelism=2 473 37.0% | Confidence=32.5%
+        └── [16.851-33.702] Time=1 0.00367s/p 0.1% | Ops=5 21506 45.4% | Files=6 1214 47.4% | Parallelism=9 1213 94.8% | Confidence=52.5%
+            ├── [16.851-25.277] Time=1 0.00367s/p 0.1% | Ops=5 20115 42.5% | Files=6 1205 47.0% | Parallelism=9 1204 94.1% | Confidence=52.5%
+            │   ├── [16.851-21.064] Time=1 0.00427s/p 0.1% | Ops=2 8991 19.0% | Files=7 787 30.7% | Parallelism=3 894 69.8% | Confidence=32.5%
+            │   │   ├── [16.851-18.957] Time=1 0.00585s/p 0.2% | Ops=1 3479 7.4% | Files=9 409 16.0% | Parallelism=1 577 45.1% | Confidence=30.0%
+            │   │   └── [18.957-21.064] Time=1 0.00057s/p 0.0% | Ops=2 5512 11.6% | Files=8 638 24.9% | Parallelism=1 766 59.8% | Confidence=30.0%
+            │   └── [21.064-25.277] Time=1 0.00065s/p 0.0% | Ops=3 11124 23.5% | Files=7 928 36.2% | Parallelism=4 927 72.4% | Confidence=37.5%
+            │       ├── [21.064-23.170] Time=1 0.00050s/p 0.0% | Ops=2 5614 11.9% | Files=8 704 27.5% | Parallelism=1 756 59.1% | Confidence=30.0%
+            │       └── [23.170-25.277] Time=1 0.00038s/p 0.0% | Ops=2 5510 11.6% | Files=8 564 22.0% | Parallelism=1 586 45.8% | Confidence=30.0%
+            └── [25.277-33.702] Time=1 0.00019s/p 0.0% | Ops=1 1391 2.9% | Files=10 187 7.3% | Parallelism=9 186 14.5% | Confidence=52.5%
+                ├── [25.277-29.489] Time=1 0.00015s/p 0.0% | Ops=1 831 1.8% | Files=10 147 5.7% | Parallelism=9 146 11.4% | Confidence=52.5%
+                │   ├── [25.277-27.383] Time=1 0.00012s/p 0.0% | Ops=1 431 0.9% | Files=10 147 5.7% | Parallelism=9 146 11.4% | Confidence=52.5%
+                │   └── [27.383-29.489] Time=1 0.00009s/p 0.0% | Ops=1 400 0.8% | Files=10 41 1.6% | Parallelism=10 40 3.1% | Confidence=55.0%
+                └── [29.489-33.702] Time=1 0.00036s/p 0.0% | Ops=1 560 1.2% | Files=10 41 1.6% | Parallelism=10 40 3.1% | Confidence=55.0%
+                    ├── [29.489-31.596] Time=1 0.00036s/p 0.0% | Ops=1 560 1.2% | Files=10 41 1.6% | Parallelism=10 40 3.1% | Confidence=55.0%
+                    └── [31.596-33.702] Time= | Ops= | Files= | Parallelism= | Confidence=nan%

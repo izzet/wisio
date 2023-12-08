@@ -1,0 +1,16 @@
+checkpoint: false
+cluster_config:
+  cluster_type: "local"
+  debug: false
+  n_workers: 8
+  memory: 0
+  local_dir: "/var/tmp/wisio/recorder_montage_pegasus_32"
+debug: true
+metrics:
+  - "time"
+trace_path: "/usr/workspace/iopp/wisio_logs/recorder_montage_pegasus_32/_parquet"
+view_types:
+  - "time_range"
+  - "proc_name"
+  - "file_name"
+working_dir: ".wisio/recorder_montage_pegasus_32"

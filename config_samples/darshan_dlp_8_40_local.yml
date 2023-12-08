@@ -1,0 +1,16 @@
+checkpoint: false
+cluster_config:
+  cluster_type: "local"
+  debug: false
+  n_workers: 8
+  memory: 0
+  local_dir: "/var/tmp/wisio-darshan-dlp"
+debug: true
+metrics:
+  - "time"
+trace_path: "/usr/workspace/iopp/dlio_paper_results/darshan_overhead_corona_8_40_combined/haridev_overhead_id1875427-1875427_11-7-66903-15281823531808078074_2.darshan"
+view_types:
+  # - "time_range"
+  - "proc_name"
+  # - "file_name"
+working_dir: ".wisio/darshan-dlp"

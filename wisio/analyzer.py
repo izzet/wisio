@@ -1,6 +1,5 @@
 import abc
 import dask.dataframe as dd
-import hashlib
 import itertools as it
 import logging
 import os
@@ -9,6 +8,7 @@ import re
 from typing import Callable, Dict, List, Union
 
 from .analysis import set_bound_columns, set_metric_deltas, set_metric_slope
+from .analysis_utils import set_file_dir, set_file_pattern, set_id, set_proc_name_parts
 from .analyzer_result import AnalysisResult
 from .bottlenecks import BottleneckDetector
 from .cluster_management import ClusterConfig, ClusterManager
@@ -33,6 +33,7 @@ from .types import (
     ViewResult,
     ViewType,
 )
+from .utils.dask_utils import flatten_column_names
 from .utils.file_utils import ensure_dir
 from .utils.logger import ElapsedTimeLogger, setup_logging
 
@@ -213,7 +214,7 @@ class Analyzer(abc.ABC):
             .reset_index() \
             .repartition(partition_size) \
             .persist()
-        hlm = self._flatten_column_names(hlm)
+        hlm = flatten_column_names(hlm)
         return hlm.rename(columns=HLM_COLS)
 
     def compute_main_view(
@@ -230,7 +231,7 @@ class Analyzer(abc.ABC):
             .sum(split_out=hlm.npartitions) \
             .persist()
         # Set hashed ids
-        main_view['id'] = main_view.index.map(self._set_id)
+        main_view['id'] = main_view.index.map(set_id)
         # Return main_view
         return main_view
 
@@ -424,11 +425,6 @@ class Analyzer(abc.ABC):
         return group_view
 
     @staticmethod
-    def _flatten_column_names(ddf: dd.DataFrame):
-        ddf.columns = ['_'.join(tup).rstrip('_') for tup in ddf.columns.values]
-        return ddf
-
-    @staticmethod
     def _get_agg_dict(view_columns: list, is_proc=False):
         if is_proc:
             agg_dict = {col: max if any(
@@ -489,42 +485,15 @@ class Analyzer(abc.ABC):
         # Return ddf
         return ddf
 
-    @staticmethod
-    def _set_file_dir(df: pd.DataFrame):
-        return df.assign(file_dir=df.index.get_level_values(COL_FILE_NAME).map(os.path.dirname))
-
-    @staticmethod
-    def _set_file_pattern(df: pd.DataFrame):
-        def _apply_regex(file_name: str):
-            return re.sub('[0-9]+', FILE_PATTERN_PLACEHOLDER, file_name)
-        return df.assign(file_pattern=df.index.get_level_values(COL_FILE_NAME).map(_apply_regex))
-
-    @staticmethod
-    def _set_id(ix: Union[tuple, str, int]):
-        ix_str = '_'.join(map(str, ix)) if isinstance(ix, tuple) else str(ix)
-        return int(hashlib.md5(ix_str.encode()).hexdigest(), 16)
-
     def _set_logical_columns(self, view: dd.DataFrame, view_types: List[ViewType]) -> dd.DataFrame:
         # Check if view types include `proc_name`
         if COL_PROC_NAME in view_types:
-            view = view.map_partitions(self._set_proc_name_parts)
+            view = view.map_partitions(set_proc_name_parts)
 
         # Check if view types include `file_name`
         if COL_FILE_NAME in view_types:
             view = view \
-                .map_partitions(self._set_file_dir) \
-                .map_partitions(self._set_file_pattern)
+                .map_partitions(set_file_dir) \
+                .map_partitions(set_file_pattern)
 
         return view
-
-    @staticmethod
-    def _set_proc_name_parts(df: pd.DataFrame):
-        return df \
-            .assign(
-                proc_name_parts=lambda df: df.index.get_level_values(COL_PROC_NAME).str.split(
-                    PROC_NAME_SEPARATOR),
-                app_name=lambda df: df.proc_name_parts.str[0].astype(str),
-                node_name=lambda df: df.proc_name_parts.str[1].astype(str),
-                rank=lambda df: df.proc_name_parts.str[2].astype(str),
-            ) \
-            .drop(columns=['proc_name_parts'])

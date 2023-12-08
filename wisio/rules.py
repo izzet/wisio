@@ -4,11 +4,12 @@ import inflect
 import jinja2
 import numpy as np
 import pandas as pd
-import textwrap
 from dask.delayed import Delayed
 from enum import Enum
 from scipy.cluster.hierarchy import linkage, fcluster
-from typing import Any, Dict, List, Tuple, Union
+from typing import Dict, List, Union
+
+from .analysis_utils import set_proc_name_parts
 from .bottlenecks import BOTTLENECK_ORDER
 from .constants import (
     ACC_PAT_SUFFIXES,
@@ -20,9 +21,7 @@ from .constants import (
     COL_PROC_NAME,
     COL_RANK,
     COL_TIME_RANGE,
-    DERIVED_MD_OPS,
     IO_TYPES,
-    VIEW_TYPES,
     XFER_SIZE_BINS,
     XFER_SIZE_BIN_LABELS,
     XFER_SIZE_BIN_NAMES,
@@ -37,9 +36,8 @@ from .types import (
     RuleResultReason,
     ViewKey,
 )
-from .utils.collection_utils import get_intervals, join_with_and
+from .utils.collection_utils import get_intervals
 from .utils.common_utils import convert_bytes_to_unit
-from .utils.dask_agg import unique
 
 
 HUMANIZED_VIEW_TYPES = dict(
@@ -63,6 +61,7 @@ class KnownCharacteristics(Enum):
     IO_SIZE = 'io_size'
     IO_TIME = 'io_time'
     NODE_COUNT = 'node_count'
+    PROC_COUNT = 'proc_count'
     READ_XFER_SIZE = 'read_xfer_size'
     WRITE_XFER_SIZE = 'write_xfer_size'
 
@@ -82,22 +81,22 @@ KNOWN_RULES = {
             RuleReason(
                 condition='(open_time > close_time) & (open_time > seek_time)',
                 message='''
-                    Overall {{ "%.2f" | format((metadata_time / time) * 100) }}% ({{ "%.2f" | format(metadata_time) }} seconds) of I/O time is spent on metadata access,
-                    specifically {{ "%.2f" | format((open_time / time) * 100) }}% ({{ "%.2f" | format(open_time) }} seconds) on the 'open' operation.
+Overall {{ "%.2f" | format((metadata_time / time) * 100) }}% ({{ "%.2f" | format(metadata_time) }} seconds) of I/O time is spent on metadata access, \
+specifically {{ "%.2f" | format((open_time / time) * 100) }}% ({{ "%.2f" | format(open_time) }} seconds) on the 'open' operation.
                 '''
             ),
             RuleReason(
                 condition='(close_time > open_time) & (close_time > seek_time)',
                 message='''
-                    Overall {{ "%.2f" | format((metadata_time / time) * 100) }}% ({{ "%.2f" | format(metadata_time) }} seconds) of I/O time is spent on metadata access,
-                    specifically {{ "%.2f" | format((open_time / time) * 100) }}% ({{ "%.2f" | format(open_time) }} seconds) on the 'close' operation.
+Overall {{ "%.2f" | format((metadata_time / time) * 100) }}% ({{ "%.2f" | format(metadata_time) }} seconds) of I/O time is spent on metadata access, \
+specifically {{ "%.2f" | format((open_time / time) * 100) }}% ({{ "%.2f" | format(open_time) }} seconds) on the 'close' operation.
                 '''
             ),
             RuleReason(
                 condition='(seek_time > open_time) & (seek_time > close_time)',
                 message='''
-                    Overall {{ "%.2f" | format((metadata_time / time) * 100) }}% ({{ "%.2f" | format(metadata_time) }} seconds) of I/O time is spent on metadata access,
-                    specifically {{ "%.2f" | format((open_time / time) * 100) }}% ({{ "%.2f" | format(open_time) }} seconds) on the 'seek' operation.
+Overall {{ "%.2f" | format((metadata_time / time) * 100) }}% ({{ "%.2f" | format(metadata_time) }} seconds) of I/O time is spent on metadata access, \
+specifically {{ "%.2f" | format((open_time / time) * 100) }}% ({{ "%.2f" | format(open_time) }} seconds) on the 'seek' operation.
                 '''
             ),
         ]
@@ -109,13 +108,13 @@ KNOWN_RULES = {
             RuleReason(
                 condition='(read_time / time) >= 0.75',
                 message='''
-                    'read' time is {{ "%.2f" | format((read_time / time) * 100) }}% ({{ "%.2f" | format(read_time) }} seconds) of I/O time.
+'read' time is {{ "%.2f" | format((read_time / time) * 100) }}% ({{ "%.2f" | format(read_time) }} seconds) of I/O time.
                 '''
             ),
             RuleReason(
                 condition='(read_size / count) < 262144',
                 message='''
-                    Average 'read's are {{ "%.2f" | format(read_size / count / 1024) }} KB, which is smaller than 256 KB
+Average 'read's are {{ "%.2f" | format(read_size / count / 1024) }} KB, which is smaller than 256 KB.
                 '''
             )
         ]
@@ -127,13 +126,13 @@ KNOWN_RULES = {
             RuleReason(
                 condition='(write_time / time) >= 0.75',
                 message='''
-                    'write' time is {{ "%.2f" | format((write_time / time) * 100) }}% ({{ "%.2f" | format(write_time) }} seconds) of I/O time.
+'write' time is {{ "%.2f" | format((write_time / time) * 100) }}% ({{ "%.2f" | format(write_time) }} seconds) of I/O time.
                 '''
             ),
             RuleReason(
                 condition='(write_size / count) < 262144',
                 message='''
-                    Average 'write's are {{ "%.2f" | format(write_size / count / 1024) }} KB, which is smaller than 256 KB
+Average 'write's are {{ "%.2f" | format(write_size / count / 1024) }} KB, which is smaller than 256 KB
                 '''
             )
         ]
@@ -177,6 +176,9 @@ class BottleneckRule(RuleHandler):
         tasks['details'] = details
         tasks['metric_boundary'] = metric_boundary
 
+        for i, reason in enumerate(self.rule.reasons):
+            tasks[f"reason{i}"] = bottlenecks.eval(reason.condition)
+
         return tasks
 
     def handle_task_results(
@@ -193,23 +195,29 @@ class BottleneckRule(RuleHandler):
         details = result['details']
         metric_boundary = result['metric_boundary']
 
+        reasoning = {}
+        reasoning_templates = {}
+        for i, reason in enumerate(self.rule.reasons):
+            reasoning[i] = result[f"reason{i}"].to_dict()
+            reasoning_templates[i] = jinja2.Template(reason.message)
+
         results = []
 
         if len(bottlenecks) == 0:
             return {}
 
-        similar_bottlenecks = self._group_similar_behavior(
-            bottlenecks=bottlenecks,
-            metric=metric,
-            view_type=view_type,
-        )
+        # similar_bottlenecks = self._group_similar_behavior(
+        #     bottlenecks=bottlenecks,
+        #     metric=metric,
+        #     view_type=view_type,
+        # )
 
-        for behavior, row in similar_bottlenecks.iterrows():
+        for ix, row in bottlenecks.iterrows():
 
             unioned_details = self._union_details(
                 details=details,
-                behavior=behavior,
-                indices=row[view_type],
+                behavior=1,
+                indices=[ix],
                 view_type=view_type,
             )
 
@@ -226,11 +234,18 @@ class BottleneckRule(RuleHandler):
             extra_data['proc_name'] = processes
             extra_data['time_range'] = times
 
+            reasons = []
+            for i, reason in enumerate(self.rule.reasons):
+                if reasoning[i][ix]:
+                    reasons.append(RuleResultReason(
+                        description=reasoning_templates[i].render(row).strip()
+                    ))
+
             result = RuleResult(
                 description=description,
                 detail_list=None,
                 extra_data=extra_data,
-                reasons=None,
+                reasons=reasons,
                 value=0,
                 value_fmt='',
             )
@@ -620,7 +635,7 @@ class CharacteristicProcessCount(CharacteristicRule):
     def __init__(self, rule_key: str) -> None:
         super().__init__(rule_key=rule_key)
         self.col = 'proc_name'
-        self.description = 'Process(es)'
+        self.description = 'Process(es)/Rank(s)'
         if rule_key is KnownCharacteristics.APP_COUNT.value:
             self.col = 'app_name'
             self.description = 'App(s)'
@@ -631,24 +646,30 @@ class CharacteristicProcessCount(CharacteristicRule):
     def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
         tasks = {}
 
-        tasks[f"{self.col}s"] = main_view \
-            .reset_index() \
-            .map_partitions(self.set_proc_name_parts) \
-            .groupby([self.col, COL_PROC_NAME]) \
-            .agg({
-                'count': sum,
-                'time': sum,
-                'read_size': sum,
-                'write_size': sum,
-            }) \
-            .groupby([self.col]) \
-            .agg({
-                'count': sum,
-                'time': max,
-                'read_size': sum,
-                'write_size': sum,
-            }) \
-            .sort_values('time', ascending=False)
+        if self.col == 'proc_name':
+            tasks[f"{self.col}s"] = main_view \
+                .map_partitions(lambda df: df.index.get_level_values(COL_PROC_NAME)) \
+                .nunique() \
+                .compute()
+        else:
+            tasks[f"{self.col}s"] = main_view \
+                .map_partitions(set_proc_name_parts) \
+                .reset_index() \
+                .groupby([self.col, COL_PROC_NAME]) \
+                .agg({
+                    'count': sum,
+                    'time': sum,
+                    'read_size': sum,
+                    'write_size': sum,
+                }) \
+                .groupby([self.col]) \
+                .agg({
+                    'count': sum,
+                    'time': max,
+                    'read_size': sum,
+                    'write_size': sum,
+                }) \
+                .sort_values('time', ascending=False)
 
         return tasks
 
@@ -657,6 +678,18 @@ class CharacteristicProcessCount(CharacteristicRule):
         result: Dict[str, Union[str, int, pd.DataFrame, pd.Series]],
         characteristics: Dict[str, RuleResult] = None,
     ) -> RuleResult:
+
+        if self.col == 'proc_name':
+            value = int(result[f"{self.col}s"])
+
+            return RuleResult(
+                description=self.description,
+                detail_list=None,
+                extra_data=None,
+                reasons=None,
+                value=value,
+                value_fmt=f"{value} {self.description.lower()}",
+            )
 
         max_io_time = characteristics[KnownCharacteristics.IO_TIME.value].value
         total_ops = characteristics[KnownCharacteristics.IO_COUNT.value].value
@@ -687,13 +720,6 @@ class CharacteristicProcessCount(CharacteristicRule):
             value=value,
             value_fmt=f"{value} {self.description.lower()}",
         )
-
-    @staticmethod
-    def set_proc_name_parts(df: pd.DataFrame):
-        proc_cols = ['app_name', 'node_name', 'proc_id_rank', 'thread_id']
-        df[proc_cols] = df[COL_PROC_NAME].fillna(
-            '###').str.split('#', expand=True)
-        return df
 
 
 class CharacteristicXferSizeRule(CharacteristicRule):

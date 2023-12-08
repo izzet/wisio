@@ -1,7 +1,7 @@
 import dask.dataframe as dd
 import numpy as np
 import pandas as pd
-from dask.dataframe import to_numeric, from_delayed
+from typing import Union
 from .constants import COL_PROC_NAME
 from .types import ViewType
 
@@ -62,7 +62,7 @@ IS_REVERSED = dict(
 )
 
 
-def set_bound_columns(ddf: dd.DataFrame, is_initial=False):
+def set_bound_columns(ddf: Union[dd.DataFrame, pd.DataFrame], is_initial=False):
     # Min(Peak IOPS, Peak I/O BW x I/O intensity) == higher the better
     # less than 25% of peak attainable performance -- reversed
     if not is_initial:
