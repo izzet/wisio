@@ -12,7 +12,7 @@ class ElapsedTimeLogger(object):
     def __exit__(self, exc_type, exc_val, exc_tb):
         timer_end = perf_counter()
         elapsed_time = timer_end - self.timer_start
-        logging.info(f"{self.message} ({elapsed_time})")
+        logging.info(f"{self.message} ({elapsed_time})", stacklevel=3)
 
 
 def setup_logging(filename: str, debug: bool):
