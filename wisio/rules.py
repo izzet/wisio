@@ -21,6 +21,7 @@ from .constants import (
     COL_PROC_NAME,
     COL_RANK,
     COL_TIME_RANGE,
+    HUMANIZED_VIEW_TYPES,
     IO_TYPES,
     XFER_SIZE_BINS,
     XFER_SIZE_BIN_LABELS,
@@ -40,16 +41,6 @@ from .utils.collection_utils import get_intervals
 from .utils.common_utils import convert_bytes_to_unit
 
 
-HUMANIZED_VIEW_TYPES = dict(
-    app_name='app',
-    file_dir='file directory',
-    file_name='file',
-    file_pattern='file pattern',
-    node_name='node',
-    proc_name='process',
-    rank='rank',
-    time_range='time range',
-)
 METADATA_ACCESS_RATIO_THRESHOLD = 0.5
 
 
@@ -103,10 +94,10 @@ specifically {{ "%.2f" | format((open_time / time) * 100) }}% ({{ "%.2f" | forma
     ),
     KnownRules.SMALL_READS.value: Rule(
         name='Small reads',
-        condition='time_threshold >= {threshold} & (read_time / time) >= 0.75 & (read_size / count) < 262144',
+        condition='time_threshold >= {threshold} & (read_time / time) > 0.5 & (read_size / count) < 262144',
         reasons=[
             RuleReason(
-                condition='(read_time / time) >= 0.75',
+                condition='(read_time / time) > 0.5',
                 message='''
 'read' time is {{ "%.2f" | format((read_time / time) * 100) }}% ({{ "%.2f" | format(read_time) }} seconds) of I/O time.
                 '''
@@ -121,10 +112,10 @@ Average 'read's are {{ "%.2f" | format(read_size / count / 1024) }} KB, which is
     ),
     KnownRules.SMALL_WRITES.value: Rule(
         name='Small writes',
-        condition='time_threshold >= {threshold} & (write_time / time) >= 0.75 & (write_size / count) < 262144',
+        condition='time_threshold >= {threshold} & (write_time / time) > 0.5 & (write_size / count) < 262144',
         reasons=[
             RuleReason(
-                condition='(write_time / time) >= 0.75',
+                condition='(write_time / time) > 0.5',
                 message='''
 'write' time is {{ "%.2f" | format((write_time / time) * 100) }}% ({{ "%.2f" | format(write_time) }} seconds) of I/O time.
                 '''
@@ -166,10 +157,13 @@ class BottleneckRule(RuleHandler):
 
         view_type = view_key[-1]
 
-        bottlenecks = bottleneck_result.bottlenecks.query(self.rule.condition.format(
-            threshold=threshold))
-        details = bottleneck_result.details.query(f"{view_type} in @indices",
-                                                  local_dict={'indices': bottlenecks.index})
+        # takes around 0.015 seconds
+        bottlenecks = bottleneck_result.bottlenecks \
+            .query(self.rule.condition.format(threshold=threshold))
+
+        # takes around 0.02 seconds
+        details = bottleneck_result.details \
+            .query(f"{view_type} in @indices", local_dict={'indices': bottlenecks.index})
 
         tasks = {}
         tasks['bottlenecks'] = bottlenecks
@@ -177,6 +171,7 @@ class BottleneckRule(RuleHandler):
         tasks['metric_boundary'] = metric_boundary
 
         for i, reason in enumerate(self.rule.reasons):
+            # takes around 0.005 seconds
             tasks[f"reason{i}"] = bottlenecks.eval(reason.condition)
 
         return tasks
@@ -188,7 +183,6 @@ class BottleneckRule(RuleHandler):
         result: Dict[str, Union[str, int, pd.DataFrame, pd.Series]],
         characteristics: Dict[str, RuleResult] = None,
     ) -> List[RuleResult]:
-
         view_type = view_key[-1]
 
         bottlenecks = result['bottlenecks']
@@ -291,12 +285,12 @@ class BottleneckRule(RuleHandler):
 
             time_intervals = get_intervals(values=times)
 
-            accessor = HUMANIZED_VIEW_TYPES['proc_name']
-            accessed = HUMANIZED_VIEW_TYPES['file_name']
+            accessor = HUMANIZED_VIEW_TYPES['proc_name'].lower()
+            accessed = HUMANIZED_VIEW_TYPES['file_name'].lower()
             if view_type in [COL_FILE_NAME, COL_FILE_DIR, COL_FILE_PATTERN]:
-                accessed = HUMANIZED_VIEW_TYPES[view_type]
+                accessed = HUMANIZED_VIEW_TYPES[view_type].lower()
             if view_type in [COL_APP_NAME, COL_NODE_NAME, COL_PROC_NAME, COL_RANK]:
-                accessor = HUMANIZED_VIEW_TYPES[view_type]
+                accessor = HUMANIZED_VIEW_TYPES[view_type].lower()
 
             description = (
                 f"{len(processes)} {self.pluralize.plural_noun(accessor, len(processes))} "

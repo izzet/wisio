@@ -74,6 +74,7 @@ Characteristics = Dict[str, RuleResult]
 
 RuleResultsPerView = Dict[ViewKey, List[RuleResult]]
 RuleResultsPerViewPerMetric = Dict[Metric, RuleResultsPerView]
+RuleResultsPerViewPerMetricPerRule = Dict[str, RuleResultsPerViewPerMetric]
 
 ViewResultsPerView = Dict[ViewKey, ViewResult]
 ViewResultsPerViewPerMetric = Dict[Metric, ViewResultsPerView]

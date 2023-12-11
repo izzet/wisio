@@ -20,7 +20,7 @@ from .types import (
     Characteristics,
     MainView,
     Metric,
-    RuleResultsPerViewPerMetric,
+    RuleResultsPerViewPerMetricPerRule,
     ViewKey,
     ViewResultsPerViewPerMetric,
     view_name,
@@ -31,13 +31,13 @@ class AnalyzerResultOutput(object):
 
     def __init__(
         self,
-        bottlenecks: RuleResultsPerViewPerMetric,
+        bottlenecks: RuleResultsPerViewPerMetricPerRule,
         characteristics: Characteristics,
     ) -> None:
         self.bottlenecks = bottlenecks
         self.characteristics = characteristics
 
-    def console(self):
+    def console(self, max_bottlenecks_per_view_type=3):
         char_table = Table(box=None, show_header=False)
 
         # Add columns to the table for the key and value
@@ -56,34 +56,47 @@ class AnalyzerResultOutput(object):
                 char_table.add_row(char.description, detail_tree)
 
         tree_dict = {}
-        for metric in self.bottlenecks:
-            for view_key in self.bottlenecks[metric]:
-                for rule_key in self.bottlenecks[metric][view_key]:
-                    if len(self.bottlenecks[metric][view_key][rule_key]) > 0:
-                        tree_dict[rule_key] = tree_dict[rule_key] if rule_key in tree_dict else {
-                        }
-                        tree_dict[rule_key][view_key] = tree_dict[rule_key][view_key] if rule_key in tree_dict[rule_key] else [
-                        ]
-                        for result in self.bottlenecks[metric][view_key][rule_key]:
-                            tree_dict[rule_key][view_key].append(result)
-                    # print(metric, view_key, rule_key)
+        for rule in self.bottlenecks:
+            tree_dict[rule] = {}
+            for metric in self.bottlenecks[rule]:
+                for view_key in self.bottlenecks[rule][metric]:
+                    tree_dict[rule][view_key] = tree_dict[rule].get(
+                        view_key, [])
+                    if len(self.bottlenecks[rule][metric][view_key]) == 0:
+                        continue
+                    for result in self.bottlenecks[rule][metric][view_key]:
+                        tree_dict[rule][view_key].append(result)
 
         bott_table = Table(box=None, show_header=False)
-        for rule_key in tree_dict:
-            rule_tree = Tree(rule_key)
-            for view_key in tree_dict[rule_key]:
-                view_tree = Tree(view_name(view_key, ' > '))
-                if len(tree_dict[rule_key][view_key]) > 0:
-                    for result in tree_dict[rule_key][view_key]:
-                        if result.reasons is None or len(result.reasons) == 0:
-                            view_tree.add(result.description)
-                        else:
-                            bott_tree = Tree(result.description)
-                            for reason in result.reasons:
-                                bott_tree.add(reason.description)
-                            view_tree.add(bott_tree)
-                    rule_tree.add(view_tree)
-            bott_table.add_row(rule_tree)
+        for rule in tree_dict:
+            rule_tree = Tree(rule)
+            total_count = 0
+            for view_key in tree_dict[rule]:
+                results = tree_dict[rule][view_key]
+                view_count = len(results)
+                total_count = total_count + view_count
+                view_tree = Tree(
+                    f"{view_name(view_key, ' > ')} ({view_count} bottlenecks)")
+                if view_count == 0:
+                    continue
+                for result in results:
+                    if result.reasons is None or len(result.reasons) == 0:
+                        view_tree.add(result.description)
+                    else:
+                        bott_tree = Tree(result.description)
+                        for reason in result.reasons:
+                            bott_tree.add(reason.description)
+                        view_tree.add(bott_tree)
+                    if (max_bottlenecks_per_view_type > 0 and
+                            len(view_tree.children) == max_bottlenecks_per_view_type and
+                            view_count > max_bottlenecks_per_view_type):
+                        view_tree.add(
+                            f"({view_count - max_bottlenecks_per_view_type} more)")
+                        break
+                rule_tree.add(view_tree)
+            if len(rule_tree.children) > 0:
+                rule_tree.label = f"{rule_tree.label} ({total_count} bottlenecks)"
+                bott_table.add_row(rule_tree)
 
         char_panel = Panel(char_table, title='I/O Characteristics')
         bott_panel = Panel(bott_table, title='I/O Bottlenecks')
@@ -524,7 +537,7 @@ class AnalysisResult(object):
 
     def __init__(
         self,
-        bottlenecks: RuleResultsPerViewPerMetric,
+        bottlenecks: RuleResultsPerViewPerMetricPerRule,
         characteristics: Characteristics,
         evaluated_views: BottlenecksPerViewPerMetric,
         main_view: MainView,

@@ -35,6 +35,17 @@ IO_TYPES = ['read', 'write', 'metadata']
 FILE_PATTERN_PLACEHOLDER = '[0-9]'
 PROC_NAME_SEPARATOR = '#'
 
+HUMANIZED_VIEW_TYPES = dict(
+    app_name='App',
+    file_dir='File Directory',
+    file_name='File',
+    file_pattern='File Pattern',
+    node_name='Node',
+    proc_name='Process',
+    rank='Rank',
+    time_range='Time Range',
+)
+
 XFER_SIZE_BINS = [
     -np.inf,
     4 * 1024.0,
