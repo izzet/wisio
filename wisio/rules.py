@@ -758,8 +758,12 @@ class CharacteristicXferSizeRule(CharacteristicRule):
             'xfer',
         )
 
-        min_xfer_size = int(result['min_xfer_size'])
-        max_xfer_size = int(result['max_xfer_size'])
+        min_xfer_size = 0
+        max_xfer_size = 0
+        if not np.isnan(result['min_xfer_size']):
+            min_xfer_size = int(result['min_xfer_size'])
+        if not np.isnan(result['max_xfer_size']):
+            max_xfer_size = int(result['max_xfer_size'])
 
         xfer_sizes = pd.DataFrame(result['xfer_sizes']) \
             .rename(columns={max_col: count_col})
