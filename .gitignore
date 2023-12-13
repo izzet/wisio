@@ -17,3 +17,4 @@ dependency/spack.lock
 .idea
 CMakeFiles
 CMakeCache.txt
+*.egg-info
