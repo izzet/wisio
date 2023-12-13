@@ -3,6 +3,7 @@ import yaml
 from dask.distributed import Client, LocalCluster
 from dask_jobqueue import LSFCluster
 from dataclasses import dataclass
+from time import sleep
 from typing import List, Literal
 from .utils.file_utils import ensure_dir
 
@@ -40,6 +41,7 @@ class ClusterManager(object):
         if self.config.cluster_type != 'local':
             self.cluster.scale(self.config.n_workers)
             logging.info(f"Scaling cluster to {self.config.n_workers} nodes")
+            self._wait_until_workers_alive()
 
     def shutdown(self):
         self.client.close()
@@ -74,6 +76,18 @@ class ClusterManager(object):
                 ),
                 use_stdin=self.config.use_stdin,
             )
+
+    def _wait_until_workers_alive(self, sleep_seconds=2):
+        current_n_workers = len(self.client.scheduler_info()['workers'])
+        while self.client.status == 'running' and current_n_workers < self.config.n_workers:
+            current_n_workers = len(self.client.scheduler_info()['workers'])
+            logging.debug(
+                f"Waiting for workers ({current_n_workers}/{self.config.n_workers})")
+            # Try to force cluster to boot workers
+            self.cluster._correct_state()
+            # Wait
+            sleep(sleep_seconds)
+        logging.debug('All workers alive')
 
 
 def load_cluster_config(config_path: str):
