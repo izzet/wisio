@@ -57,9 +57,6 @@ class BottleneckDetector(object):
         # Get view type
         view_type = view_key[-1]
 
-        # Create lower level view
-        low_level_view = view_result.view
-
         col = metric if IS_NORMALIZED[metric] else f"{metric}_pero"
 
         bottlenecks = view_result.group_view \
