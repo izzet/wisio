@@ -3,9 +3,8 @@ import dask.dataframe as dd
 import itertools as it
 import logging
 import os
-import pandas as pd
-import re
-from typing import Callable, Dict, List, Union
+from dask.distributed import wait
+from typing import Callable, Dict, List
 
 from .analysis import set_bound_columns, set_metric_deltas, set_metric_slope
 from .analysis_utils import set_file_dir, set_file_pattern, set_id, set_proc_name_parts
@@ -17,9 +16,13 @@ from .constants import (
     COL_FILE_NAME,
     COL_PROC_NAME,
     DERIVED_MD_OPS,
-    FILE_PATTERN_PLACEHOLDER,
+    EVENT_ATT_REASONS,
+    EVENT_COMP_HLM,
+    EVENT_COMP_MAIN_VIEW,
+    EVENT_COMP_METBD,
+    EVENT_COMP_PERS,
+    EVENT_DET_BOTT,
     LOGICAL_VIEW_TYPES,
-    PROC_NAME_SEPARATOR,
     VIEW_TYPES,
     AccessPattern,
     IOCategory,
@@ -33,9 +36,9 @@ from .types import (
     ViewResult,
     ViewType,
 )
-from .utils.dask_utils import flatten_column_names
+from .utils.dask_utils import EventLogger, flatten_column_names
 from .utils.file_utils import ensure_dir
-from .utils.logger import ElapsedTimeLogger, setup_logging
+from .utils.logger import setup_logging
 
 
 CHECKPOINT_MAIN_VIEW = '_main_view'
@@ -105,9 +108,11 @@ class Analyzer(abc.ABC):
         slope_threshold: int = 45,
         view_types: List[ViewType] = ['file_name', 'proc_name', 'time_range'],
     ):
+        # Compute original I/O record count
+        original_total_count = traces.index.count().persist()
 
         # Compute high-level metrics
-        with ElapsedTimeLogger(message='Compute high-level metrics'):
+        with EventLogger(key=EVENT_COMP_HLM, message='Compute high-level metrics'):
             hlm = self.load_view(
                 view_name=CHECKPOINT_HLM,
                 fallback=lambda: self.compute_high_level_metrics(
@@ -118,7 +123,7 @@ class Analyzer(abc.ABC):
             )
 
         # Compute main view
-        with ElapsedTimeLogger(message='Compute main view'):
+        with EventLogger(key=EVENT_COMP_MAIN_VIEW, message='Compute main view'):
             main_view = self.load_view(
                 view_name=CHECKPOINT_MAIN_VIEW,
                 fallback=lambda: self.compute_main_view(
@@ -129,14 +134,14 @@ class Analyzer(abc.ABC):
             )
 
         # Compute upper bounds
-        with ElapsedTimeLogger(message='Compute metric boundaries'):
+        with EventLogger(key=EVENT_COMP_METBD, message='Compute metric boundaries'):
             metric_boundaries = self.compute_metric_boundaries(
                 main_view=main_view,
                 metrics=metrics,
             )
 
         # Compute views
-        with ElapsedTimeLogger(message='Compute views'):
+        with EventLogger(key=EVENT_COMP_PERS, message='Compute perspectives'):
             view_results = self.compute_views(
                 main_view=main_view,
                 metrics=metrics,
@@ -144,9 +149,6 @@ class Analyzer(abc.ABC):
                 slope_threshold=slope_threshold,
                 view_types=view_types,
             )
-
-        # Compute views
-        with ElapsedTimeLogger(message='Compute logical views'):
             logical_view_results = self.compute_logical_views(
                 main_view=main_view,
                 metrics=metrics,
@@ -160,7 +162,7 @@ class Analyzer(abc.ABC):
 
         # Detect bottlenecks
         bottleneck_detector = BottleneckDetector()
-        with ElapsedTimeLogger(message='Evaluate I/O accesses'):
+        with EventLogger(key=EVENT_DET_BOTT, message='Detect I/O bottlenecks'):
             evaluated_views = bottleneck_detector.evaluate_views(
                 view_results=view_results,
                 metrics=metrics,
@@ -169,12 +171,10 @@ class Analyzer(abc.ABC):
 
         # Execute rules
         rule_engine = RuleEngine(rules=[])
-        with ElapsedTimeLogger(message='Detect I/O characteristics'):
+        with EventLogger(key=EVENT_ATT_REASONS, message='Attach reasons to I/O bottlenecks'):
             characteristics = rule_engine.process_characteristics(
                 main_view=main_view
             )
-
-        with ElapsedTimeLogger(message='Detect I/O bottlenecks'):
             bottlenecks = rule_engine.process_bottlenecks(
                 evaluated_views=evaluated_views,
                 characteristics=characteristics,
@@ -185,9 +185,11 @@ class Analyzer(abc.ABC):
         result = AnalysisResult(
             bottlenecks=bottlenecks,
             characteristics=characteristics,
+            debug=self.debug,
             evaluated_views=evaluated_views,
             main_view=main_view,
             metric_boundaries=metric_boundaries,
+            original_total_count=original_total_count.compute(),
             view_results=view_results,
         )
 
@@ -247,7 +249,8 @@ class Analyzer(abc.ABC):
                 metric_boundary = main_view \
                     .groupby(['proc_name']) \
                     .sum()['time'] \
-                    .max()
+                    .max() \
+                    .persist()
             elif metric == 'bw':
 
                 pass

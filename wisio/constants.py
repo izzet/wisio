@@ -81,3 +81,11 @@ XFER_SIZE_BIN_NAMES = [
     '64 MB',
     '>64 MB'
 ]
+
+EVENT_ATT_REASONS = 'attach_reasons'
+EVENT_COMP_HLM = 'compute_hlm'
+EVENT_COMP_MAIN_VIEW = 'compute_main_view'
+EVENT_COMP_METBD = 'compute_metric_boundaries'
+EVENT_COMP_PERS = 'compute_perspectives'
+EVENT_DET_BOTT = 'detect_bottlenecks'
+EVENT_READ_TRACES = 'read_traces'

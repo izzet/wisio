@@ -2,6 +2,7 @@ import math
 import matplotlib.pyplot as plt
 import numpy as np
 import venn
+from distributed import get_client
 from matplotlib import ticker
 from matplotlib.axes import Axes
 from matplotlib.lines import Line2D
@@ -10,10 +11,14 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.tree import Tree
 from typing import List, Set, Tuple
+
 from .analysis import DELTA_BINS
 from .constants import (
     COL_PROC_NAME,
     COL_TIME_RANGE,
+    EVENT_ATT_REASONS,
+    EVENT_COMP_PERS,
+    EVENT_DET_BOTT,
 )
 from .types import (
     BottlenecksPerViewPerMetric,
@@ -33,14 +38,22 @@ class AnalyzerResultOutput(object):
         self,
         bottlenecks: RuleResultsPerViewPerMetricPerRule,
         characteristics: Characteristics,
+        debug: bool,
+        evaluated_views: BottlenecksPerViewPerMetric,
+        main_view: MainView,
+        original_total_count: int,
+        view_results: ViewResultsPerViewPerMetric,
     ) -> None:
         self.bottlenecks = bottlenecks
         self.characteristics = characteristics
+        self.debug = debug
+        self.evaluated_views = evaluated_views
+        self.main_view = main_view
+        self.original_total_count = original_total_count
+        self.view_results = view_results
 
     def console(self, max_bottlenecks_per_view_type=3):
         char_table = Table(box=None, show_header=False)
-
-        # Add columns to the table for the key and value
         char_table.add_column(style="cyan")
         char_table.add_column()
 
@@ -68,16 +81,17 @@ class AnalyzerResultOutput(object):
                         tree_dict[rule][view_key].append(result)
 
         bott_table = Table(box=None, show_header=False)
+        bott_count = 0
         for rule in tree_dict:
             rule_tree = Tree(rule)
             total_count = 0
             for view_key in tree_dict[rule]:
                 results = tree_dict[rule][view_key]
-                view_count = len(results)
-                total_count = total_count + view_count
+                view_record_count = len(results)
+                total_count = total_count + view_record_count
                 view_tree = Tree(
-                    f"{view_name(view_key, ' > ')} ({view_count} bottlenecks)")
-                if view_count == 0:
+                    f"{view_name(view_key, ' > ')} ({view_record_count} bottlenecks)")
+                if view_record_count == 0:
                     continue
                 for result in results:
                     if result.reasons is None or len(result.reasons) == 0:
@@ -89,11 +103,12 @@ class AnalyzerResultOutput(object):
                         view_tree.add(bott_tree)
                     if (max_bottlenecks_per_view_type > 0 and
                             len(view_tree.children) == max_bottlenecks_per_view_type and
-                            view_count > max_bottlenecks_per_view_type):
+                            view_record_count > max_bottlenecks_per_view_type):
                         view_tree.add(
-                            f"({view_count - max_bottlenecks_per_view_type} more)")
+                            f"({view_record_count - max_bottlenecks_per_view_type} more)")
                         break
                 rule_tree.add(view_tree)
+            bott_count = bott_count + total_count
             if len(rule_tree.children) > 0:
                 rule_tree.label = f"{rule_tree.label} ({total_count} bottlenecks)"
                 bott_table.add_row(rule_tree)
@@ -101,8 +116,77 @@ class AnalyzerResultOutput(object):
         char_panel = Panel(char_table, title='I/O Characteristics')
         bott_panel = Panel(bott_table, title='I/O Bottlenecks')
 
-        # Print the table with Rich formatting
-        Console().print(char_panel, bott_panel)
+        if self.debug:
+            elapsed_times = {}
+            for (_, event) in get_client().get_events('elapsed_times'):
+                elapsed_times[event['key']] = event['elapsed_time']
+
+            debug_table = Table(box=None, show_header=False)
+            debug_table.add_column(style="cyan")
+            debug_table.add_column()
+
+            reduction_tree = Tree(f"raw - {self.original_total_count} (100%)")
+            view_count = 0
+            total_record_count = 0
+            for metric in self.view_results:
+                metric_tree = Tree(metric)
+                counts = []
+                for view_key, view_result in self.view_results[metric].items():
+                    view_count = view_count + 1
+                    view_record_count = len(view_result.view)
+                    view_record_per = view_record_count/self.original_total_count
+                    metric_tree.add(
+                        f"{view_name(view_key, ' > ')} - {view_record_count} ({view_record_per*100:.2f}%)")
+                    counts.append(view_record_count)
+                avg_count = int(np.average(counts))
+                max_count = int(np.max(counts))
+                min_count = int(np.min(counts))
+                sum_count = int(np.sum(counts))
+                total_record_count = total_record_count + sum_count
+                metric_tree.label = (
+                    f"{metric}"
+                    f" - avg. {avg_count} ({avg_count/self.original_total_count*100:.2f}%)"
+                    f" - max. {max_count} ({max_count/self.original_total_count*100:.2f}%)"
+                    f" - min. {min_count} ({min_count/self.original_total_count*100:.2f}%)"
+                    f" - sum. {sum_count} ({sum_count/self.original_total_count*100:.2f}%)"
+                )
+                reduction_tree.add(metric_tree)
+            debug_table.add_row('Data Reduction', reduction_tree)
+
+            bott_record_count = 0
+            for metric in self.evaluated_views:
+                for view_key in self.evaluated_views[metric]:
+                    bott_record_count = bott_record_count + \
+                        len(self.evaluated_views[metric][view_key].bottlenecks)
+
+            thruput_table = Table(box=None, show_header=False)
+            thruput_table.add_column()
+            thruput_table.add_column()
+            thruput_table.add_column()
+
+            thruput_table.add_row(
+                'Multi-perspective View',
+                f"{total_record_count/elapsed_times[EVENT_COMP_PERS]:.2f} records/sec",
+                f"{view_count/elapsed_times[EVENT_COMP_PERS]:.2f} perspectives/sec",
+            )
+            thruput_table.add_row(
+                'Bottleneck Detection',
+                f"{bott_record_count/elapsed_times[EVENT_DET_BOTT]:.2f} records/sec",
+                f"{bott_count/elapsed_times[EVENT_DET_BOTT]:.2f} bottlenecks/sec",
+            )
+            thruput_table.add_row(
+                'Rule Engine',
+                f"{(bott_record_count*len(self.bottlenecks))/(elapsed_times[EVENT_ATT_REASONS]):.2f} records/sec",
+                ''
+            )
+
+            debug_table.add_row('Throughputs', thruput_table)
+
+            debug_panel = Panel(debug_table, title='Debug')
+
+            Console().print(char_panel, bott_panel, debug_panel)
+        else:
+            Console().print(char_panel, bott_panel)
 
 
 class AnalysisResultPlots(object):
@@ -539,21 +623,30 @@ class AnalysisResult(object):
         self,
         bottlenecks: RuleResultsPerViewPerMetricPerRule,
         characteristics: Characteristics,
+        debug: bool,
         evaluated_views: BottlenecksPerViewPerMetric,
         main_view: MainView,
         metric_boundaries,
+        original_total_count: int,
         view_results: ViewResultsPerViewPerMetric,
     ):
         self.bottlenecks = bottlenecks
         self.characteristics = characteristics
+        self.debug = debug
         self.evaluated_views = evaluated_views
         self.main_view = main_view
         self.metric_boundaries = metric_boundaries
+        self.original_total_count = original_total_count
         self.view_results = view_results
 
         self.output = AnalyzerResultOutput(
             characteristics=characteristics,
             bottlenecks=bottlenecks,
+            debug=debug,
+            evaluated_views=evaluated_views,
+            main_view=main_view,
+            original_total_count=original_total_count,
+            view_results=view_results,
         )
 
         self.plots = AnalysisResultPlots(

@@ -3,20 +3,28 @@ from time import perf_counter
 
 
 class ElapsedTimeLogger(object):
-    def __init__(self, message: str, level=logging.INFO):
+
+    def __init__(self, message: str, level=logging.INFO, stacklevel=3):
         self.level = level
         self.message = message
+        self.stacklevel = stacklevel
 
     def __enter__(self):
-        self.timer_start = perf_counter()
+        self.start_time = perf_counter()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        timer_end = perf_counter()
-        elapsed_time = timer_end - self.timer_start
+        self.end_time = perf_counter()
+        self.elapsed_time = self.end_time - self.start_time
         if self.level is logging.DEBUG:
-            logging.debug(f"{self.message} ({elapsed_time})", stacklevel=3)
+            logging.debug(
+                msg=f"{self.message} ({self.elapsed_time})",
+                stacklevel=self.stacklevel,
+            )
         else:
-            logging.info(f"{self.message} ({elapsed_time})", stacklevel=3)
+            logging.info(
+                msg=f"{self.message} ({self.elapsed_time})",
+                stacklevel=self.stacklevel,
+            )
 
 
 def setup_logging(filename: str, debug: bool):

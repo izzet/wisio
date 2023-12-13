@@ -5,7 +5,7 @@ from typing import List
 from .cluster_management import ClusterConfig
 from .darshan import DarshanAnalyzer
 from .recorder import RecorderAnalyzer
-from .types import Metric, ViewType
+from .types import Metric, OutputType, ViewType
 
 
 @dataclass
@@ -16,6 +16,7 @@ class Config:
     cluster_config: ClusterConfig = None
     debug: bool = False
     metrics: List[Metric] = field(default_factory=list)
+    output_type: OutputType = 'console'
     view_types: List[ViewType] = field(default_factory=list)
     working_dir: str = '.wisio'
 
@@ -70,13 +71,12 @@ def handle_recorder(recorder_parser, args):
 
         config = _load_config(args.config)
 
-        print(config)
-
         analyzer = RecorderAnalyzer(
             checkpoint=config.checkpoint,
             checkpoint_dir=config.checkpoint_dir,
             cluster_config=config.cluster_config,
             debug=config.debug,
+            output_type=config.output_type,
             working_dir=config.working_dir,
         )
 
@@ -85,8 +85,6 @@ def handle_recorder(recorder_parser, args):
             metrics=config.metrics,
             view_types=config.view_types,
         )
-
-        print(len(result.main_view))
 
 
 def ask_questions():
