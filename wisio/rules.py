@@ -310,10 +310,11 @@ class BottleneckRule(RuleHandler):
 
         else:
 
+            accessor = HUMANIZED_VIEW_TYPES[view_type].lower()
             count = len(unioned_dict[view_type])
 
             description = (
-                f"{count} {self.pluralize.plural_noun(HUMANIZED_VIEW_TYPES[view_type], count)} "
+                f"{count} {self.pluralize.plural_noun(accessor, count)} "
                 f"{self.pluralize.plural_verb('has', count)} an I/O time of "
                 f"{value:.2f} seconds which is {value/metric_boundary*100:.2f}% of overall I/O time of the workload."
             )
