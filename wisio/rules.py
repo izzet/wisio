@@ -60,6 +60,9 @@ class KnownCharacteristics(Enum):
 class KnownRules(Enum):
     EXCESSIVE_METADATA_ACCESS = 'excessive_metadata_access'
     LOW_BANDWIDTH = 'low_bandwidth'
+    OPERATION_IMBALANCE = 'operation_imbalance'
+    RANDOM_OPERATIONS = 'random_operations'
+    SIZE_IMBALANCE = 'size_imbalance'
     SMALL_READS = 'small_reads'
     SMALL_WRITES = 'small_writes'
 
@@ -67,7 +70,7 @@ class KnownRules(Enum):
 KNOWN_RULES = {
     KnownRules.EXCESSIVE_METADATA_ACCESS.value: Rule(
         name='Excessive metadata access',
-        condition='time_threshold >= {threshold} & (metadata_time / time) >= 0.5',
+        condition='{metric}_threshold >= {threshold} & (metadata_time / time) >= 0.5',
         reasons=[
             RuleReason(
                 condition='(open_time > close_time) & (open_time > seek_time)',
@@ -92,9 +95,58 @@ specifically {{ "%.2f" | format((open_time / time) * 100) }}% ({{ "%.2f" | forma
             ),
         ]
     ),
+    KnownRules.OPERATION_IMBALANCE.value: Rule(
+        name='Operation imbalance',
+        condition='{metric}_threshold >= {threshold} & (abs(write_count - read_count) / count) > 0.1',
+        reasons=[
+            RuleReason(
+                condition='read_count > write_count',
+                message='''
+'read' operations are {{ "%.2f" | format((read_count / count) * 100) }}% ({{read_count}} operations) of total I/O operations.
+                '''
+            ),
+            RuleReason(
+                condition='write_count > read_count',
+                message='''
+'write' operations are {{ "%.2f" | format((write_count / count) * 100) }}% ({{write_count}} operations) of total I/O operations.
+                '''
+            ),
+        ]
+    ),
+    KnownRules.RANDOM_OPERATIONS.value: Rule(
+        name='Random operations',
+        condition='{metric}_threshold >= {threshold} & random_count / count > 0.5',
+        reasons=[
+            RuleReason(
+                condition='random_count / count > 0.5',
+                message='''
+Issued high number of random operations, specifically {{ "%.2f" | format((random_count / count) * 100) }}% \
+({{ random_count }} operations) of total I/O operations.
+                '''
+            ),
+        ]
+    ),
+    KnownRules.SIZE_IMBALANCE.value: Rule(
+        name='Size imbalance',
+        condition='{metric}_threshold >= {threshold} & size > 0 & (abs(write_size - read_size) / size) > 0.1',
+        reasons=[
+            RuleReason(
+                condition='read_size > write_size',
+                message='''
+'read' size is {{ "%.2f" | format((read_size / size) * 100) }}% ({{ "%.2f" | format(read_size / 1024 / 1024) }} MB) of total I/O size.
+                '''
+            ),
+            RuleReason(
+                condition='write_size > read_size',
+                message='''
+'write' size is {{ "%.2f" | format((write_size / size) * 100) }}% ({{ "%.2f" | format(write_size / 1024 / 1024) }} MB) of total I/O size.
+                '''
+            ),
+        ]
+    ),
     KnownRules.SMALL_READS.value: Rule(
         name='Small reads',
-        condition='time_threshold >= {threshold} & (read_time / time) > 0.5 & (read_size / count) < 262144',
+        condition='{metric}_threshold >= {threshold} & (read_time / time) > 0.5 & (read_size / count) < 262144',
         reasons=[
             RuleReason(
                 condition='(read_time / time) > 0.5',
@@ -112,7 +164,7 @@ Average 'read's are {{ "%.2f" | format(read_size / count / 1024) }} KB, which is
     ),
     KnownRules.SMALL_WRITES.value: Rule(
         name='Small writes',
-        condition='time_threshold >= {threshold} & (write_time / time) > 0.5 & (write_size / count) < 262144',
+        condition='{metric}_threshold >= {threshold} & (write_time / time) > 0.5 & (write_size / count) < 262144',
         reasons=[
             RuleReason(
                 condition='(write_time / time) > 0.5',
@@ -159,7 +211,7 @@ class BottleneckRule(RuleHandler):
 
         # takes around 0.015 seconds
         bottlenecks = bottleneck_result.bottlenecks \
-            .query(self.rule.condition.format(threshold=threshold))
+            .query(self.rule.condition.format(metric=metric, threshold=threshold))
 
         # takes around 0.02 seconds
         details = bottleneck_result.details \
