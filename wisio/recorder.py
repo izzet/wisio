@@ -7,7 +7,7 @@ from typing import List, Union
 from .analyzer import Analyzer
 from .cluster_management import ClusterConfig
 from .constants import IO_CATS
-from .types import AnalysisAccuracy, Metric, OutputType, ViewType
+from .types import AnalysisAccuracy, Metric, OutputType, RawStats, ViewType
 from .utils.logger import ElapsedTimeLogger
 
 
@@ -64,22 +64,34 @@ class RecorderAnalyzer(Analyzer):
     ):
         # Read traces
         with ElapsedTimeLogger(message='Read traces'):
-            traces = self.read_parquet_files(
+            traces, job_time = self.read_parquet_files(
                 trace_path=trace_path,
                 time_granularity=time_granularity,
             )
 
+        # Prepare raw stats
+        raw_stats = RawStats(
+            job_time=job_time.persist(),
+            total_count=traces.index.count().persist(),
+        )
+
         # Analyze traces
         return self.analyze_traces(
-            traces=traces,
-            metrics=metrics,
             accuracy=accuracy,
+            metrics=metrics,
+            raw_stats=raw_stats,
             slope_threshold=slope_threshold,
+            traces=traces,
             view_types=view_types,
         )
 
+    def compute_job_time(self) -> dd.core.Scalar:
+        return self.job_time
+
     def read_parquet_files(self, trace_path: str, time_granularity: int):
         traces = dd.read_parquet(f"{trace_path}/*.parquet")
+
+        job_time = traces['tend'].max() - traces['tstart'].min()
 
         traces['acc_pat'] = traces['acc_pat'].astype(np.uint8)
         traces['count'] = 1
@@ -97,7 +109,7 @@ class RecorderAnalyzer(Analyzer):
             .rename(columns=RENAMED_COLS) \
             .drop(columns=DROPPED_COLS, errors='ignore')
 
-        return traces
+        return traces, job_time
 
     @staticmethod
     def _compute_time_ranges(global_min_max: dict, time_granularity: int):

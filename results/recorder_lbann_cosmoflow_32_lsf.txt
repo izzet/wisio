@@ -1,0 +1,1290 @@
+╭─────────────────────────────────────────────────────────────── I/O Characteristics ───────────────────────────────────────────────────────────────╮
+│  I/O Time             134.06 seconds                                                                                                              │
+│                       ├── Read - 132.26 seconds (98.66%)                                                                                          │
+│                       ├── Write - 0.15 seconds (0.11%)                                                                                            │
+│                       └── Metadata - 1.83 seconds (1.36%)                                                                                         │
+│  I/O Ops              10,439,334 ops                                                                                                              │
+│                       ├── Read - 2,074,582 ops (19.87%)                                                                                           │
+│                       ├── Write - 37,144 ops (0.36%)                                                                                              │
+│                       └── Metadata - 8,327,608 ops (79.77%)                                                                                       │
+│  I/O Size             1455.46 GB                                                                                                                  │
+│                       ├── Read - 1455.46 GB (100.00%)                                                                                             │
+│                       └── Write - 0.00 GB (0.00%)                                                                                                 │
+│  Read Xfer            4 KB-4 MB - 292,416 ops                                                                                                     │
+│                       ├── <4 KB - 99,752 ops (34.11%)                                                                                             │
+│                       ├── 4-16 KB - 360 ops (0.12%)                                                                                               │
+│                       └── 1-4 MB - 192,304 ops (65.76%)                                                                                           │
+│  Write Xfer           4 KB-4 KB - 1,482 ops                                                                                                       │
+│                       └── <4 KB - 1,482 ops (100.00%)                                                                                             │
+│  Node(s)              1 node(s)                                                                                                                   │
+│                       └── localhost - 134.06 s (100.00%) - 1455.46/0.00 GB R/W (100.00/0.00%) - 10,439,334 ops (100.00%)                          │
+│  App(s)               1 app(s)                                                                                                                    │
+│                       └── app1 - 134.06 s (100.00%) - 1455.46/0.00 GB R/W (100.00/0.00%) - 10,439,334 ops (100.00%)                               │
+│  Process(es)/Rank(s)  652 process(es)/rank(s)                                                                                                     │
+│  Files                49521 files                                                                                                                 │
+│                       ├── Shared: 48878 files (98.70%)                                                                                            │
+│                       └── FPP: 643 files (1.30%)                                                                                                  │
+│  Access Pattern       100.00% Sequential - 0.00% Random                                                                                           │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────────────────────────────── I/O Bottlenecks ─────────────────────────────────────────────────────────────────╮
+│  small_reads (43 bottlenecks)                                                                                                                     │
+│  ├── proc_name > rank (41 bottlenecks)                                                                                                            │
+│  │   ├── 1 rank accesses 2082 files within 3097 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of the    │
+│  │   │   workload.                                                                                                                                │
+│  │   │   ├── 'read' time is 98.66% (132.26 seconds) of I/O time.                                                                                  │
+│  │   │   └── Average 'read's are 132.20 KB, which is smaller than 256 KB.                                                                         │
+│  │   ├── 1 rank accesses 1844 files within 2636 time periods and has an I/O time of 130.05 seconds which is 97.01% of overall I/O time of the     │
+│  │   │   workload.                                                                                                                                │
+│  │   │   ├── 'read' time is 98.82% (128.52 seconds) of I/O time.                                                                                  │
+│  │   │   └── Average 'read's are 133.11 KB, which is smaller than 256 KB.                                                                         │
+│  │   ├── 1 rank accesses 1845 files within 2643 time periods and has an I/O time of 124.63 seconds which is 92.97% of overall I/O time of the     │
+│  │   │   workload.                                                                                                                                │
+│  │   │   ├── 'read' time is 98.61% (122.90 seconds) of I/O time.                                                                                  │
+│  │   │   └── Average 'read's are 133.03 KB, which is smaller than 256 KB.                                                                         │
+│  │   └── (38 more)                                                                                                                                │
+│  ├── proc_name > node_name (1 bottlenecks)                                                                                                        │
+│  │   └── 1 node accesses 49521 files within 199055 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of     │
+│  │       the workload.                                                                                                                            │
+│  │       ├── 'read' time is 98.66% (132.26 seconds) of I/O time.                                                                                  │
+│  │       └── Average 'read's are 146.19 KB, which is smaller than 256 KB.                                                                         │
+│  └── proc_name > app_name (1 bottlenecks)                                                                                                         │
+│      └── 1 app accesses 49521 files within 199055 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of the  │
+│          workload.                                                                                                                                │
+│          ├── 'read' time is 98.66% (132.26 seconds) of I/O time.                                                                                  │
+│          └── Average 'read's are 146.19 KB, which is smaller than 256 KB.                                                                         │
+│  size_imbalance (466 bottlenecks)                                                                                                                 │
+│  ├── file_name > file_pattern (1 bottlenecks)                                                                                                     │
+│  │   └── 240 processes access 1 file pattern within 178532 time periods and have an I/O time of 133.99 seconds which is 99.95% of overall I/O     │
+│  │       time of the workload.                                                                                                                    │
+│  │       └── 'read' size is 100.00% (1490378.75 MB) of total I/O size.                                                                            │
+│  ├── file_name > file_dir (1 bottlenecks)                                                                                                         │
+│  │   └── 240 processes access 1 file directory within 178532 time periods and have an I/O time of 133.99 seconds which is 99.95% of overall I/O   │
+│  │       time of the workload.                                                                                                                    │
+│  │       └── 'read' size is 100.00% (1490378.75 MB) of total I/O size.                                                                            │
+│  ├── proc_name > rank (41 bottlenecks)                                                                                                            │
+│  │   ├── 1 rank accesses 2082 files within 3097 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of the    │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12420.58 MB) of total I/O size.                                                                              │
+│  │   ├── 1 rank accesses 1844 files within 2636 time periods and has an I/O time of 130.05 seconds which is 97.01% of overall I/O time of the     │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12420.58 MB) of total I/O size.                                                                              │
+│  │   ├── 1 rank accesses 1845 files within 2643 time periods and has an I/O time of 124.63 seconds which is 92.97% of overall I/O time of the     │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12420.58 MB) of total I/O size.                                                                              │
+│  │   └── (38 more)                                                                                                                                │
+│  ├── proc_name > node_name (1 bottlenecks)                                                                                                        │
+│  │   └── 1 node accesses 49521 files within 199055 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of     │
+│  │       the workload.                                                                                                                            │
+│  │       └── 'read' size is 100.00% (1490386.98 MB) of total I/O size.                                                                            │
+│  ├── proc_name > app_name (1 bottlenecks)                                                                                                         │
+│  │   └── 1 app accesses 49521 files within 199055 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of the  │
+│  │       workload.                                                                                                                                │
+│  │       └── 'read' size is 100.00% (1490386.98 MB) of total I/O size.                                                                            │
+│  ├── file_name > time_range > proc_name (30 bottlenecks)                                                                                          │
+│  │   ├── 1 process accesses 1337 files within 1341 time periods and has an I/O time of 88.31 seconds which is 65.88% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (10332.38 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1364 files within 1368 time periods and has an I/O time of 88.06 seconds which is 65.69% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (10679.94 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1292 files within 1303 time periods and has an I/O time of 87.62 seconds which is 65.36% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (10007.85 MB) of total I/O size.                                                                              │
+│  │   └── (27 more)                                                                                                                                │
+│  ├── time_range > file_name > proc_name (88 bottlenecks)                                                                                          │
+│  │   ├── 1 process accesses 1529 files within 1698 time periods and has an I/O time of 128.51 seconds which is 95.87% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12033.71 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1477 files within 1655 time periods and has an I/O time of 99.79 seconds which is 74.44% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (11646.43 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1471 files within 1605 time periods and has an I/O time of 99.23 seconds which is 74.02% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (11618.35 MB) of total I/O size.                                                                              │
+│  │   └── (85 more)                                                                                                                                │
+│  ├── file_name > proc_name (91 bottlenecks)                                                                                                       │
+│  │   ├── 1 process accesses 1550 files within 2069 time periods and has an I/O time of 133.80 seconds which is 99.81% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12404.49 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1552 files within 2268 time periods and has an I/O time of 104.20 seconds which is 77.73% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12419.59 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1552 files within 2266 time periods and has an I/O time of 104.17 seconds which is 77.71% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12419.59 MB) of total I/O size.                                                                              │
+│  │   └── (88 more)                                                                                                                                │
+│  ├── time_range > proc_name (92 bottlenecks)                                                                                                      │
+│  │   ├── 1 process accesses 1552 files within 1718 time periods and has an I/O time of 129.79 seconds which is 96.82% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12193.76 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1470 files within 1617 time periods and has an I/O time of 118.96 seconds which is 88.74% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (11529.30 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1535 files within 1713 time periods and has an I/O time of 102.78 seconds which is 76.67% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12086.56 MB) of total I/O size.                                                                              │
+│  │   └── (89 more)                                                                                                                                │
+│  └── proc_name (120 bottlenecks)                                                                                                                  │
+│      ├── 1 process accesses 1558 files within 2080 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of     │
+│      │   the workload.                                                                                                                            │
+│      │   └── 'read' size is 100.00% (12420.50 MB) of total I/O size.                                                                              │
+│      ├── 1 process accesses 1558 files within 1918 time periods and has an I/O time of 130.05 seconds which is 97.01% of overall I/O time of the  │
+│      │   workload.                                                                                                                                │
+│      │   └── 'read' size is 100.00% (12420.50 MB) of total I/O size.                                                                              │
+│      ├── 1 process accesses 1558 files within 2120 time periods and has an I/O time of 124.63 seconds which is 92.97% of overall I/O time of the  │
+│      │   workload.                                                                                                                                │
+│      │   └── 'read' size is 100.00% (12420.50 MB) of total I/O size.                                                                              │
+│      └── (117 more)                                                                                                                               │
+│  operation_imbalance (466 bottlenecks)                                                                                                            │
+│  ├── file_name > file_pattern (1 bottlenecks)                                                                                                     │
+│  │   └── 240 processes access 1 file pattern within 178532 time periods and have an I/O time of 133.99 seconds which is 99.95% of overall I/O     │
+│  │       time of the workload.                                                                                                                    │
+│  │       └── 'read' operations are 79.98% (2051520 operations) of total I/O operations.                                                           │
+│  ├── file_name > file_dir (1 bottlenecks)                                                                                                         │
+│  │   └── 240 processes access 1 file directory within 178532 time periods and have an I/O time of 133.99 seconds which is 99.95% of overall I/O   │
+│  │       time of the workload.                                                                                                                    │
+│  │       └── 'read' operations are 79.98% (2051520 operations) of total I/O operations.                                                           │
+│  ├── proc_name > rank (41 bottlenecks)                                                                                                            │
+│  │   ├── 1 rank accesses 2082 files within 3097 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of the    │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 22.81% (21945 operations) of total I/O operations.                                                             │
+│  │   ├── 1 rank accesses 1844 files within 2636 time periods and has an I/O time of 130.05 seconds which is 97.01% of overall I/O time of the     │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 22.97% (21947 operations) of total I/O operations.                                                             │
+│  │   ├── 1 rank accesses 1845 files within 2643 time periods and has an I/O time of 124.63 seconds which is 92.97% of overall I/O time of the     │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 22.96% (21947 operations) of total I/O operations.                                                             │
+│  │   └── (38 more)                                                                                                                                │
+│  ├── proc_name > node_name (1 bottlenecks)                                                                                                        │
+│  │   └── 1 node accesses 49521 files within 199055 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of     │
+│  │       the workload.                                                                                                                            │
+│  │       └── 'read' operations are 19.87% (2074582 operations) of total I/O operations.                                                           │
+│  ├── proc_name > app_name (1 bottlenecks)                                                                                                         │
+│  │   └── 1 app accesses 49521 files within 199055 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of the  │
+│  │       workload.                                                                                                                                │
+│  │       └── 'read' operations are 19.87% (2074582 operations) of total I/O operations.                                                           │
+│  ├── file_name > time_range > proc_name (30 bottlenecks)                                                                                          │
+│  │   ├── 1 process accesses 1337 files within 1341 time periods and has an I/O time of 88.31 seconds which is 65.88% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 84.36% (11555 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1364 files within 1368 time periods and has an I/O time of 88.06 seconds which is 65.69% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 84.44% (10799 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1292 files within 1303 time periods and has an I/O time of 87.62 seconds which is 65.36% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 84.46% (10188 operations) of total I/O operations.                                                             │
+│  │   └── (27 more)                                                                                                                                │
+│  ├── time_range > file_name > proc_name (88 bottlenecks)                                                                                          │
+│  │   ├── 1 process accesses 1529 files within 1698 time periods and has an I/O time of 128.51 seconds which is 95.87% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 74.51% (18933 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1477 files within 1655 time periods and has an I/O time of 99.79 seconds which is 74.44% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 84.05% (12483 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1471 files within 1605 time periods and has an I/O time of 99.23 seconds which is 74.02% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 84.13% (12290 operations) of total I/O operations.                                                             │
+│  │   └── (85 more)                                                                                                                                │
+│  ├── file_name > proc_name (91 bottlenecks)                                                                                                       │
+│  │   ├── 1 process accesses 1550 files within 2069 time periods and has an I/O time of 133.80 seconds which is 99.81% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 73.68% (21700 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1552 files within 2268 time periods and has an I/O time of 104.20 seconds which is 77.73% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 83.33% (15520 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1552 files within 2266 time periods and has an I/O time of 104.17 seconds which is 77.71% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 83.33% (15520 operations) of total I/O operations.                                                             │
+│  │   └── (88 more)                                                                                                                                │
+│  ├── time_range > proc_name (92 bottlenecks)                                                                                                      │
+│  │   ├── 1 process accesses 1552 files within 1718 time periods and has an I/O time of 129.79 seconds which is 96.82% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 56.39% (19204 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1470 files within 1617 time periods and has an I/O time of 118.96 seconds which is 88.74% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 54.43% (16981 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1535 files within 1713 time periods and has an I/O time of 102.78 seconds which is 76.67% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 60.03% (13025 operations) of total I/O operations.                                                             │
+│  │   └── (89 more)                                                                                                                                │
+│  └── proc_name (120 bottlenecks)                                                                                                                  │
+│      ├── 1 process accesses 1558 files within 2080 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of     │
+│      │   the workload.                                                                                                                            │
+│      │   └── 'read' operations are 54.93% (21729 operations) of total I/O operations.                                                             │
+│      ├── 1 process accesses 1558 files within 1918 time periods and has an I/O time of 130.05 seconds which is 97.01% of overall I/O time of the  │
+│      │   workload.                                                                                                                                │
+│      │   └── 'read' operations are 50.53% (21729 operations) of total I/O operations.                                                             │
+│      ├── 1 process accesses 1558 files within 2120 time periods and has an I/O time of 124.63 seconds which is 92.97% of overall I/O time of the  │
+│      │   workload.                                                                                                                                │
+│      │   └── 'read' operations are 49.15% (21729 operations) of total I/O operations.                                                             │
+│      └── (117 more)                                                                                                                               │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭────────────────────────────────────────────────────────────────────── Debug ──────────────────────────────────────────────────────────────────────╮
+│  Data Reduction  raw - 10439334 (100%)                                                                                                            │
+│                  └── time - avg. 316137 (3.03%) - max. 965184 (9.25%) - min. 71955 (0.69%) - sum. 6322741 (60.57%)                                │
+│                      ├── time_range - 507375 (4.86%)                                                                                              │
+│                      ├── proc_name - 690079 (6.61%)                                                                                               │
+│                      ├── file_name - 280629 (2.69%)                                                                                               │
+│                      ├── time_range > proc_name - 336194 (3.22%)                                                                                  │
+│                      ├── time_range > file_name - 194269 (1.86%)                                                                                  │
+│                      ├── proc_name > time_range - 223722 (2.14%)                                                                                  │
+│                      ├── proc_name > file_name - 270498 (2.59%)                                                                                   │
+│                      ├── file_name > time_range - 131448 (1.26%)                                                                                  │
+│                      ├── file_name > proc_name - 210312 (2.01%)                                                                                   │
+│                      ├── time_range > proc_name > file_name - 140896 (1.35%)                                                                      │
+│                      ├── time_range > file_name > proc_name - 142778 (1.37%)                                                                      │
+│                      ├── proc_name > time_range > file_name - 81425 (0.78%)                                                                       │
+│                      ├── proc_name > file_name > time_range - 125969 (1.21%)                                                                      │
+│                      ├── file_name > time_range > proc_name - 71955 (0.69%)                                                                       │
+│                      ├── file_name > proc_name > time_range - 89514 (0.86%)                                                                       │
+│                      ├── proc_name > app_name - 965184 (9.25%)                                                                                    │
+│                      ├── proc_name > node_name - 965184 (9.25%)                                                                                   │
+│                      ├── proc_name > rank - 331106 (3.17%)                                                                                        │
+│                      ├── file_name > file_dir - 281682 (2.70%)                                                                                    │
+│                      └── file_name > file_pattern - 282522 (2.71%)                                                                                │
+│  Counts                         Count  Processed Record Count                                                                                     │
+│                   Perspectives  20     6322741                                                                                                    │
+│                   Bottlenecks   975    820336                                                                                                     │
+│                   Rules         6      4922016                                                                                                    │
+│  Throughputs                    Record Throughput      Throughput                                                                                 │
+│                   Perspectives  64452.19 records/sec   0.20 perspectives/sec                                                                      │
+│                   Bottlenecks   122646.70 records/sec  145.77 bottlenecks/sec                                                                     │
+│                   Rules         50410.00 records/sec                                                                                              │
+│  Severities      total - 975 bottlenecks (100%)                                                                                                   │
+│                  ├── critical - 31 bottlenecks (3.18%)                                                                                            │
+│                  ├── high - 10 bottlenecks (1.03%)                                                                                                │
+│                  ├── very high - 8 bottlenecks (0.82%)                                                                                            │
+│                  └── rest - 926 bottlenecks (94.97%)                                                                                              │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─────────────────────────────────────────────────────────────── I/O Characteristics ───────────────────────────────────────────────────────────────╮
+│  I/O Time             134.06 seconds                                                                                                              │
+│                       ├── Read - 132.26 seconds (98.66%)                                                                                          │
+│                       ├── Write - 0.15 seconds (0.11%)                                                                                            │
+│                       └── Metadata - 1.83 seconds (1.36%)                                                                                         │
+│  I/O Ops              10,439,334 ops                                                                                                              │
+│                       ├── Read - 2,074,582 ops (19.87%)                                                                                           │
+│                       ├── Write - 37,144 ops (0.36%)                                                                                              │
+│                       └── Metadata - 8,327,608 ops (79.77%)                                                                                       │
+│  I/O Size             1455.46 GB                                                                                                                  │
+│                       ├── Read - 1455.46 GB (100.00%)                                                                                             │
+│                       └── Write - 0.00 GB (0.00%)                                                                                                 │
+│  Read Xfer            4 KB-4 MB - 292,416 ops                                                                                                     │
+│                       ├── <4 KB - 99,752 ops (34.11%)                                                                                             │
+│                       ├── 4-16 KB - 360 ops (0.12%)                                                                                               │
+│                       └── 1-4 MB - 192,304 ops (65.76%)                                                                                           │
+│  Write Xfer           4 KB-4 KB - 1,482 ops                                                                                                       │
+│                       └── <4 KB - 1,482 ops (100.00%)                                                                                             │
+│  Node(s)              1 node(s)                                                                                                                   │
+│                       └── localhost - 134.06 s (100.00%) - 1455.46/0.00 GB R/W (100.00/0.00%) - 10,439,334 ops (100.00%)                          │
+│  App(s)               1 app(s)                                                                                                                    │
+│                       └── app1 - 134.06 s (100.00%) - 1455.46/0.00 GB R/W (100.00/0.00%) - 10,439,334 ops (100.00%)                               │
+│  Process(es)/Rank(s)  652 process(es)/rank(s)                                                                                                     │
+│  Files                49521 files                                                                                                                 │
+│                       ├── Shared: 48878 files (98.70%)                                                                                            │
+│                       └── FPP: 643 files (1.30%)                                                                                                  │
+│  Access Pattern       100.00% Sequential - 0.00% Random                                                                                           │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────────────────────────────── I/O Bottlenecks ─────────────────────────────────────────────────────────────────╮
+│  small_reads (43 bottlenecks)                                                                                                                     │
+│  ├── proc_name > rank (41 bottlenecks)                                                                                                            │
+│  │   ├── 1 rank accesses 2082 files within 3097 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of the    │
+│  │   │   workload.                                                                                                                                │
+│  │   │   ├── 'read' time is 98.66% (132.26 seconds) of I/O time.                                                                                  │
+│  │   │   └── Average 'read's are 132.20 KB, which is smaller than 256 KB.                                                                         │
+│  │   ├── 1 rank accesses 1844 files within 2636 time periods and has an I/O time of 130.05 seconds which is 97.01% of overall I/O time of the     │
+│  │   │   workload.                                                                                                                                │
+│  │   │   ├── 'read' time is 98.82% (128.52 seconds) of I/O time.                                                                                  │
+│  │   │   └── Average 'read's are 133.11 KB, which is smaller than 256 KB.                                                                         │
+│  │   ├── 1 rank accesses 1845 files within 2643 time periods and has an I/O time of 124.63 seconds which is 92.97% of overall I/O time of the     │
+│  │   │   workload.                                                                                                                                │
+│  │   │   ├── 'read' time is 98.61% (122.90 seconds) of I/O time.                                                                                  │
+│  │   │   └── Average 'read's are 133.03 KB, which is smaller than 256 KB.                                                                         │
+│  │   └── (38 more)                                                                                                                                │
+│  ├── proc_name > node_name (1 bottlenecks)                                                                                                        │
+│  │   └── 1 node accesses 49521 files within 199055 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of     │
+│  │       the workload.                                                                                                                            │
+│  │       ├── 'read' time is 98.66% (132.26 seconds) of I/O time.                                                                                  │
+│  │       └── Average 'read's are 146.19 KB, which is smaller than 256 KB.                                                                         │
+│  └── proc_name > app_name (1 bottlenecks)                                                                                                         │
+│      └── 1 app accesses 49521 files within 199055 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of the  │
+│          workload.                                                                                                                                │
+│          ├── 'read' time is 98.66% (132.26 seconds) of I/O time.                                                                                  │
+│          └── Average 'read's are 146.19 KB, which is smaller than 256 KB.                                                                         │
+│  size_imbalance (466 bottlenecks)                                                                                                                 │
+│  ├── file_name > file_pattern (1 bottlenecks)                                                                                                     │
+│  │   └── 240 processes access 1 file pattern within 178532 time periods and have an I/O time of 133.99 seconds which is 99.95% of overall I/O     │
+│  │       time of the workload.                                                                                                                    │
+│  │       └── 'read' size is 100.00% (1490378.75 MB) of total I/O size.                                                                            │
+│  ├── file_name > file_dir (1 bottlenecks)                                                                                                         │
+│  │   └── 240 processes access 1 file directory within 178532 time periods and have an I/O time of 133.99 seconds which is 99.95% of overall I/O   │
+│  │       time of the workload.                                                                                                                    │
+│  │       └── 'read' size is 100.00% (1490378.75 MB) of total I/O size.                                                                            │
+│  ├── proc_name > rank (41 bottlenecks)                                                                                                            │
+│  │   ├── 1 rank accesses 2082 files within 3097 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of the    │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12420.58 MB) of total I/O size.                                                                              │
+│  │   ├── 1 rank accesses 1844 files within 2636 time periods and has an I/O time of 130.05 seconds which is 97.01% of overall I/O time of the     │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12420.58 MB) of total I/O size.                                                                              │
+│  │   ├── 1 rank accesses 1845 files within 2643 time periods and has an I/O time of 124.63 seconds which is 92.97% of overall I/O time of the     │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12420.58 MB) of total I/O size.                                                                              │
+│  │   └── (38 more)                                                                                                                                │
+│  ├── proc_name > node_name (1 bottlenecks)                                                                                                        │
+│  │   └── 1 node accesses 49521 files within 199055 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of     │
+│  │       the workload.                                                                                                                            │
+│  │       └── 'read' size is 100.00% (1490386.98 MB) of total I/O size.                                                                            │
+│  ├── proc_name > app_name (1 bottlenecks)                                                                                                         │
+│  │   └── 1 app accesses 49521 files within 199055 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of the  │
+│  │       workload.                                                                                                                                │
+│  │       └── 'read' size is 100.00% (1490386.98 MB) of total I/O size.                                                                            │
+│  ├── file_name > time_range > proc_name (30 bottlenecks)                                                                                          │
+│  │   ├── 1 process accesses 1337 files within 1341 time periods and has an I/O time of 88.31 seconds which is 65.88% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (10332.38 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1364 files within 1368 time periods and has an I/O time of 88.06 seconds which is 65.69% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (10679.94 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1292 files within 1303 time periods and has an I/O time of 87.62 seconds which is 65.36% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (10007.85 MB) of total I/O size.                                                                              │
+│  │   └── (27 more)                                                                                                                                │
+│  ├── time_range > file_name > proc_name (88 bottlenecks)                                                                                          │
+│  │   ├── 1 process accesses 1529 files within 1698 time periods and has an I/O time of 128.51 seconds which is 95.87% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12033.71 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1477 files within 1655 time periods and has an I/O time of 99.79 seconds which is 74.44% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (11646.43 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1471 files within 1605 time periods and has an I/O time of 99.23 seconds which is 74.02% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (11618.35 MB) of total I/O size.                                                                              │
+│  │   └── (85 more)                                                                                                                                │
+│  ├── file_name > proc_name (91 bottlenecks)                                                                                                       │
+│  │   ├── 1 process accesses 1550 files within 2069 time periods and has an I/O time of 133.80 seconds which is 99.81% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12404.49 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1552 files within 2268 time periods and has an I/O time of 104.20 seconds which is 77.73% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12419.59 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1552 files within 2266 time periods and has an I/O time of 104.17 seconds which is 77.71% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12419.59 MB) of total I/O size.                                                                              │
+│  │   └── (88 more)                                                                                                                                │
+│  ├── time_range > proc_name (92 bottlenecks)                                                                                                      │
+│  │   ├── 1 process accesses 1552 files within 1718 time periods and has an I/O time of 129.79 seconds which is 96.82% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12193.76 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1470 files within 1617 time periods and has an I/O time of 118.96 seconds which is 88.74% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (11529.30 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1535 files within 1713 time periods and has an I/O time of 102.78 seconds which is 76.67% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12086.56 MB) of total I/O size.                                                                              │
+│  │   └── (89 more)                                                                                                                                │
+│  └── proc_name (120 bottlenecks)                                                                                                                  │
+│      ├── 1 process accesses 1558 files within 2080 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of     │
+│      │   the workload.                                                                                                                            │
+│      │   └── 'read' size is 100.00% (12420.50 MB) of total I/O size.                                                                              │
+│      ├── 1 process accesses 1558 files within 1918 time periods and has an I/O time of 130.05 seconds which is 97.01% of overall I/O time of the  │
+│      │   workload.                                                                                                                                │
+│      │   └── 'read' size is 100.00% (12420.50 MB) of total I/O size.                                                                              │
+│      ├── 1 process accesses 1558 files within 2120 time periods and has an I/O time of 124.63 seconds which is 92.97% of overall I/O time of the  │
+│      │   workload.                                                                                                                                │
+│      │   └── 'read' size is 100.00% (12420.50 MB) of total I/O size.                                                                              │
+│      └── (117 more)                                                                                                                               │
+│  operation_imbalance (466 bottlenecks)                                                                                                            │
+│  ├── file_name > file_pattern (1 bottlenecks)                                                                                                     │
+│  │   └── 240 processes access 1 file pattern within 178532 time periods and have an I/O time of 133.99 seconds which is 99.95% of overall I/O     │
+│  │       time of the workload.                                                                                                                    │
+│  │       └── 'read' operations are 79.98% (2051520 operations) of total I/O operations.                                                           │
+│  ├── file_name > file_dir (1 bottlenecks)                                                                                                         │
+│  │   └── 240 processes access 1 file directory within 178532 time periods and have an I/O time of 133.99 seconds which is 99.95% of overall I/O   │
+│  │       time of the workload.                                                                                                                    │
+│  │       └── 'read' operations are 79.98% (2051520 operations) of total I/O operations.                                                           │
+│  ├── proc_name > rank (41 bottlenecks)                                                                                                            │
+│  │   ├── 1 rank accesses 2082 files within 3097 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of the    │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 22.81% (21945 operations) of total I/O operations.                                                             │
+│  │   ├── 1 rank accesses 1844 files within 2636 time periods and has an I/O time of 130.05 seconds which is 97.01% of overall I/O time of the     │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 22.97% (21947 operations) of total I/O operations.                                                             │
+│  │   ├── 1 rank accesses 1845 files within 2643 time periods and has an I/O time of 124.63 seconds which is 92.97% of overall I/O time of the     │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 22.96% (21947 operations) of total I/O operations.                                                             │
+│  │   └── (38 more)                                                                                                                                │
+│  ├── proc_name > node_name (1 bottlenecks)                                                                                                        │
+│  │   └── 1 node accesses 49521 files within 199055 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of     │
+│  │       the workload.                                                                                                                            │
+│  │       └── 'read' operations are 19.87% (2074582 operations) of total I/O operations.                                                           │
+│  ├── proc_name > app_name (1 bottlenecks)                                                                                                         │
+│  │   └── 1 app accesses 49521 files within 199055 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of the  │
+│  │       workload.                                                                                                                                │
+│  │       └── 'read' operations are 19.87% (2074582 operations) of total I/O operations.                                                           │
+│  ├── file_name > time_range > proc_name (30 bottlenecks)                                                                                          │
+│  │   ├── 1 process accesses 1337 files within 1341 time periods and has an I/O time of 88.31 seconds which is 65.88% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 84.36% (11555 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1364 files within 1368 time periods and has an I/O time of 88.06 seconds which is 65.69% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 84.44% (10799 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1292 files within 1303 time periods and has an I/O time of 87.62 seconds which is 65.36% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 84.46% (10188 operations) of total I/O operations.                                                             │
+│  │   └── (27 more)                                                                                                                                │
+│  ├── time_range > file_name > proc_name (88 bottlenecks)                                                                                          │
+│  │   ├── 1 process accesses 1529 files within 1698 time periods and has an I/O time of 128.51 seconds which is 95.87% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 74.51% (18933 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1477 files within 1655 time periods and has an I/O time of 99.79 seconds which is 74.44% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 84.05% (12483 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1471 files within 1605 time periods and has an I/O time of 99.23 seconds which is 74.02% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 84.13% (12290 operations) of total I/O operations.                                                             │
+│  │   └── (85 more)                                                                                                                                │
+│  ├── file_name > proc_name (91 bottlenecks)                                                                                                       │
+│  │   ├── 1 process accesses 1550 files within 2069 time periods and has an I/O time of 133.80 seconds which is 99.81% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 73.68% (21700 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1552 files within 2268 time periods and has an I/O time of 104.20 seconds which is 77.73% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 83.33% (15520 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1552 files within 2266 time periods and has an I/O time of 104.17 seconds which is 77.71% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 83.33% (15520 operations) of total I/O operations.                                                             │
+│  │   └── (88 more)                                                                                                                                │
+│  ├── time_range > proc_name (92 bottlenecks)                                                                                                      │
+│  │   ├── 1 process accesses 1552 files within 1718 time periods and has an I/O time of 129.79 seconds which is 96.82% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 56.39% (19204 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1470 files within 1617 time periods and has an I/O time of 118.96 seconds which is 88.74% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 54.43% (16981 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1535 files within 1713 time periods and has an I/O time of 102.78 seconds which is 76.67% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 60.03% (13025 operations) of total I/O operations.                                                             │
+│  │   └── (89 more)                                                                                                                                │
+│  └── proc_name (120 bottlenecks)                                                                                                                  │
+│      ├── 1 process accesses 1558 files within 2080 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of     │
+│      │   the workload.                                                                                                                            │
+│      │   └── 'read' operations are 54.93% (21729 operations) of total I/O operations.                                                             │
+│      ├── 1 process accesses 1558 files within 1918 time periods and has an I/O time of 130.05 seconds which is 97.01% of overall I/O time of the  │
+│      │   workload.                                                                                                                                │
+│      │   └── 'read' operations are 50.53% (21729 operations) of total I/O operations.                                                             │
+│      ├── 1 process accesses 1558 files within 2120 time periods and has an I/O time of 124.63 seconds which is 92.97% of overall I/O time of the  │
+│      │   workload.                                                                                                                                │
+│      │   └── 'read' operations are 49.15% (21729 operations) of total I/O operations.                                                             │
+│      └── (117 more)                                                                                                                               │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭────────────────────────────────────────────────────────────────────── Debug ──────────────────────────────────────────────────────────────────────╮
+│  Data Reduction  raw - 10439334 (100%)                                                                                                            │
+│                  └── time - avg. 316137 (3.03%) - max. 965184 (9.25%) - min. 71955 (0.69%) - sum. 6322741 (60.57%)                                │
+│                      ├── time_range - 507375 (4.86%)                                                                                              │
+│                      ├── proc_name - 690079 (6.61%)                                                                                               │
+│                      ├── file_name - 280629 (2.69%)                                                                                               │
+│                      ├── time_range > proc_name - 336194 (3.22%)                                                                                  │
+│                      ├── time_range > file_name - 194269 (1.86%)                                                                                  │
+│                      ├── proc_name > time_range - 223722 (2.14%)                                                                                  │
+│                      ├── proc_name > file_name - 270498 (2.59%)                                                                                   │
+│                      ├── file_name > time_range - 131448 (1.26%)                                                                                  │
+│                      ├── file_name > proc_name - 210312 (2.01%)                                                                                   │
+│                      ├── time_range > proc_name > file_name - 140896 (1.35%)                                                                      │
+│                      ├── time_range > file_name > proc_name - 142778 (1.37%)                                                                      │
+│                      ├── proc_name > time_range > file_name - 81425 (0.78%)                                                                       │
+│                      ├── proc_name > file_name > time_range - 125969 (1.21%)                                                                      │
+│                      ├── file_name > time_range > proc_name - 71955 (0.69%)                                                                       │
+│                      ├── file_name > proc_name > time_range - 89514 (0.86%)                                                                       │
+│                      ├── proc_name > app_name - 965184 (9.25%)                                                                                    │
+│                      ├── proc_name > node_name - 965184 (9.25%)                                                                                   │
+│                      ├── proc_name > rank - 331106 (3.17%)                                                                                        │
+│                      ├── file_name > file_dir - 281682 (2.70%)                                                                                    │
+│                      └── file_name > file_pattern - 282522 (2.71%)                                                                                │
+│  Counts                         Count  Processed Record Count                                                                                     │
+│                   Perspectives  20     6322741                                                                                                    │
+│                   Bottlenecks   975    820336                                                                                                     │
+│                   Rules         6      4922016                                                                                                    │
+│  Throughputs                    Record Throughput      Throughput                                                                                 │
+│                   Perspectives  62458.14 records/sec   0.20 perspectives/sec                                                                      │
+│                   Bottlenecks   123287.54 records/sec  146.53 bottlenecks/sec                                                                     │
+│                   Rules         35284.97 records/sec                                                                                              │
+│  Severities      total - 975 bottlenecks (100%)                                                                                                   │
+│                  ├── critical - 31 bottlenecks (3.18%)                                                                                            │
+│                  ├── high - 10 bottlenecks (1.03%)                                                                                                │
+│                  ├── very high - 8 bottlenecks (0.82%)                                                                                            │
+│                  └── rest - 926 bottlenecks (94.97%)                                                                                              │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─────────────────────────────────────────────────────────────── I/O Characteristics ───────────────────────────────────────────────────────────────╮
+│  I/O Time             134.06 seconds                                                                                                              │
+│                       ├── Read - 132.26 seconds (98.66%)                                                                                          │
+│                       ├── Write - 0.15 seconds (0.11%)                                                                                            │
+│                       └── Metadata - 1.83 seconds (1.36%)                                                                                         │
+│  I/O Ops              10,439,334 ops                                                                                                              │
+│                       ├── Read - 2,074,582 ops (19.87%)                                                                                           │
+│                       ├── Write - 37,144 ops (0.36%)                                                                                              │
+│                       └── Metadata - 8,327,608 ops (79.77%)                                                                                       │
+│  I/O Size             1455.46 GB                                                                                                                  │
+│                       ├── Read - 1455.46 GB (100.00%)                                                                                             │
+│                       └── Write - 0.00 GB (0.00%)                                                                                                 │
+│  Read Xfer            4 KB-4 MB - 292,416 ops                                                                                                     │
+│                       ├── <4 KB - 99,752 ops (34.11%)                                                                                             │
+│                       ├── 4-16 KB - 360 ops (0.12%)                                                                                               │
+│                       └── 1-4 MB - 192,304 ops (65.76%)                                                                                           │
+│  Write Xfer           4 KB-4 KB - 1,482 ops                                                                                                       │
+│                       └── <4 KB - 1,482 ops (100.00%)                                                                                             │
+│  Node(s)              1 node(s)                                                                                                                   │
+│                       └── localhost - 134.06 s (100.00%) - 1455.46/0.00 GB R/W (100.00/0.00%) - 10,439,334 ops (100.00%)                          │
+│  App(s)               1 app(s)                                                                                                                    │
+│                       └── app1 - 134.06 s (100.00%) - 1455.46/0.00 GB R/W (100.00/0.00%) - 10,439,334 ops (100.00%)                               │
+│  Process(es)/Rank(s)  652 process(es)/rank(s)                                                                                                     │
+│  Files                49521 files                                                                                                                 │
+│                       ├── Shared: 48878 files (98.70%)                                                                                            │
+│                       └── FPP: 643 files (1.30%)                                                                                                  │
+│  Access Pattern       100.00% Sequential - 0.00% Random                                                                                           │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────────────────────────────── I/O Bottlenecks ─────────────────────────────────────────────────────────────────╮
+│  small_reads (43 bottlenecks)                                                                                                                     │
+│  ├── proc_name > rank (41 bottlenecks)                                                                                                            │
+│  │   ├── 1 rank accesses 2082 files within 3097 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of the    │
+│  │   │   workload.                                                                                                                                │
+│  │   │   ├── 'read' time is 98.66% (132.26 seconds) of I/O time.                                                                                  │
+│  │   │   └── Average 'read's are 132.20 KB, which is smaller than 256 KB.                                                                         │
+│  │   ├── 1 rank accesses 1844 files within 2636 time periods and has an I/O time of 130.05 seconds which is 97.01% of overall I/O time of the     │
+│  │   │   workload.                                                                                                                                │
+│  │   │   ├── 'read' time is 98.82% (128.52 seconds) of I/O time.                                                                                  │
+│  │   │   └── Average 'read's are 133.11 KB, which is smaller than 256 KB.                                                                         │
+│  │   ├── 1 rank accesses 1845 files within 2643 time periods and has an I/O time of 124.63 seconds which is 92.97% of overall I/O time of the     │
+│  │   │   workload.                                                                                                                                │
+│  │   │   ├── 'read' time is 98.61% (122.90 seconds) of I/O time.                                                                                  │
+│  │   │   └── Average 'read's are 133.03 KB, which is smaller than 256 KB.                                                                         │
+│  │   └── (38 more)                                                                                                                                │
+│  ├── proc_name > node_name (1 bottlenecks)                                                                                                        │
+│  │   └── 1 node accesses 49521 files within 199055 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of     │
+│  │       the workload.                                                                                                                            │
+│  │       ├── 'read' time is 98.66% (132.26 seconds) of I/O time.                                                                                  │
+│  │       └── Average 'read's are 146.19 KB, which is smaller than 256 KB.                                                                         │
+│  └── proc_name > app_name (1 bottlenecks)                                                                                                         │
+│      └── 1 app accesses 49521 files within 199055 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of the  │
+│          workload.                                                                                                                                │
+│          ├── 'read' time is 98.66% (132.26 seconds) of I/O time.                                                                                  │
+│          └── Average 'read's are 146.19 KB, which is smaller than 256 KB.                                                                         │
+│  size_imbalance (466 bottlenecks)                                                                                                                 │
+│  ├── file_name > file_pattern (1 bottlenecks)                                                                                                     │
+│  │   └── 240 processes access 1 file pattern within 178532 time periods and have an I/O time of 133.99 seconds which is 99.95% of overall I/O     │
+│  │       time of the workload.                                                                                                                    │
+│  │       └── 'read' size is 100.00% (1490378.75 MB) of total I/O size.                                                                            │
+│  ├── file_name > file_dir (1 bottlenecks)                                                                                                         │
+│  │   └── 240 processes access 1 file directory within 178532 time periods and have an I/O time of 133.99 seconds which is 99.95% of overall I/O   │
+│  │       time of the workload.                                                                                                                    │
+│  │       └── 'read' size is 100.00% (1490378.75 MB) of total I/O size.                                                                            │
+│  ├── proc_name > rank (41 bottlenecks)                                                                                                            │
+│  │   ├── 1 rank accesses 2082 files within 3097 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of the    │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12420.58 MB) of total I/O size.                                                                              │
+│  │   ├── 1 rank accesses 1844 files within 2636 time periods and has an I/O time of 130.05 seconds which is 97.01% of overall I/O time of the     │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12420.58 MB) of total I/O size.                                                                              │
+│  │   ├── 1 rank accesses 1845 files within 2643 time periods and has an I/O time of 124.63 seconds which is 92.97% of overall I/O time of the     │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12420.58 MB) of total I/O size.                                                                              │
+│  │   └── (38 more)                                                                                                                                │
+│  ├── proc_name > node_name (1 bottlenecks)                                                                                                        │
+│  │   └── 1 node accesses 49521 files within 199055 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of     │
+│  │       the workload.                                                                                                                            │
+│  │       └── 'read' size is 100.00% (1490386.98 MB) of total I/O size.                                                                            │
+│  ├── proc_name > app_name (1 bottlenecks)                                                                                                         │
+│  │   └── 1 app accesses 49521 files within 199055 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of the  │
+│  │       workload.                                                                                                                                │
+│  │       └── 'read' size is 100.00% (1490386.98 MB) of total I/O size.                                                                            │
+│  ├── file_name > time_range > proc_name (30 bottlenecks)                                                                                          │
+│  │   ├── 1 process accesses 1337 files within 1341 time periods and has an I/O time of 88.31 seconds which is 65.88% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (10332.38 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1364 files within 1368 time periods and has an I/O time of 88.06 seconds which is 65.69% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (10679.94 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1292 files within 1303 time periods and has an I/O time of 87.62 seconds which is 65.36% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (10007.85 MB) of total I/O size.                                                                              │
+│  │   └── (27 more)                                                                                                                                │
+│  ├── time_range > file_name > proc_name (88 bottlenecks)                                                                                          │
+│  │   ├── 1 process accesses 1529 files within 1698 time periods and has an I/O time of 128.51 seconds which is 95.87% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12033.71 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1477 files within 1655 time periods and has an I/O time of 99.79 seconds which is 74.44% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (11646.43 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1471 files within 1605 time periods and has an I/O time of 99.23 seconds which is 74.02% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (11618.35 MB) of total I/O size.                                                                              │
+│  │   └── (85 more)                                                                                                                                │
+│  ├── file_name > proc_name (91 bottlenecks)                                                                                                       │
+│  │   ├── 1 process accesses 1550 files within 2069 time periods and has an I/O time of 133.80 seconds which is 99.81% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12404.49 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1552 files within 2268 time periods and has an I/O time of 104.20 seconds which is 77.73% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12419.59 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1552 files within 2266 time periods and has an I/O time of 104.17 seconds which is 77.71% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12419.59 MB) of total I/O size.                                                                              │
+│  │   └── (88 more)                                                                                                                                │
+│  ├── time_range > proc_name (92 bottlenecks)                                                                                                      │
+│  │   ├── 1 process accesses 1552 files within 1718 time periods and has an I/O time of 129.79 seconds which is 96.82% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12193.76 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1470 files within 1617 time periods and has an I/O time of 118.96 seconds which is 88.74% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (11529.30 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1535 files within 1713 time periods and has an I/O time of 102.78 seconds which is 76.67% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12086.56 MB) of total I/O size.                                                                              │
+│  │   └── (89 more)                                                                                                                                │
+│  └── proc_name (120 bottlenecks)                                                                                                                  │
+│      ├── 1 process accesses 1558 files within 2080 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of     │
+│      │   the workload.                                                                                                                            │
+│      │   └── 'read' size is 100.00% (12420.50 MB) of total I/O size.                                                                              │
+│      ├── 1 process accesses 1558 files within 1918 time periods and has an I/O time of 130.05 seconds which is 97.01% of overall I/O time of the  │
+│      │   workload.                                                                                                                                │
+│      │   └── 'read' size is 100.00% (12420.50 MB) of total I/O size.                                                                              │
+│      ├── 1 process accesses 1558 files within 2120 time periods and has an I/O time of 124.63 seconds which is 92.97% of overall I/O time of the  │
+│      │   workload.                                                                                                                                │
+│      │   └── 'read' size is 100.00% (12420.50 MB) of total I/O size.                                                                              │
+│      └── (117 more)                                                                                                                               │
+│  operation_imbalance (466 bottlenecks)                                                                                                            │
+│  ├── file_name > file_pattern (1 bottlenecks)                                                                                                     │
+│  │   └── 240 processes access 1 file pattern within 178532 time periods and have an I/O time of 133.99 seconds which is 99.95% of overall I/O     │
+│  │       time of the workload.                                                                                                                    │
+│  │       └── 'read' operations are 79.98% (2051520 operations) of total I/O operations.                                                           │
+│  ├── file_name > file_dir (1 bottlenecks)                                                                                                         │
+│  │   └── 240 processes access 1 file directory within 178532 time periods and have an I/O time of 133.99 seconds which is 99.95% of overall I/O   │
+│  │       time of the workload.                                                                                                                    │
+│  │       └── 'read' operations are 79.98% (2051520 operations) of total I/O operations.                                                           │
+│  ├── proc_name > rank (41 bottlenecks)                                                                                                            │
+│  │   ├── 1 rank accesses 2082 files within 3097 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of the    │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 22.81% (21945 operations) of total I/O operations.                                                             │
+│  │   ├── 1 rank accesses 1844 files within 2636 time periods and has an I/O time of 130.05 seconds which is 97.01% of overall I/O time of the     │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 22.97% (21947 operations) of total I/O operations.                                                             │
+│  │   ├── 1 rank accesses 1845 files within 2643 time periods and has an I/O time of 124.63 seconds which is 92.97% of overall I/O time of the     │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 22.96% (21947 operations) of total I/O operations.                                                             │
+│  │   └── (38 more)                                                                                                                                │
+│  ├── proc_name > node_name (1 bottlenecks)                                                                                                        │
+│  │   └── 1 node accesses 49521 files within 199055 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of     │
+│  │       the workload.                                                                                                                            │
+│  │       └── 'read' operations are 19.87% (2074582 operations) of total I/O operations.                                                           │
+│  ├── proc_name > app_name (1 bottlenecks)                                                                                                         │
+│  │   └── 1 app accesses 49521 files within 199055 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of the  │
+│  │       workload.                                                                                                                                │
+│  │       └── 'read' operations are 19.87% (2074582 operations) of total I/O operations.                                                           │
+│  ├── file_name > time_range > proc_name (30 bottlenecks)                                                                                          │
+│  │   ├── 1 process accesses 1337 files within 1341 time periods and has an I/O time of 88.31 seconds which is 65.88% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 84.36% (11555 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1364 files within 1368 time periods and has an I/O time of 88.06 seconds which is 65.69% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 84.44% (10799 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1292 files within 1303 time periods and has an I/O time of 87.62 seconds which is 65.36% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 84.46% (10188 operations) of total I/O operations.                                                             │
+│  │   └── (27 more)                                                                                                                                │
+│  ├── time_range > file_name > proc_name (88 bottlenecks)                                                                                          │
+│  │   ├── 1 process accesses 1529 files within 1698 time periods and has an I/O time of 128.51 seconds which is 95.87% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 74.51% (18933 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1477 files within 1655 time periods and has an I/O time of 99.79 seconds which is 74.44% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 84.05% (12483 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1471 files within 1605 time periods and has an I/O time of 99.23 seconds which is 74.02% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 84.13% (12290 operations) of total I/O operations.                                                             │
+│  │   └── (85 more)                                                                                                                                │
+│  ├── file_name > proc_name (91 bottlenecks)                                                                                                       │
+│  │   ├── 1 process accesses 1550 files within 2069 time periods and has an I/O time of 133.80 seconds which is 99.81% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 73.68% (21700 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1552 files within 2268 time periods and has an I/O time of 104.20 seconds which is 77.73% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 83.33% (15520 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1552 files within 2266 time periods and has an I/O time of 104.17 seconds which is 77.71% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 83.33% (15520 operations) of total I/O operations.                                                             │
+│  │   └── (88 more)                                                                                                                                │
+│  ├── time_range > proc_name (92 bottlenecks)                                                                                                      │
+│  │   ├── 1 process accesses 1552 files within 1718 time periods and has an I/O time of 129.79 seconds which is 96.82% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 56.39% (19204 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1470 files within 1617 time periods and has an I/O time of 118.96 seconds which is 88.74% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 54.43% (16981 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1535 files within 1713 time periods and has an I/O time of 102.78 seconds which is 76.67% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 60.03% (13025 operations) of total I/O operations.                                                             │
+│  │   └── (89 more)                                                                                                                                │
+│  └── proc_name (120 bottlenecks)                                                                                                                  │
+│      ├── 1 process accesses 1558 files within 2080 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of     │
+│      │   the workload.                                                                                                                            │
+│      │   └── 'read' operations are 54.93% (21729 operations) of total I/O operations.                                                             │
+│      ├── 1 process accesses 1558 files within 1918 time periods and has an I/O time of 130.05 seconds which is 97.01% of overall I/O time of the  │
+│      │   workload.                                                                                                                                │
+│      │   └── 'read' operations are 50.53% (21729 operations) of total I/O operations.                                                             │
+│      ├── 1 process accesses 1558 files within 2120 time periods and has an I/O time of 124.63 seconds which is 92.97% of overall I/O time of the  │
+│      │   workload.                                                                                                                                │
+│      │   └── 'read' operations are 49.15% (21729 operations) of total I/O operations.                                                             │
+│      └── (117 more)                                                                                                                               │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭────────────────────────────────────────────────────────────────────── Debug ──────────────────────────────────────────────────────────────────────╮
+│  Data Reduction  raw - 10439334 (100%)                                                                                                            │
+│                  └── time - avg. 316137 (3.03%) - max. 965184 (9.25%) - min. 71955 (0.69%) - sum. 6322741 (60.57%)                                │
+│                      ├── time_range - 507375 (4.86%)                                                                                              │
+│                      ├── proc_name - 690079 (6.61%)                                                                                               │
+│                      ├── file_name - 280629 (2.69%)                                                                                               │
+│                      ├── time_range > proc_name - 336194 (3.22%)                                                                                  │
+│                      ├── time_range > file_name - 194269 (1.86%)                                                                                  │
+│                      ├── proc_name > time_range - 223722 (2.14%)                                                                                  │
+│                      ├── proc_name > file_name - 270498 (2.59%)                                                                                   │
+│                      ├── file_name > time_range - 131448 (1.26%)                                                                                  │
+│                      ├── file_name > proc_name - 210312 (2.01%)                                                                                   │
+│                      ├── time_range > proc_name > file_name - 140896 (1.35%)                                                                      │
+│                      ├── time_range > file_name > proc_name - 142778 (1.37%)                                                                      │
+│                      ├── proc_name > time_range > file_name - 81425 (0.78%)                                                                       │
+│                      ├── proc_name > file_name > time_range - 125969 (1.21%)                                                                      │
+│                      ├── file_name > time_range > proc_name - 71955 (0.69%)                                                                       │
+│                      ├── file_name > proc_name > time_range - 89514 (0.86%)                                                                       │
+│                      ├── proc_name > app_name - 965184 (9.25%)                                                                                    │
+│                      ├── proc_name > node_name - 965184 (9.25%)                                                                                   │
+│                      ├── proc_name > rank - 331106 (3.17%)                                                                                        │
+│                      ├── file_name > file_dir - 281682 (2.70%)                                                                                    │
+│                      └── file_name > file_pattern - 282522 (2.71%)                                                                                │
+│  Counts                         Count  Processed Record Count                                                                                     │
+│                   Perspectives  20     6322741                                                                                                    │
+│                   Bottlenecks   975    820336                                                                                                     │
+│                   Rules         6      4922016                                                                                                    │
+│  Throughputs                    Record Throughput      Throughput                                                                                 │
+│                   Perspectives  62001.06 records/sec   0.20 perspectives/sec                                                                      │
+│                   Bottlenecks   102977.55 records/sec  122.39 bottlenecks/sec                                                                     │
+│                   Rules         49870.62 records/sec                                                                                              │
+│  Severities      total - 975 bottlenecks (100%)                                                                                                   │
+│                  ├── critical - 31 bottlenecks (3.18%)                                                                                            │
+│                  ├── high - 10 bottlenecks (1.03%)                                                                                                │
+│                  ├── very high - 8 bottlenecks (0.82%)                                                                                            │
+│                  └── rest - 926 bottlenecks (94.97%)                                                                                              │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─────────────────────────────────────────────────────────────── I/O Characteristics ───────────────────────────────────────────────────────────────╮
+│  I/O Time             134.06 seconds                                                                                                              │
+│                       ├── Read - 132.26 seconds (98.66%)                                                                                          │
+│                       ├── Write - 0.15 seconds (0.11%)                                                                                            │
+│                       └── Metadata - 1.83 seconds (1.36%)                                                                                         │
+│  I/O Ops              10,439,334 ops                                                                                                              │
+│                       ├── Read - 2,074,582 ops (19.87%)                                                                                           │
+│                       ├── Write - 37,144 ops (0.36%)                                                                                              │
+│                       └── Metadata - 8,327,608 ops (79.77%)                                                                                       │
+│  I/O Size             1455.46 GB                                                                                                                  │
+│                       ├── Read - 1455.46 GB (100.00%)                                                                                             │
+│                       └── Write - 0.00 GB (0.00%)                                                                                                 │
+│  Read Xfer            4 KB-4 MB - 292,416 ops                                                                                                     │
+│                       ├── <4 KB - 99,752 ops (34.11%)                                                                                             │
+│                       ├── 4-16 KB - 360 ops (0.12%)                                                                                               │
+│                       └── 1-4 MB - 192,304 ops (65.76%)                                                                                           │
+│  Write Xfer           4 KB-4 KB - 1,482 ops                                                                                                       │
+│                       └── <4 KB - 1,482 ops (100.00%)                                                                                             │
+│  Node(s)              1 node(s)                                                                                                                   │
+│                       └── localhost - 134.06 s (100.00%) - 1455.46/0.00 GB R/W (100.00/0.00%) - 10,439,334 ops (100.00%)                          │
+│  App(s)               1 app(s)                                                                                                                    │
+│                       └── app1 - 134.06 s (100.00%) - 1455.46/0.00 GB R/W (100.00/0.00%) - 10,439,334 ops (100.00%)                               │
+│  Process(es)/Rank(s)  652 process(es)/rank(s)                                                                                                     │
+│  Files                49521 files                                                                                                                 │
+│                       ├── Shared: 48878 files (98.70%)                                                                                            │
+│                       └── FPP: 643 files (1.30%)                                                                                                  │
+│  Access Pattern       100.00% Sequential - 0.00% Random                                                                                           │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────────────────────────────── I/O Bottlenecks ─────────────────────────────────────────────────────────────────╮
+│  small_reads (43 bottlenecks)                                                                                                                     │
+│  ├── proc_name > rank (41 bottlenecks)                                                                                                            │
+│  │   ├── 1 rank accesses 2082 files within 3097 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of the    │
+│  │   │   workload.                                                                                                                                │
+│  │   │   ├── 'read' time is 98.66% (132.26 seconds) of I/O time.                                                                                  │
+│  │   │   └── Average 'read's are 132.20 KB, which is smaller than 256 KB.                                                                         │
+│  │   ├── 1 rank accesses 1844 files within 2636 time periods and has an I/O time of 130.05 seconds which is 97.01% of overall I/O time of the     │
+│  │   │   workload.                                                                                                                                │
+│  │   │   ├── 'read' time is 98.82% (128.52 seconds) of I/O time.                                                                                  │
+│  │   │   └── Average 'read's are 133.11 KB, which is smaller than 256 KB.                                                                         │
+│  │   ├── 1 rank accesses 1845 files within 2643 time periods and has an I/O time of 124.63 seconds which is 92.97% of overall I/O time of the     │
+│  │   │   workload.                                                                                                                                │
+│  │   │   ├── 'read' time is 98.61% (122.90 seconds) of I/O time.                                                                                  │
+│  │   │   └── Average 'read's are 133.03 KB, which is smaller than 256 KB.                                                                         │
+│  │   └── (38 more)                                                                                                                                │
+│  ├── proc_name > node_name (1 bottlenecks)                                                                                                        │
+│  │   └── 1 node accesses 49521 files within 199055 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of     │
+│  │       the workload.                                                                                                                            │
+│  │       ├── 'read' time is 98.66% (132.26 seconds) of I/O time.                                                                                  │
+│  │       └── Average 'read's are 146.19 KB, which is smaller than 256 KB.                                                                         │
+│  └── proc_name > app_name (1 bottlenecks)                                                                                                         │
+│      └── 1 app accesses 49521 files within 199055 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of the  │
+│          workload.                                                                                                                                │
+│          ├── 'read' time is 98.66% (132.26 seconds) of I/O time.                                                                                  │
+│          └── Average 'read's are 146.19 KB, which is smaller than 256 KB.                                                                         │
+│  size_imbalance (466 bottlenecks)                                                                                                                 │
+│  ├── file_name > file_pattern (1 bottlenecks)                                                                                                     │
+│  │   └── 240 processes access 1 file pattern within 178532 time periods and have an I/O time of 133.99 seconds which is 99.95% of overall I/O     │
+│  │       time of the workload.                                                                                                                    │
+│  │       └── 'read' size is 100.00% (1490378.75 MB) of total I/O size.                                                                            │
+│  ├── file_name > file_dir (1 bottlenecks)                                                                                                         │
+│  │   └── 240 processes access 1 file directory within 178532 time periods and have an I/O time of 133.99 seconds which is 99.95% of overall I/O   │
+│  │       time of the workload.                                                                                                                    │
+│  │       └── 'read' size is 100.00% (1490378.75 MB) of total I/O size.                                                                            │
+│  ├── proc_name > rank (41 bottlenecks)                                                                                                            │
+│  │   ├── 1 rank accesses 2082 files within 3097 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of the    │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12420.58 MB) of total I/O size.                                                                              │
+│  │   ├── 1 rank accesses 1844 files within 2636 time periods and has an I/O time of 130.05 seconds which is 97.01% of overall I/O time of the     │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12420.58 MB) of total I/O size.                                                                              │
+│  │   ├── 1 rank accesses 1845 files within 2643 time periods and has an I/O time of 124.63 seconds which is 92.97% of overall I/O time of the     │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12420.58 MB) of total I/O size.                                                                              │
+│  │   └── (38 more)                                                                                                                                │
+│  ├── proc_name > node_name (1 bottlenecks)                                                                                                        │
+│  │   └── 1 node accesses 49521 files within 199055 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of     │
+│  │       the workload.                                                                                                                            │
+│  │       └── 'read' size is 100.00% (1490386.98 MB) of total I/O size.                                                                            │
+│  ├── proc_name > app_name (1 bottlenecks)                                                                                                         │
+│  │   └── 1 app accesses 49521 files within 199055 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of the  │
+│  │       workload.                                                                                                                                │
+│  │       └── 'read' size is 100.00% (1490386.98 MB) of total I/O size.                                                                            │
+│  ├── file_name > time_range > proc_name (30 bottlenecks)                                                                                          │
+│  │   ├── 1 process accesses 1337 files within 1341 time periods and has an I/O time of 88.31 seconds which is 65.88% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (10332.38 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1364 files within 1368 time periods and has an I/O time of 88.06 seconds which is 65.69% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (10679.94 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1292 files within 1303 time periods and has an I/O time of 87.62 seconds which is 65.36% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (10007.85 MB) of total I/O size.                                                                              │
+│  │   └── (27 more)                                                                                                                                │
+│  ├── time_range > file_name > proc_name (88 bottlenecks)                                                                                          │
+│  │   ├── 1 process accesses 1529 files within 1698 time periods and has an I/O time of 128.51 seconds which is 95.87% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12033.71 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1477 files within 1655 time periods and has an I/O time of 99.79 seconds which is 74.44% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (11646.43 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1471 files within 1605 time periods and has an I/O time of 99.23 seconds which is 74.02% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (11618.35 MB) of total I/O size.                                                                              │
+│  │   └── (85 more)                                                                                                                                │
+│  ├── file_name > proc_name (91 bottlenecks)                                                                                                       │
+│  │   ├── 1 process accesses 1550 files within 2069 time periods and has an I/O time of 133.80 seconds which is 99.81% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12404.49 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1552 files within 2268 time periods and has an I/O time of 104.20 seconds which is 77.73% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12419.59 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1552 files within 2266 time periods and has an I/O time of 104.17 seconds which is 77.71% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12419.59 MB) of total I/O size.                                                                              │
+│  │   └── (88 more)                                                                                                                                │
+│  ├── time_range > proc_name (92 bottlenecks)                                                                                                      │
+│  │   ├── 1 process accesses 1552 files within 1718 time periods and has an I/O time of 129.79 seconds which is 96.82% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12193.76 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1470 files within 1617 time periods and has an I/O time of 118.96 seconds which is 88.74% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (11529.30 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1535 files within 1713 time periods and has an I/O time of 102.78 seconds which is 76.67% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12086.56 MB) of total I/O size.                                                                              │
+│  │   └── (89 more)                                                                                                                                │
+│  └── proc_name (120 bottlenecks)                                                                                                                  │
+│      ├── 1 process accesses 1558 files within 2080 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of     │
+│      │   the workload.                                                                                                                            │
+│      │   └── 'read' size is 100.00% (12420.50 MB) of total I/O size.                                                                              │
+│      ├── 1 process accesses 1558 files within 1918 time periods and has an I/O time of 130.05 seconds which is 97.01% of overall I/O time of the  │
+│      │   workload.                                                                                                                                │
+│      │   └── 'read' size is 100.00% (12420.50 MB) of total I/O size.                                                                              │
+│      ├── 1 process accesses 1558 files within 2120 time periods and has an I/O time of 124.63 seconds which is 92.97% of overall I/O time of the  │
+│      │   workload.                                                                                                                                │
+│      │   └── 'read' size is 100.00% (12420.50 MB) of total I/O size.                                                                              │
+│      └── (117 more)                                                                                                                               │
+│  operation_imbalance (466 bottlenecks)                                                                                                            │
+│  ├── file_name > file_pattern (1 bottlenecks)                                                                                                     │
+│  │   └── 240 processes access 1 file pattern within 178532 time periods and have an I/O time of 133.99 seconds which is 99.95% of overall I/O     │
+│  │       time of the workload.                                                                                                                    │
+│  │       └── 'read' operations are 79.98% (2051520 operations) of total I/O operations.                                                           │
+│  ├── file_name > file_dir (1 bottlenecks)                                                                                                         │
+│  │   └── 240 processes access 1 file directory within 178532 time periods and have an I/O time of 133.99 seconds which is 99.95% of overall I/O   │
+│  │       time of the workload.                                                                                                                    │
+│  │       └── 'read' operations are 79.98% (2051520 operations) of total I/O operations.                                                           │
+│  ├── proc_name > rank (41 bottlenecks)                                                                                                            │
+│  │   ├── 1 rank accesses 2082 files within 3097 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of the    │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 22.81% (21945 operations) of total I/O operations.                                                             │
+│  │   ├── 1 rank accesses 1844 files within 2636 time periods and has an I/O time of 130.05 seconds which is 97.01% of overall I/O time of the     │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 22.97% (21947 operations) of total I/O operations.                                                             │
+│  │   ├── 1 rank accesses 1845 files within 2643 time periods and has an I/O time of 124.63 seconds which is 92.97% of overall I/O time of the     │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 22.96% (21947 operations) of total I/O operations.                                                             │
+│  │   └── (38 more)                                                                                                                                │
+│  ├── proc_name > node_name (1 bottlenecks)                                                                                                        │
+│  │   └── 1 node accesses 49521 files within 199055 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of     │
+│  │       the workload.                                                                                                                            │
+│  │       └── 'read' operations are 19.87% (2074582 operations) of total I/O operations.                                                           │
+│  ├── proc_name > app_name (1 bottlenecks)                                                                                                         │
+│  │   └── 1 app accesses 49521 files within 199055 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of the  │
+│  │       workload.                                                                                                                                │
+│  │       └── 'read' operations are 19.87% (2074582 operations) of total I/O operations.                                                           │
+│  ├── file_name > time_range > proc_name (30 bottlenecks)                                                                                          │
+│  │   ├── 1 process accesses 1337 files within 1341 time periods and has an I/O time of 88.31 seconds which is 65.88% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 84.36% (11555 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1364 files within 1368 time periods and has an I/O time of 88.06 seconds which is 65.69% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 84.44% (10799 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1292 files within 1303 time periods and has an I/O time of 87.62 seconds which is 65.36% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 84.46% (10188 operations) of total I/O operations.                                                             │
+│  │   └── (27 more)                                                                                                                                │
+│  ├── time_range > file_name > proc_name (88 bottlenecks)                                                                                          │
+│  │   ├── 1 process accesses 1529 files within 1698 time periods and has an I/O time of 128.51 seconds which is 95.87% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 74.51% (18933 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1477 files within 1655 time periods and has an I/O time of 99.79 seconds which is 74.44% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 84.05% (12483 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1471 files within 1605 time periods and has an I/O time of 99.23 seconds which is 74.02% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 84.13% (12290 operations) of total I/O operations.                                                             │
+│  │   └── (85 more)                                                                                                                                │
+│  ├── file_name > proc_name (91 bottlenecks)                                                                                                       │
+│  │   ├── 1 process accesses 1550 files within 2069 time periods and has an I/O time of 133.80 seconds which is 99.81% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 73.68% (21700 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1552 files within 2268 time periods and has an I/O time of 104.20 seconds which is 77.73% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 83.33% (15520 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1552 files within 2266 time periods and has an I/O time of 104.17 seconds which is 77.71% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 83.33% (15520 operations) of total I/O operations.                                                             │
+│  │   └── (88 more)                                                                                                                                │
+│  ├── time_range > proc_name (92 bottlenecks)                                                                                                      │
+│  │   ├── 1 process accesses 1552 files within 1718 time periods and has an I/O time of 129.79 seconds which is 96.82% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 56.39% (19204 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1470 files within 1617 time periods and has an I/O time of 118.96 seconds which is 88.74% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 54.43% (16981 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1535 files within 1713 time periods and has an I/O time of 102.78 seconds which is 76.67% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 60.03% (13025 operations) of total I/O operations.                                                             │
+│  │   └── (89 more)                                                                                                                                │
+│  └── proc_name (120 bottlenecks)                                                                                                                  │
+│      ├── 1 process accesses 1558 files within 2080 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of     │
+│      │   the workload.                                                                                                                            │
+│      │   └── 'read' operations are 54.93% (21729 operations) of total I/O operations.                                                             │
+│      ├── 1 process accesses 1558 files within 1918 time periods and has an I/O time of 130.05 seconds which is 97.01% of overall I/O time of the  │
+│      │   workload.                                                                                                                                │
+│      │   └── 'read' operations are 50.53% (21729 operations) of total I/O operations.                                                             │
+│      ├── 1 process accesses 1558 files within 2120 time periods and has an I/O time of 124.63 seconds which is 92.97% of overall I/O time of the  │
+│      │   workload.                                                                                                                                │
+│      │   └── 'read' operations are 49.15% (21729 operations) of total I/O operations.                                                             │
+│      └── (117 more)                                                                                                                               │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭────────────────────────────────────────────────────────────────────── Debug ──────────────────────────────────────────────────────────────────────╮
+│  Data Reduction  raw - 10439334 (100%)                                                                                                            │
+│                  └── time - avg. 316137 (3.03%) - max. 965184 (9.25%) - min. 71955 (0.69%) - sum. 6322741 (60.57%)                                │
+│                      ├── time_range - 507375 (4.86%)                                                                                              │
+│                      ├── proc_name - 690079 (6.61%)                                                                                               │
+│                      ├── file_name - 280629 (2.69%)                                                                                               │
+│                      ├── time_range > proc_name - 336194 (3.22%)                                                                                  │
+│                      ├── time_range > file_name - 194269 (1.86%)                                                                                  │
+│                      ├── proc_name > time_range - 223722 (2.14%)                                                                                  │
+│                      ├── proc_name > file_name - 270498 (2.59%)                                                                                   │
+│                      ├── file_name > time_range - 131448 (1.26%)                                                                                  │
+│                      ├── file_name > proc_name - 210312 (2.01%)                                                                                   │
+│                      ├── time_range > proc_name > file_name - 140896 (1.35%)                                                                      │
+│                      ├── time_range > file_name > proc_name - 142778 (1.37%)                                                                      │
+│                      ├── proc_name > time_range > file_name - 81425 (0.78%)                                                                       │
+│                      ├── proc_name > file_name > time_range - 125969 (1.21%)                                                                      │
+│                      ├── file_name > time_range > proc_name - 71955 (0.69%)                                                                       │
+│                      ├── file_name > proc_name > time_range - 89514 (0.86%)                                                                       │
+│                      ├── proc_name > app_name - 965184 (9.25%)                                                                                    │
+│                      ├── proc_name > node_name - 965184 (9.25%)                                                                                   │
+│                      ├── proc_name > rank - 331106 (3.17%)                                                                                        │
+│                      ├── file_name > file_dir - 281682 (2.70%)                                                                                    │
+│                      └── file_name > file_pattern - 282522 (2.71%)                                                                                │
+│  Counts                         Count  Processed Record Count                                                                                     │
+│                   Perspectives  20     6322741                                                                                                    │
+│                   Bottlenecks   975    820336                                                                                                     │
+│                   Rules         6      4922016                                                                                                    │
+│  Throughputs                    Record Throughput      Throughput                                                                                 │
+│                   Perspectives  62657.20 records/sec   0.20 perspectives/sec                                                                      │
+│                   Bottlenecks   127368.39 records/sec  151.38 bottlenecks/sec                                                                     │
+│                   Rules         34843.63 records/sec                                                                                              │
+│  Severities      total - 975 bottlenecks (100%)                                                                                                   │
+│                  ├── critical - 31 bottlenecks (3.18%)                                                                                            │
+│                  ├── high - 10 bottlenecks (1.03%)                                                                                                │
+│                  ├── very high - 8 bottlenecks (0.82%)                                                                                            │
+│                  └── rest - 926 bottlenecks (94.97%)                                                                                              │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─────────────────────────────────────────────────────────────── I/O Characteristics ───────────────────────────────────────────────────────────────╮
+│  I/O Time             134.06 seconds                                                                                                              │
+│                       ├── Read - 132.26 seconds (98.66%)                                                                                          │
+│                       ├── Write - 0.15 seconds (0.11%)                                                                                            │
+│                       └── Metadata - 1.83 seconds (1.36%)                                                                                         │
+│  I/O Ops              10,439,334 ops                                                                                                              │
+│                       ├── Read - 2,074,582 ops (19.87%)                                                                                           │
+│                       ├── Write - 37,144 ops (0.36%)                                                                                              │
+│                       └── Metadata - 8,327,608 ops (79.77%)                                                                                       │
+│  I/O Size             1455.46 GB                                                                                                                  │
+│                       ├── Read - 1455.46 GB (100.00%)                                                                                             │
+│                       └── Write - 0.00 GB (0.00%)                                                                                                 │
+│  Read Xfer            4 KB-4 MB - 292,416 ops                                                                                                     │
+│                       ├── <4 KB - 99,752 ops (34.11%)                                                                                             │
+│                       ├── 4-16 KB - 360 ops (0.12%)                                                                                               │
+│                       └── 1-4 MB - 192,304 ops (65.76%)                                                                                           │
+│  Write Xfer           4 KB-4 KB - 1,482 ops                                                                                                       │
+│                       └── <4 KB - 1,482 ops (100.00%)                                                                                             │
+│  Node(s)              1 node(s)                                                                                                                   │
+│                       └── localhost - 134.06 s (100.00%) - 1455.46/0.00 GB R/W (100.00/0.00%) - 10,439,334 ops (100.00%)                          │
+│  App(s)               1 app(s)                                                                                                                    │
+│                       └── app1 - 134.06 s (100.00%) - 1455.46/0.00 GB R/W (100.00/0.00%) - 10,439,334 ops (100.00%)                               │
+│  Process(es)/Rank(s)  652 process(es)/rank(s)                                                                                                     │
+│  Files                49521 files                                                                                                                 │
+│                       ├── Shared: 48878 files (98.70%)                                                                                            │
+│                       └── FPP: 643 files (1.30%)                                                                                                  │
+│  Access Pattern       100.00% Sequential - 0.00% Random                                                                                           │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────────────────────────────── I/O Bottlenecks ─────────────────────────────────────────────────────────────────╮
+│  small_reads (43 bottlenecks)                                                                                                                     │
+│  ├── proc_name > rank (41 bottlenecks)                                                                                                            │
+│  │   ├── 1 rank accesses 2082 files within 3097 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of the    │
+│  │   │   workload.                                                                                                                                │
+│  │   │   ├── 'read' time is 98.66% (132.26 seconds) of I/O time.                                                                                  │
+│  │   │   └── Average 'read's are 132.20 KB, which is smaller than 256 KB.                                                                         │
+│  │   ├── 1 rank accesses 1844 files within 2636 time periods and has an I/O time of 130.05 seconds which is 97.01% of overall I/O time of the     │
+│  │   │   workload.                                                                                                                                │
+│  │   │   ├── 'read' time is 98.82% (128.52 seconds) of I/O time.                                                                                  │
+│  │   │   └── Average 'read's are 133.11 KB, which is smaller than 256 KB.                                                                         │
+│  │   ├── 1 rank accesses 1845 files within 2643 time periods and has an I/O time of 124.63 seconds which is 92.97% of overall I/O time of the     │
+│  │   │   workload.                                                                                                                                │
+│  │   │   ├── 'read' time is 98.61% (122.90 seconds) of I/O time.                                                                                  │
+│  │   │   └── Average 'read's are 133.03 KB, which is smaller than 256 KB.                                                                         │
+│  │   └── (38 more)                                                                                                                                │
+│  ├── proc_name > node_name (1 bottlenecks)                                                                                                        │
+│  │   └── 1 node accesses 49521 files within 199055 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of     │
+│  │       the workload.                                                                                                                            │
+│  │       ├── 'read' time is 98.66% (132.26 seconds) of I/O time.                                                                                  │
+│  │       └── Average 'read's are 146.19 KB, which is smaller than 256 KB.                                                                         │
+│  └── proc_name > app_name (1 bottlenecks)                                                                                                         │
+│      └── 1 app accesses 49521 files within 199055 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of the  │
+│          workload.                                                                                                                                │
+│          ├── 'read' time is 98.66% (132.26 seconds) of I/O time.                                                                                  │
+│          └── Average 'read's are 146.19 KB, which is smaller than 256 KB.                                                                         │
+│  size_imbalance (466 bottlenecks)                                                                                                                 │
+│  ├── file_name > file_pattern (1 bottlenecks)                                                                                                     │
+│  │   └── 240 processes access 1 file pattern within 178532 time periods and have an I/O time of 133.99 seconds which is 99.95% of overall I/O     │
+│  │       time of the workload.                                                                                                                    │
+│  │       └── 'read' size is 100.00% (1490378.75 MB) of total I/O size.                                                                            │
+│  ├── file_name > file_dir (1 bottlenecks)                                                                                                         │
+│  │   └── 240 processes access 1 file directory within 178532 time periods and have an I/O time of 133.99 seconds which is 99.95% of overall I/O   │
+│  │       time of the workload.                                                                                                                    │
+│  │       └── 'read' size is 100.00% (1490378.75 MB) of total I/O size.                                                                            │
+│  ├── proc_name > rank (41 bottlenecks)                                                                                                            │
+│  │   ├── 1 rank accesses 2082 files within 3097 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of the    │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12420.58 MB) of total I/O size.                                                                              │
+│  │   ├── 1 rank accesses 1844 files within 2636 time periods and has an I/O time of 130.05 seconds which is 97.01% of overall I/O time of the     │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12420.58 MB) of total I/O size.                                                                              │
+│  │   ├── 1 rank accesses 1845 files within 2643 time periods and has an I/O time of 124.63 seconds which is 92.97% of overall I/O time of the     │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12420.58 MB) of total I/O size.                                                                              │
+│  │   └── (38 more)                                                                                                                                │
+│  ├── proc_name > node_name (1 bottlenecks)                                                                                                        │
+│  │   └── 1 node accesses 49521 files within 199055 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of     │
+│  │       the workload.                                                                                                                            │
+│  │       └── 'read' size is 100.00% (1490386.98 MB) of total I/O size.                                                                            │
+│  ├── proc_name > app_name (1 bottlenecks)                                                                                                         │
+│  │   └── 1 app accesses 49521 files within 199055 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of the  │
+│  │       workload.                                                                                                                                │
+│  │       └── 'read' size is 100.00% (1490386.98 MB) of total I/O size.                                                                            │
+│  ├── file_name > time_range > proc_name (30 bottlenecks)                                                                                          │
+│  │   ├── 1 process accesses 1337 files within 1341 time periods and has an I/O time of 88.31 seconds which is 65.88% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (10332.38 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1364 files within 1368 time periods and has an I/O time of 88.06 seconds which is 65.69% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (10679.94 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1292 files within 1303 time periods and has an I/O time of 87.62 seconds which is 65.36% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (10007.85 MB) of total I/O size.                                                                              │
+│  │   └── (27 more)                                                                                                                                │
+│  ├── time_range > file_name > proc_name (88 bottlenecks)                                                                                          │
+│  │   ├── 1 process accesses 1529 files within 1698 time periods and has an I/O time of 128.51 seconds which is 95.87% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12033.71 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1477 files within 1655 time periods and has an I/O time of 99.79 seconds which is 74.44% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (11646.43 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1471 files within 1605 time periods and has an I/O time of 99.23 seconds which is 74.02% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (11618.35 MB) of total I/O size.                                                                              │
+│  │   └── (85 more)                                                                                                                                │
+│  ├── file_name > proc_name (91 bottlenecks)                                                                                                       │
+│  │   ├── 1 process accesses 1550 files within 2069 time periods and has an I/O time of 133.80 seconds which is 99.81% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12404.49 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1552 files within 2268 time periods and has an I/O time of 104.20 seconds which is 77.73% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12419.59 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1552 files within 2266 time periods and has an I/O time of 104.17 seconds which is 77.71% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12419.59 MB) of total I/O size.                                                                              │
+│  │   └── (88 more)                                                                                                                                │
+│  ├── time_range > proc_name (92 bottlenecks)                                                                                                      │
+│  │   ├── 1 process accesses 1552 files within 1718 time periods and has an I/O time of 129.79 seconds which is 96.82% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12193.76 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1470 files within 1617 time periods and has an I/O time of 118.96 seconds which is 88.74% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (11529.30 MB) of total I/O size.                                                                              │
+│  │   ├── 1 process accesses 1535 files within 1713 time periods and has an I/O time of 102.78 seconds which is 76.67% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' size is 100.00% (12086.56 MB) of total I/O size.                                                                              │
+│  │   └── (89 more)                                                                                                                                │
+│  └── proc_name (120 bottlenecks)                                                                                                                  │
+│      ├── 1 process accesses 1558 files within 2080 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of     │
+│      │   the workload.                                                                                                                            │
+│      │   └── 'read' size is 100.00% (12420.50 MB) of total I/O size.                                                                              │
+│      ├── 1 process accesses 1558 files within 1918 time periods and has an I/O time of 130.05 seconds which is 97.01% of overall I/O time of the  │
+│      │   workload.                                                                                                                                │
+│      │   └── 'read' size is 100.00% (12420.50 MB) of total I/O size.                                                                              │
+│      ├── 1 process accesses 1558 files within 2120 time periods and has an I/O time of 124.63 seconds which is 92.97% of overall I/O time of the  │
+│      │   workload.                                                                                                                                │
+│      │   └── 'read' size is 100.00% (12420.50 MB) of total I/O size.                                                                              │
+│      └── (117 more)                                                                                                                               │
+│  operation_imbalance (466 bottlenecks)                                                                                                            │
+│  ├── file_name > file_pattern (1 bottlenecks)                                                                                                     │
+│  │   └── 240 processes access 1 file pattern within 178532 time periods and have an I/O time of 133.99 seconds which is 99.95% of overall I/O     │
+│  │       time of the workload.                                                                                                                    │
+│  │       └── 'read' operations are 79.98% (2051520 operations) of total I/O operations.                                                           │
+│  ├── file_name > file_dir (1 bottlenecks)                                                                                                         │
+│  │   └── 240 processes access 1 file directory within 178532 time periods and have an I/O time of 133.99 seconds which is 99.95% of overall I/O   │
+│  │       time of the workload.                                                                                                                    │
+│  │       └── 'read' operations are 79.98% (2051520 operations) of total I/O operations.                                                           │
+│  ├── proc_name > rank (41 bottlenecks)                                                                                                            │
+│  │   ├── 1 rank accesses 2082 files within 3097 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of the    │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 22.81% (21945 operations) of total I/O operations.                                                             │
+│  │   ├── 1 rank accesses 1844 files within 2636 time periods and has an I/O time of 130.05 seconds which is 97.01% of overall I/O time of the     │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 22.97% (21947 operations) of total I/O operations.                                                             │
+│  │   ├── 1 rank accesses 1845 files within 2643 time periods and has an I/O time of 124.63 seconds which is 92.97% of overall I/O time of the     │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 22.96% (21947 operations) of total I/O operations.                                                             │
+│  │   └── (38 more)                                                                                                                                │
+│  ├── proc_name > node_name (1 bottlenecks)                                                                                                        │
+│  │   └── 1 node accesses 49521 files within 199055 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of     │
+│  │       the workload.                                                                                                                            │
+│  │       └── 'read' operations are 19.87% (2074582 operations) of total I/O operations.                                                           │
+│  ├── proc_name > app_name (1 bottlenecks)                                                                                                         │
+│  │   └── 1 app accesses 49521 files within 199055 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of the  │
+│  │       workload.                                                                                                                                │
+│  │       └── 'read' operations are 19.87% (2074582 operations) of total I/O operations.                                                           │
+│  ├── file_name > time_range > proc_name (30 bottlenecks)                                                                                          │
+│  │   ├── 1 process accesses 1337 files within 1341 time periods and has an I/O time of 88.31 seconds which is 65.88% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 84.36% (11555 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1364 files within 1368 time periods and has an I/O time of 88.06 seconds which is 65.69% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 84.44% (10799 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1292 files within 1303 time periods and has an I/O time of 87.62 seconds which is 65.36% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 84.46% (10188 operations) of total I/O operations.                                                             │
+│  │   └── (27 more)                                                                                                                                │
+│  ├── time_range > file_name > proc_name (88 bottlenecks)                                                                                          │
+│  │   ├── 1 process accesses 1529 files within 1698 time periods and has an I/O time of 128.51 seconds which is 95.87% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 74.51% (18933 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1477 files within 1655 time periods and has an I/O time of 99.79 seconds which is 74.44% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 84.05% (12483 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1471 files within 1605 time periods and has an I/O time of 99.23 seconds which is 74.02% of overall I/O time of the   │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 84.13% (12290 operations) of total I/O operations.                                                             │
+│  │   └── (85 more)                                                                                                                                │
+│  ├── file_name > proc_name (91 bottlenecks)                                                                                                       │
+│  │   ├── 1 process accesses 1550 files within 2069 time periods and has an I/O time of 133.80 seconds which is 99.81% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 73.68% (21700 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1552 files within 2268 time periods and has an I/O time of 104.20 seconds which is 77.73% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 83.33% (15520 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1552 files within 2266 time periods and has an I/O time of 104.17 seconds which is 77.71% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 83.33% (15520 operations) of total I/O operations.                                                             │
+│  │   └── (88 more)                                                                                                                                │
+│  ├── time_range > proc_name (92 bottlenecks)                                                                                                      │
+│  │   ├── 1 process accesses 1552 files within 1718 time periods and has an I/O time of 129.79 seconds which is 96.82% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 56.39% (19204 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1470 files within 1617 time periods and has an I/O time of 118.96 seconds which is 88.74% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 54.43% (16981 operations) of total I/O operations.                                                             │
+│  │   ├── 1 process accesses 1535 files within 1713 time periods and has an I/O time of 102.78 seconds which is 76.67% of overall I/O time of the  │
+│  │   │   workload.                                                                                                                                │
+│  │   │   └── 'read' operations are 60.03% (13025 operations) of total I/O operations.                                                             │
+│  │   └── (89 more)                                                                                                                                │
+│  └── proc_name (120 bottlenecks)                                                                                                                  │
+│      ├── 1 process accesses 1558 files within 2080 time periods and has an I/O time of 134.06 seconds which is 100.00% of overall I/O time of     │
+│      │   the workload.                                                                                                                            │
+│      │   └── 'read' operations are 54.93% (21729 operations) of total I/O operations.                                                             │
+│      ├── 1 process accesses 1558 files within 1918 time periods and has an I/O time of 130.05 seconds which is 97.01% of overall I/O time of the  │
+│      │   workload.                                                                                                                                │
+│      │   └── 'read' operations are 50.53% (21729 operations) of total I/O operations.                                                             │
+│      ├── 1 process accesses 1558 files within 2120 time periods and has an I/O time of 124.63 seconds which is 92.97% of overall I/O time of the  │
+│      │   workload.                                                                                                                                │
+│      │   └── 'read' operations are 49.15% (21729 operations) of total I/O operations.                                                             │
+│      └── (117 more)                                                                                                                               │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭────────────────────────────────────────────────────────────────────── Debug ──────────────────────────────────────────────────────────────────────╮
+│  Data Reduction  raw - 10439334 (100%)                                                                                                            │
+│                  └── time - avg. 316137 (3.03%) - max. 965184 (9.25%) - min. 71955 (0.69%) - sum. 6322741 (60.57%)                                │
+│                      ├── time_range - 507375 (4.86%)                                                                                              │
+│                      ├── proc_name - 690079 (6.61%)                                                                                               │
+│                      ├── file_name - 280629 (2.69%)                                                                                               │
+│                      ├── time_range > proc_name - 336194 (3.22%)                                                                                  │
+│                      ├── time_range > file_name - 194269 (1.86%)                                                                                  │
+│                      ├── proc_name > time_range - 223722 (2.14%)                                                                                  │
+│                      ├── proc_name > file_name - 270498 (2.59%)                                                                                   │
+│                      ├── file_name > time_range - 131448 (1.26%)                                                                                  │
+│                      ├── file_name > proc_name - 210312 (2.01%)                                                                                   │
+│                      ├── time_range > proc_name > file_name - 140896 (1.35%)                                                                      │
+│                      ├── time_range > file_name > proc_name - 142778 (1.37%)                                                                      │
+│                      ├── proc_name > time_range > file_name - 81425 (0.78%)                                                                       │
+│                      ├── proc_name > file_name > time_range - 125969 (1.21%)                                                                      │
+│                      ├── file_name > time_range > proc_name - 71955 (0.69%)                                                                       │
+│                      ├── file_name > proc_name > time_range - 89514 (0.86%)                                                                       │
+│                      ├── proc_name > app_name - 965184 (9.25%)                                                                                    │
+│                      ├── proc_name > node_name - 965184 (9.25%)                                                                                   │
+│                      ├── proc_name > rank - 331106 (3.17%)                                                                                        │
+│                      ├── file_name > file_dir - 281682 (2.70%)                                                                                    │
+│                      └── file_name > file_pattern - 282522 (2.71%)                                                                                │
+│  Counts                         Count  Processed Record Count                                                                                     │
+│                   Perspectives  20     6322741                                                                                                    │
+│                   Bottlenecks   975    820336                                                                                                     │
+│                   Rules         6      4922016                                                                                                    │
+│  Throughputs                    Record Throughput      Throughput                                                                                 │
+│                   Perspectives  64400.95 records/sec   0.20 perspectives/sec                                                                      │
+│                   Bottlenecks   130483.83 records/sec  155.08 bottlenecks/sec                                                                     │
+│                   Rules         43845.77 records/sec                                                                                              │
+│  Severities      total - 975 bottlenecks (100%)                                                                                                   │
+│                  ├── critical - 31 bottlenecks (3.18%)                                                                                            │
+│                  ├── high - 10 bottlenecks (1.03%)                                                                                                │
+│                  ├── very high - 8 bottlenecks (0.82%)                                                                                            │
+│                  └── rest - 926 bottlenecks (94.97%)                                                                                              │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

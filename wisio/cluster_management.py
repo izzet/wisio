@@ -24,6 +24,7 @@ class ClusterConfig:
     memory: int = 1600
     n_threads_per_worker: int = 16
     n_workers: int = 8
+    processes: bool = True
     use_stdin: bool = True
 
 
@@ -59,6 +60,7 @@ class ClusterManager(object):
                 local_directory=self.config.local_dir,
                 memory_limit=self.config.memory,
                 n_workers=self.config.n_workers,
+                processes=self.config.processes,
                 silence_logs=logging.DEBUG if self.config.debug else logging.CRITICAL,
             )
         elif self.config.cluster_type == 'lsf':

@@ -1,14 +1,14 @@
 # import darshan as d
-import dask
 import dask.dataframe as dd
-import pandas as pd 
-from datetime import datetime
+import pandas as pd
+from dask import delayed
 from glob import glob
 from typing import List
-from ._darshan.analysis import create_dxt_dataframe, generate_dxt_records
+
+from ._darshan.analysis import create_dxt_dataframe
 from .cluster_management import ClusterConfig
 from .analyzer import Analyzer
-from .types import AnalysisAccuracy, ViewType
+from .types import AnalysisAccuracy, OutputType, RawStats, ViewType
 from .utils.logger import ElapsedTimeLogger
 
 
@@ -35,15 +35,17 @@ class DarshanAnalyzer(Analyzer):
         checkpoint: bool = False,
         checkpoint_dir: str = '',
         cluster_config: ClusterConfig = None,
-        debug=False
+        debug=False,
+        output_type: OutputType = 'console',
     ):
         super().__init__(
             name='Darshan',
-            working_dir=working_dir,
             checkpoint=checkpoint,
             checkpoint_dir=checkpoint_dir,
             cluster_config=cluster_config,
             debug=debug,
+            output_type=output_type,
+            working_dir=working_dir,
         )
 
     def analyze_dxt(
@@ -57,43 +59,38 @@ class DarshanAnalyzer(Analyzer):
     ):
         # Read traces
         with ElapsedTimeLogger(message='Read traces'):
-            traces = self.read_dxt(
+            traces, job_time = self.read_dxt(
                 trace_path_pattern=trace_path_pattern,
                 time_granularity=time_granularity,
             )
 
+        # Prepare raw stats
+        raw_stats = RawStats(
+            job_time=delayed(job_time),
+            total_count=traces.index.count().persist(),
+        )
+
         # Analyze traces
         return self.analyze_traces(
-            traces=traces,
-            metrics=metrics,
             accuracy=accuracy,
+            metrics=metrics,
+            raw_stats=raw_stats,
             slope_threshold=slope_threshold,
+            traces=traces,
             view_types=view_types,
         )
 
     def read_dxt(self, trace_path_pattern: str, time_granularity: int):
         trace_paths = glob(trace_path_pattern)
 
-        rows = []
-
-
         df = None
 
         for trace_path in trace_paths:
-            t0 = datetime.now()
             if df is None:
-                df = create_dxt_dataframe(trace_path, time_granularity)
+                df, job_time = create_dxt_dataframe(
+                    trace_path, time_granularity)
             else:
-                df = pd.concat([df, create_dxt_dataframe(trace_path, time_granularity)])
-            
+                df = pd.concat(
+                    [df, create_dxt_dataframe(trace_path, time_granularity)])
 
-        return dd.from_pandas(df, npartitions=1)
-
-        trace_bag = dask.bag.from_delayed([
-            dask.delayed(generate_dxt_records)(trace_path, time_granularity)
-            for trace_path in trace_paths
-        ])
-        traces = trace_bag.to_dataframe(meta=DXT_COLS)
-        npartitions = 1
-        traces = traces.repartition(npartitions=npartitions)
-        return traces
+        return dd.from_pandas(df, npartitions=max(1, self.cluster_config.n_workers)), job_time

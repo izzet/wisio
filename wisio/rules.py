@@ -422,12 +422,10 @@ class BottleneckRule(RuleHandler):
             agg_dict = {col: lambda x: set.union(*x) for col in agg_dict}
             agg_dict[view_type] = set
 
-        behavior_col = 'behavior'
-        detail_groups[behavior_col] = behavior
-
         return detail_groups \
             .reset_index() \
-            .groupby([behavior_col]) \
+            .assign(behavior=behavior) \
+            .groupby(['behavior']) \
             .agg(agg_dict) \
             .reset_index(drop=True)
 
@@ -696,8 +694,7 @@ class CharacteristicProcessCount(CharacteristicRule):
         if self.col == 'proc_name':
             tasks[f"{self.col}s"] = main_view \
                 .map_partitions(lambda df: df.index.get_level_values(COL_PROC_NAME)) \
-                .nunique() \
-                .compute()
+                .nunique()
         else:
             tasks[f"{self.col}s"] = main_view \
                 .map_partitions(set_proc_name_parts) \
@@ -738,9 +735,9 @@ class CharacteristicProcessCount(CharacteristicRule):
                 value_fmt=f"{value} {self.description.lower()}",
             )
 
-        max_io_time = characteristics[KnownCharacteristics.IO_TIME.value].value
-        total_ops = characteristics[KnownCharacteristics.IO_COUNT.value].value
-        total_size = characteristics[KnownCharacteristics.IO_SIZE.value].value
+        max_io_time = characteristics[KnownCharacteristics.IO_TIME.value]['total_time']
+        total_ops = characteristics[KnownCharacteristics.IO_COUNT.value]['total_count']
+        total_size = characteristics[KnownCharacteristics.IO_SIZE.value]['total_size']
 
         detail_list = []
         for node, row in pd.DataFrame(result[f"{self.col}s"]).iterrows():
@@ -822,11 +819,12 @@ class CharacteristicXferSizeRule(CharacteristicRule):
         xfer_sizes[xfer_col] = pd.cut(
             xfer_sizes.index, bins=XFER_SIZE_BINS, labels=XFER_SIZE_BIN_LABELS, right=True)
         xfer_bins = xfer_sizes \
-            .groupby([xfer_col]) \
+            .groupby([xfer_col], observed=True) \
             .sum() \
             .replace(0, np.nan) \
             .dropna()
-        xfer_bins[per_col] = xfer_bins[count_col] / xfer_bins[count_col].sum()
+        xfer_bins.loc[:, per_col] = xfer_bins[count_col] / \
+            xfer_bins[count_col].sum()
 
         total_ops = int(xfer_bins[count_col].sum())
 

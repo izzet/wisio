@@ -8,6 +8,12 @@ def create_dxt_dataframe(trace_path: str, time_granularity=1e3):
 
     rep = darshan.DarshanReport(trace_path, read_all=True)
 
+    job = rep.metadata['job']
+    if 'start_time' in job:
+        job_time = job['end_time'] - job['start_time']
+    else:
+        job_time = job['end_time_sec'] - job['start_time_sec']
+
     df = rep.records['DXT_POSIX'].to_df()
 
     dxt_posix = pd.DataFrame(df)
@@ -97,7 +103,7 @@ def create_dxt_dataframe(trace_path: str, time_granularity=1e3):
     dxt_posix_df['count'] = 1
     dxt_posix_df['time'] = dxt_posix_df['end_time'] - dxt_posix_df['start_time']
 
-    return dxt_posix_df
+    return dxt_posix_df, job_time  
 
 
 def generate_dxt_records(trace_path: str, time_granularity=1e3):

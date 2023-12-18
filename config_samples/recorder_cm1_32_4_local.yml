@@ -2,12 +2,13 @@ checkpoint: false
 cluster_config:
   cluster_type: "local"
   debug: false
-  n_workers: 8
+  n_workers: 16
   memory: 0
   local_dir: "/var/tmp/wisio/recorder_cm1_32_4_local"
 debug: true
 metrics:
   - "time"
+output_type: "console"
 trace_path: "/usr/workspace/iopp/wisio_logs/recorder_cm1_32_4/_parquet"
 view_types:
   - "time_range"

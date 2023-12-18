@@ -2,15 +2,17 @@ checkpoint: false
 cluster_config:
   cluster_type: "local"
   debug: false
-  n_workers: 8
+  local_dir: "/var/tmp/wisio/darshan_dlp_1_40_local"
   memory: 0
-  local_dir: "/var/tmp/wisio-darshan-dlp"
-debug: true
+  n_workers: 1
+  processes: false
+debug: false
 metrics:
   - "time"
-trace_path: "/usr/workspace/iopp/wisio_logs/darshan_dlp_overhead_1_40/haridev_overhead_id3822049-3822049_11-7-66326-7292532907421145426_1.darshan"
+output_type: console
+trace_path: "/p/gpfs1/iopp/wisio_logs/darshan_dlp_overhead_1_40/overhead.darshan"
 view_types:
   # - "time_range"
   - "proc_name"
   # - "file_name"
-working_dir: ".wisio/darshan-dlp"
+working_dir: ".wisio/darshan_dlp_1_40_local"

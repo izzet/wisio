@@ -1,9 +1,11 @@
-import logging
+import functools as ft
+import itertools as it
+import dask.bag as db
 import dask.dataframe as dd
 import numpy as np
-from concurrent.futures import ThreadPoolExecutor
 from dask import compute
-from typing import Dict, List
+from dask.delayed import Delayed
+from typing import Dict, List, Tuple, Union
 
 from .rules import (
     KNOWN_RULES,
@@ -14,18 +16,21 @@ from .rules import (
     CharacteristicIOSizeRule,
     CharacteristicIOTimeRule,
     CharacteristicProcessCount,
+    CharacteristicRule,
     CharacteristicXferSizeRule,
     KnownCharacteristics as kc,
 )
 from .types import (
+    BottleneckResult,
     BottlenecksPerViewPerMetric,
     Characteristics,
     Metric,
     RuleResult,
     RuleResultsPerViewPerMetricPerRule,
+    ViewKey,
     ViewType,
 )
-from .utils.logger import ElapsedTimeLogger
+from .utils.collection_utils import deepmerge
 
 
 class RuleEngine(object):
@@ -34,42 +39,41 @@ class RuleEngine(object):
         self.rules = rules
 
     def process_characteristics(self, main_view: dd.DataFrame) -> Characteristics:
-        with ElapsedTimeLogger(message='Create characteristics rules', level=logging.DEBUG):
-            rules = [
-                CharacteristicIOTimeRule(),
-                CharacteristicIOOpsRule(),
-                CharacteristicIOSizeRule(),
-                CharacteristicXferSizeRule(rule_key=kc.READ_XFER_SIZE.value),
-                CharacteristicXferSizeRule(rule_key=kc.WRITE_XFER_SIZE.value),
-                CharacteristicProcessCount(rule_key=kc.NODE_COUNT.value),
-                CharacteristicProcessCount(rule_key=kc.APP_COUNT.value),
-                CharacteristicProcessCount(rule_key=kc.PROC_COUNT.value),
-                CharacteristicFileCountRule(),
-                CharacteristicAccessPatternRule(),
-            ]
 
-        with ElapsedTimeLogger(message='Define characteristics tasks', level=logging.DEBUG):
-            tasks = {}
-            for rule in rules:
-                tasks[rule.rule_key] = rule.define_tasks(main_view=main_view)
+        rules = [
+            CharacteristicIOTimeRule(),
+            CharacteristicIOOpsRule(),
+            CharacteristicIOSizeRule(),
+            CharacteristicXferSizeRule(rule_key=kc.READ_XFER_SIZE.value),
+            CharacteristicXferSizeRule(rule_key=kc.WRITE_XFER_SIZE.value),
+            CharacteristicProcessCount(rule_key=kc.NODE_COUNT.value),
+            CharacteristicProcessCount(rule_key=kc.APP_COUNT.value),
+            CharacteristicProcessCount(rule_key=kc.PROC_COUNT.value),
+            CharacteristicFileCountRule(),
+            CharacteristicAccessPatternRule(),
+        ]
 
-        # visualize(tasks, filename='characteristics')
+        rules_bag = db.from_sequence(rules)
+        main_view_bag = db.from_sequence(it.repeat(main_view, len(rules)))
 
-        with ElapsedTimeLogger(message='Compute characteristics tasks', level=logging.DEBUG):
-            results = compute(tasks)
-        # with performance_report(filename='characteristics-report.html'):
-        #     results = compute(tasks)
+        tasks = db.zip(rules_bag, main_view_bag) \
+            .map(self._define_characteristic_tasks) \
+            .map(compute) \
+            .flatten()
 
-        with ElapsedTimeLogger(message='Handle characteristics task results', level=logging.DEBUG):
-            characteristics = {}
-            for rule in rules:
-                result = results[0][rule.rule_key]
-                characteristics[rule.rule_key] = rule.handle_task_results(
-                    result=result,
-                    characteristics=characteristics,
-                )
+        results = db.zip(rules_bag, tasks) \
+            .map(self._handle_characteristic_task_results, characteristics=tasks.fold(deepmerge)) \
+            .compute()
 
-        return characteristics
+        characteristics = ft.reduce(deepmerge, results)
+
+        rule_keys = [rule.rule_key for rule in rules]
+        sorted_characteristics = dict(
+            sorted(characteristics.items(),
+                   key=lambda characteristic: rule_keys.index(characteristic[0]))
+        )
+
+        return sorted_characteristics
 
     def process_bottlenecks(
         self,
@@ -79,93 +83,96 @@ class RuleEngine(object):
         threshold=0.5,
     ) -> RuleResultsPerViewPerMetricPerRule:
 
-        with ElapsedTimeLogger(message='Create bottlenecks rules', level=logging.DEBUG):
-            rules = {rule: BottleneckRule(rule_key=rule, rule=KNOWN_RULES[rule])
-                     for rule in KNOWN_RULES}
+        rules = {rule: BottleneckRule(rule_key=rule, rule=KNOWN_RULES[rule])
+                 for rule in KNOWN_RULES}
 
-        with ElapsedTimeLogger(message='Define bottlenecks tasks', level=logging.DEBUG):
-            tasks = {}
-            with ThreadPoolExecutor(max_workers=len(rules)) as executor:
-                for rule, impl in rules.items():
-                    for rule_tasks in executor.map(
-                        self._define_tasks,
-                        evaluated_views.keys(),
-                        evaluated_views.values(),
-                        np.repeat(rule, len(evaluated_views)),
-                        np.repeat(impl, len(evaluated_views)),
-                        np.repeat(metric_boundaries, len(evaluated_views)),
-                        np.repeat(characteristics, len(evaluated_views)),
-                        np.repeat(threshold, len(evaluated_views)),
-                    ):
-                        tasks.update(rule_tasks)
+        metrics = list(evaluated_views.keys())
 
-        # visualize(tasks, filename='bottlenecks')
+        view_keys_per_metric = list(it.chain.from_iterable(
+            evaluated_views[metric].keys() for metric in metrics))
+        evaluated_views_per_metric = list(it.chain.from_iterable(
+            evaluated_views[metric].values() for metric in metrics))
 
-        with ElapsedTimeLogger(message='Compute bottlenecks tasks', level=logging.DEBUG):
-            results = compute(tasks)
-        # with performance_report(filename='bottlenecks-report.html'):
-        #     results = compute(tasks)
+        rules_bag = db.from_sequence(
+            np.repeat(list(rules.keys()), len(view_keys_per_metric)))
+        metrics_bag = db.from_sequence(
+            np.repeat(metrics, len(rules) * len(view_keys_per_metric)))
+        view_keys_bag = db.from_sequence(
+            list(it.chain.from_iterable(it.repeat(view_keys_per_metric, len(rules)))))
+        evaluated_views_bag = db.from_sequence(
+            list(it.chain.from_iterable(it.repeat(evaluated_views_per_metric, len(rules)))))
 
-        with ElapsedTimeLogger(message='Handle bottlenecks task results', level=logging.DEBUG):
-            bottlenecks = {}
-            with ThreadPoolExecutor(max_workers=len(rules)) as executor:
-                for rule, impl in rules.items():
-                    for rule_bottlenecks in executor.map(
-                        self._handle_task_results,
-                        evaluated_views.keys(),
-                        evaluated_views.values(),
-                        np.repeat(rule, len(evaluated_views)),
-                        np.repeat(impl, len(evaluated_views)),
-                        np.repeat(results, len(evaluated_views)),
-                        np.repeat(characteristics, len(evaluated_views)),
-                    ):
-                        bottlenecks.update(rule_bottlenecks)
+        tasks = db.zip(rules_bag, metrics_bag, view_keys_bag, evaluated_views_bag) \
+            .map(self._define_bottleneck_tasks,
+                 rules=rules,
+                 characteristics=characteristics,
+                 metric_boundaries=metric_boundaries,
+                 threshold=threshold) \
+            .map(compute) \
+            .flatten()
+
+        results = db.zip(rules_bag, metrics_bag, view_keys_bag, tasks) \
+            .map(self._handle_bottleneck_task_results, rules=rules, characteristics=characteristics) \
+            .compute()
+
+        bottlenecks = ft.reduce(deepmerge, results)
 
         return bottlenecks
 
     @staticmethod
-    def _define_tasks(
-        metric: str,
-        evaluated_views: BottlenecksPerViewPerMetric,
-        rule: str,
-        rule_impl: BottleneckRule,
-        metric_boundaries: Dict[Metric, dd.core.Scalar],
-        characteristics: Dict[str, RuleResult],
-        threshold: float
-    ):
+    def _define_characteristic_tasks(zipped: Tuple[CharacteristicRule, dd.DataFrame]):
+        rule, main_view = zipped
         tasks = {}
-        tasks[rule] = {}
-        tasks[rule][metric] = {}
-        for view_key in evaluated_views:
-            bottleneck_result = evaluated_views[view_key]
-            tasks[rule][metric][view_key] = rule_impl.define_tasks(
-                metric=metric,
-                metric_boundary=metric_boundaries[metric],
-                view_key=view_key,
-                bottleneck_result=bottleneck_result,
-                characteristics=characteristics,
-                threshold=threshold,
-            )
+        tasks[rule.rule_key] = rule.define_tasks(main_view=main_view)
         return tasks
 
     @staticmethod
-    def _handle_task_results(
-        metric: str,
-        evaluated_views: BottlenecksPerViewPerMetric,
-        rule: str,
-        rule_impl: BottleneckRule,
-        results: tuple,
+    def _handle_characteristic_task_results(
+        zipped: Tuple[CharacteristicRule, Dict[str, Delayed]],
+        characteristics: Dict[str, Union[dict, list, int, float]],
+    ):
+        rule, result = zipped
+        characteristic = {}
+        characteristic[rule.rule_key] = rule.handle_task_results(
+            result=result[rule.rule_key],
+            characteristics=characteristics,
+        )
+        return characteristic
+
+    @staticmethod
+    def _define_bottleneck_tasks(
+        zipped: Tuple[str, str, ViewKey, BottleneckResult],
+        rules: Dict[str, BottleneckRule],
+        characteristics: Dict[str, RuleResult],
+        metric_boundaries: Dict[Metric, dd.core.Scalar],
+        threshold: float,
+    ):
+        rule, metric, view_key, bottleneck_result = zipped
+        rule_impl = rules[rule]
+        return rule_impl.define_tasks(
+            metric,
+            metric_boundary=metric_boundaries[metric],
+            view_key=view_key,
+            bottleneck_result=bottleneck_result,
+            characteristics=characteristics,
+            threshold=threshold,
+        )
+
+    @staticmethod
+    def _handle_bottleneck_task_results(
+        zipped: Tuple[str, str, ViewKey, tuple],
+        rules: Dict[str, BottleneckRule],
         characteristics: Dict[str, RuleResult],
     ):
-        bottlenecks = {}
-        bottlenecks[rule] = {}
-        bottlenecks[rule][metric] = {}
-        for view_key in evaluated_views:
-            result = results[rule][metric][view_key]
-            bottlenecks[rule][metric][view_key] = rule_impl.handle_task_results(
-                metric=metric,
-                view_key=view_key,
-                result=result,
-                characteristics=characteristics,
-            )
-        return bottlenecks
+        rule, metric, view_key, result = zipped
+        rule_impl = rules[rule]
+        bottleneck = {}
+        bottleneck[rule] = {}
+        bottleneck[rule][metric] = {}
+        bottleneck[rule][metric][view_key] = rule_impl.handle_task_results(
+            metric=metric,
+            view_key=view_key,
+            result=result,
+            characteristics=characteristics,
+        )
+        return bottleneck

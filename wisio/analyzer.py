@@ -3,11 +3,12 @@ import dask.dataframe as dd
 import itertools as it
 import logging
 import os
+from dask.base import unpack_collections
 from dask.distributed import wait
 from typing import Callable, Dict, List
 
 from .analysis import set_bound_columns, set_metric_deltas, set_metric_slope
-from .analysis_utils import set_file_dir, set_file_pattern, set_id, set_proc_name_parts
+from .analysis_utils import set_file_dir, set_file_pattern, set_proc_name_parts
 from .analyzer_result import AnalysisResult
 from .bottlenecks import BottleneckDetector
 from .cluster_management import ClusterConfig, ClusterManager
@@ -32,6 +33,7 @@ from .types import (
     AnalysisAccuracy,
     Metric,
     OutputType,
+    RawStats,
     ViewKey,
     ViewResult,
     ViewType,
@@ -104,13 +106,11 @@ class Analyzer(abc.ABC):
         self,
         traces: dd.DataFrame,
         metrics: List[Metric],
+        raw_stats: RawStats,
         accuracy: AnalysisAccuracy = 'pessimistic',
         slope_threshold: int = 45,
         view_types: List[ViewType] = ['file_name', 'proc_name', 'time_range'],
     ):
-        # Compute original I/O record count
-        original_total_count = traces.index.count().persist()
-
         # Compute high-level metrics
         with EventLogger(key=EVENT_COMP_HLM, message='Compute high-level metrics'):
             hlm = self.load_view(
@@ -121,6 +121,7 @@ class Analyzer(abc.ABC):
                 ),
                 force=False,
             )
+            wait(hlm)
 
         # Compute main view
         with EventLogger(key=EVENT_COMP_MAIN_VIEW, message='Compute main view'):
@@ -132,6 +133,7 @@ class Analyzer(abc.ABC):
                 ),
                 force=False,
             )
+            wait(main_view)
 
         # Compute upper bounds
         with EventLogger(key=EVENT_COMP_METBD, message='Compute metric boundaries'):
@@ -139,6 +141,8 @@ class Analyzer(abc.ABC):
                 main_view=main_view,
                 metrics=metrics,
             )
+            metric_boundaries_tasks, _ = unpack_collections(metric_boundaries)
+            wait(metric_boundaries_tasks)
 
         # Compute views
         with EventLogger(key=EVENT_COMP_PERS, message='Compute perspectives'):
@@ -157,8 +161,11 @@ class Analyzer(abc.ABC):
                 view_types=view_types,
                 view_results=view_results,
             )
-
-        view_results.update(logical_view_results)
+            view_tasks, _ = unpack_collections(view_results)
+            logical_view_tasks, _ = unpack_collections(logical_view_results)
+            view_tasks.extend(logical_view_tasks)
+            wait(view_tasks)
+            view_results.update(logical_view_results)
 
         # Detect bottlenecks
         bottleneck_detector = BottleneckDetector()
@@ -168,6 +175,8 @@ class Analyzer(abc.ABC):
                 metrics=metrics,
                 metric_boundaries=metric_boundaries,
             )
+            evaluated_view_tasks, _ = unpack_collections(evaluated_views)
+            wait(evaluated_view_tasks)
 
         # Execute rules
         rule_engine = RuleEngine(rules=[])
@@ -189,13 +198,9 @@ class Analyzer(abc.ABC):
             evaluated_views=evaluated_views,
             main_view=main_view,
             metric_boundaries=metric_boundaries,
-            original_total_count=original_total_count.compute(),
+            raw_stats=raw_stats,
             view_results=view_results,
         )
-
-        # Output result
-        if self.output_type == 'console':
-            result.output.console()
 
         # Return result
         return result
@@ -233,7 +238,7 @@ class Analyzer(abc.ABC):
             .sum(split_out=hlm.npartitions) \
             .persist()
         # Set hashed ids
-        main_view['id'] = main_view.index.map(set_id)
+        # main_view['id'] = main_view.index.map(set_id)
         # Return main_view
         return main_view
 
@@ -434,7 +439,7 @@ class Analyzer(abc.ABC):
                 x in col for x in 'duration time'.split()) else sum for col in view_columns}
         else:
             agg_dict = {col: sum for col in view_columns}
-        agg_dict.pop('id')
+        # agg_dict.pop('id')
         agg_dict['size_min'] = min
         agg_dict['size_max'] = max
         for view_type in VIEW_TYPES:

@@ -46,13 +46,12 @@ def handle_darshan(darshan_parser, args):
 
         config = _load_config(args.config)
 
-        print(config)
-
         analyzer = DarshanAnalyzer(
             checkpoint=config.checkpoint,
             checkpoint_dir=config.checkpoint_dir,
             cluster_config=config.cluster_config,
             debug=config.debug,
+            output_type=config.output_type,
             working_dir=config.working_dir,
         )
 
@@ -61,6 +60,9 @@ def handle_darshan(darshan_parser, args):
             metrics=config.metrics,
             view_types=config.view_types,
         )
+
+        if config.output_type == 'console':
+            result.output.console()
 
 
 def handle_recorder(recorder_parser, args):
@@ -85,6 +87,9 @@ def handle_recorder(recorder_parser, args):
             metrics=config.metrics,
             view_types=config.view_types,
         )
+
+        if config.output_type == 'console':
+            result.output.console()
 
 
 def ask_questions():

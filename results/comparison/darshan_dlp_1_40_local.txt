@@ -1,0 +1,620 @@
+╭─────────────────────────────────────────────────────────────── I/O Characteristics ───────────────────────────────────────────────────────────────╮
+│  I/O Time             0.75 seconds                                                                                                                │
+│                       ├── Read - 0.72 seconds (95.91%)                                                                                            │
+│                       ├── Write - 0.03 seconds (4.23%)                                                                                            │
+│                       └── Metadata - 0.00 seconds (0.00%)                                                                                         │
+│  I/O Ops              40,040 ops                                                                                                                  │
+│                       ├── Read - 40 ops (0.10%)                                                                                                   │
+│                       ├── Write - 40,000 ops (99.90%)                                                                                             │
+│                       └── Metadata - 0 ops (0.00%)                                                                                                │
+│  I/O Size             5.00 GB                                                                                                                     │
+│                       ├── Read - 0.12 GB (2.44%)                                                                                                  │
+│                       └── Write - 4.88 GB (97.56%)                                                                                                │
+│  Read Xfer            4 MB - 40 ops                                                                                                               │
+│                       └── 1-4 MB - 40 ops (100.00%)                                                                                               │
+│  Write Xfer           256 KB - 40 ops                                                                                                             │
+│                       └── 64-256 KB - 40 ops (100.00%)                                                                                            │
+│  Node(s)              1 node(s)                                                                                                                   │
+│                       └── localhost - 0.75 s (100.00%) - 0.12/4.88 GB R/W (2.44/97.56%) - 40,040 ops (100.00%)                                    │
+│  App(s)               1 app(s)                                                                                                                    │
+│                       └── app - 0.75 s (100.00%) - 0.12/4.88 GB R/W (2.44/97.56%) - 40,040 ops (100.00%)                                          │
+│  Process(es)/Rank(s)  40 process(es)/rank(s)                                                                                                      │
+│  Files                0 files                                                                                                                     │
+│                       ├── Shared: N/A                                                                                                             │
+│                       └── FPP: N/A                                                                                                                │
+│  Access Pattern       100.00% Sequential - 0.00% Random                                                                                           │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────────────────────────────── I/O Bottlenecks ─────────────────────────────────────────────────────────────────╮
+│  small_reads (80 bottlenecks)                                                                                                                     │
+│  ├── proc_name > rank (39 bottlenecks)                                                                                                            │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                             │
+│  │   │   ├── 'read' time is 95.89% (0.72 seconds) of I/O time.                                                                                    │
+│  │   │   └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 99.98% of overall I/O time of the workload.                                              │
+│  │   │   ├── 'read' time is 95.92% (0.72 seconds) of I/O time.                                                                                    │
+│  │   │   └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 99.97% of overall I/O time of the workload.                                              │
+│  │   │   ├── 'read' time is 95.93% (0.72 seconds) of I/O time.                                                                                    │
+│  │   │   └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│  │   └── (36 more)                                                                                                                                │
+│  ├── proc_name > node_name (1 bottlenecks)                                                                                                        │
+│  │   └── 1 node has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                             │
+│  │       ├── 'read' time is 95.91% (0.72 seconds) of I/O time.                                                                                    │
+│  │       └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│  ├── proc_name > app_name (1 bottlenecks)                                                                                                         │
+│  │   └── 1 app has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                              │
+│  │       ├── 'read' time is 95.91% (0.72 seconds) of I/O time.                                                                                    │
+│  │       └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│  └── proc_name (39 bottlenecks)                                                                                                                   │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                          │
+│      │   ├── 'read' time is 95.89% (0.72 seconds) of I/O time.                                                                                    │
+│      │   └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 99.98% of overall I/O time of the workload.                                           │
+│      │   ├── 'read' time is 95.92% (0.72 seconds) of I/O time.                                                                                    │
+│      │   └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 99.97% of overall I/O time of the workload.                                           │
+│      │   ├── 'read' time is 95.93% (0.72 seconds) of I/O time.                                                                                    │
+│      │   └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│      └── (36 more)                                                                                                                                │
+│  size_imbalance (80 bottlenecks)                                                                                                                  │
+│  ├── proc_name > rank (39 bottlenecks)                                                                                                            │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                             │
+│  │   │   └── 'write' size is 97.56% (125.00 MB) of total I/O size.                                                                                │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 99.98% of overall I/O time of the workload.                                              │
+│  │   │   └── 'write' size is 97.56% (125.00 MB) of total I/O size.                                                                                │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 99.97% of overall I/O time of the workload.                                              │
+│  │   │   └── 'write' size is 97.56% (125.00 MB) of total I/O size.                                                                                │
+│  │   └── (36 more)                                                                                                                                │
+│  ├── proc_name > node_name (1 bottlenecks)                                                                                                        │
+│  │   └── 1 node has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                             │
+│  │       └── 'write' size is 97.56% (5000.00 MB) of total I/O size.                                                                               │
+│  ├── proc_name > app_name (1 bottlenecks)                                                                                                         │
+│  │   └── 1 app has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                              │
+│  │       └── 'write' size is 97.56% (5000.00 MB) of total I/O size.                                                                               │
+│  └── proc_name (39 bottlenecks)                                                                                                                   │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                          │
+│      │   └── 'write' size is 97.56% (125.00 MB) of total I/O size.                                                                                │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 99.98% of overall I/O time of the workload.                                           │
+│      │   └── 'write' size is 97.56% (125.00 MB) of total I/O size.                                                                                │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 99.97% of overall I/O time of the workload.                                           │
+│      │   └── 'write' size is 97.56% (125.00 MB) of total I/O size.                                                                                │
+│      └── (36 more)                                                                                                                                │
+│  operation_imbalance (80 bottlenecks)                                                                                                             │
+│  ├── proc_name > rank (39 bottlenecks)                                                                                                            │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                             │
+│  │   │   └── 'write' operations are 99.90% (1000 operations) of total I/O operations.                                                             │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 99.98% of overall I/O time of the workload.                                              │
+│  │   │   └── 'write' operations are 99.90% (1000 operations) of total I/O operations.                                                             │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 99.97% of overall I/O time of the workload.                                              │
+│  │   │   └── 'write' operations are 99.90% (1000 operations) of total I/O operations.                                                             │
+│  │   └── (36 more)                                                                                                                                │
+│  ├── proc_name > node_name (1 bottlenecks)                                                                                                        │
+│  │   └── 1 node has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                             │
+│  │       └── 'write' operations are 99.90% (40000 operations) of total I/O operations.                                                            │
+│  ├── proc_name > app_name (1 bottlenecks)                                                                                                         │
+│  │   └── 1 app has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                              │
+│  │       └── 'write' operations are 99.90% (40000 operations) of total I/O operations.                                                            │
+│  └── proc_name (39 bottlenecks)                                                                                                                   │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                          │
+│      │   └── 'write' operations are 99.90% (1000 operations) of total I/O operations.                                                             │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 99.98% of overall I/O time of the workload.                                           │
+│      │   └── 'write' operations are 99.90% (1000 operations) of total I/O operations.                                                             │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 99.97% of overall I/O time of the workload.                                           │
+│      │   └── 'write' operations are 99.90% (1000 operations) of total I/O operations.                                                             │
+│      └── (36 more)                                                                                                                                │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭────────────────────────────────────────────────────────────────────── Debug ──────────────────────────────────────────────────────────────────────╮
+│  Data Reduction  raw - 40040 (100%)                                                                                                               │
+│                  └── time - avg. 39 (0.10%) - max. 40 (0.10%) - min. 39 (0.10%) - sum. 158 (0.39%)                                                │
+│                      ├── proc_name - 39 (0.10%)                                                                                                   │
+│                      ├── proc_name > app_name - 40 (0.10%)                                                                                        │
+│                      ├── proc_name > node_name - 40 (0.10%)                                                                                       │
+│                      └── proc_name > rank - 39 (0.10%)                                                                                            │
+│  Counts                         Count  Processed Record Count                                                                                     │
+│                   Perspectives  4      158                                                                                                        │
+│                   Bottlenecks   240    80                                                                                                         │
+│                   Rules         6      480                                                                                                        │
+│  Throughputs                    Record Throughput   Throughput                                                                                    │
+│                   Perspectives  103.65 records/sec  2.62 perspectives/sec                                                                         │
+│                   Bottlenecks   89.09 records/sec   267.27 bottlenecks/sec                                                                        │
+│                   Rules         153.84 records/sec                                                                                                │
+│  Severities      total - 240 bottlenecks (100%)                                                                                                   │
+│                  ├── critical - 24 bottlenecks (10.00%)                                                                                           │
+│                  └── rest - 216 bottlenecks (90.00%)                                                                                              │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─────────────────────────────────────────────────────────────── I/O Characteristics ───────────────────────────────────────────────────────────────╮
+│  I/O Time             0.75 seconds                                                                                                                │
+│                       ├── Read - 0.72 seconds (95.91%)                                                                                            │
+│                       ├── Write - 0.03 seconds (4.23%)                                                                                            │
+│                       └── Metadata - 0.00 seconds (0.00%)                                                                                         │
+│  I/O Ops              40,040 ops                                                                                                                  │
+│                       ├── Read - 40 ops (0.10%)                                                                                                   │
+│                       ├── Write - 40,000 ops (99.90%)                                                                                             │
+│                       └── Metadata - 0 ops (0.00%)                                                                                                │
+│  I/O Size             5.00 GB                                                                                                                     │
+│                       ├── Read - 0.12 GB (2.44%)                                                                                                  │
+│                       └── Write - 4.88 GB (97.56%)                                                                                                │
+│  Read Xfer            4 MB - 40 ops                                                                                                               │
+│                       └── 1-4 MB - 40 ops (100.00%)                                                                                               │
+│  Write Xfer           256 KB - 40 ops                                                                                                             │
+│                       └── 64-256 KB - 40 ops (100.00%)                                                                                            │
+│  Node(s)              1 node(s)                                                                                                                   │
+│                       └── localhost - 0.75 s (100.00%) - 0.12/4.88 GB R/W (2.44/97.56%) - 40,040 ops (100.00%)                                    │
+│  App(s)               1 app(s)                                                                                                                    │
+│                       └── app - 0.75 s (100.00%) - 0.12/4.88 GB R/W (2.44/97.56%) - 40,040 ops (100.00%)                                          │
+│  Process(es)/Rank(s)  40 process(es)/rank(s)                                                                                                      │
+│  Files                0 files                                                                                                                     │
+│                       ├── Shared: N/A                                                                                                             │
+│                       └── FPP: N/A                                                                                                                │
+│  Access Pattern       100.00% Sequential - 0.00% Random                                                                                           │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────────────────────────────── I/O Bottlenecks ─────────────────────────────────────────────────────────────────╮
+│  small_reads (80 bottlenecks)                                                                                                                     │
+│  ├── proc_name > rank (39 bottlenecks)                                                                                                            │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                             │
+│  │   │   ├── 'read' time is 95.89% (0.72 seconds) of I/O time.                                                                                    │
+│  │   │   └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 99.98% of overall I/O time of the workload.                                              │
+│  │   │   ├── 'read' time is 95.92% (0.72 seconds) of I/O time.                                                                                    │
+│  │   │   └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 99.97% of overall I/O time of the workload.                                              │
+│  │   │   ├── 'read' time is 95.93% (0.72 seconds) of I/O time.                                                                                    │
+│  │   │   └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│  │   └── (36 more)                                                                                                                                │
+│  ├── proc_name > node_name (1 bottlenecks)                                                                                                        │
+│  │   └── 1 node has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                             │
+│  │       ├── 'read' time is 95.91% (0.72 seconds) of I/O time.                                                                                    │
+│  │       └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│  ├── proc_name > app_name (1 bottlenecks)                                                                                                         │
+│  │   └── 1 app has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                              │
+│  │       ├── 'read' time is 95.91% (0.72 seconds) of I/O time.                                                                                    │
+│  │       └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│  └── proc_name (39 bottlenecks)                                                                                                                   │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                          │
+│      │   ├── 'read' time is 95.89% (0.72 seconds) of I/O time.                                                                                    │
+│      │   └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 99.98% of overall I/O time of the workload.                                           │
+│      │   ├── 'read' time is 95.92% (0.72 seconds) of I/O time.                                                                                    │
+│      │   └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 99.97% of overall I/O time of the workload.                                           │
+│      │   ├── 'read' time is 95.93% (0.72 seconds) of I/O time.                                                                                    │
+│      │   └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│      └── (36 more)                                                                                                                                │
+│  size_imbalance (80 bottlenecks)                                                                                                                  │
+│  ├── proc_name > rank (39 bottlenecks)                                                                                                            │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                             │
+│  │   │   └── 'write' size is 97.56% (125.00 MB) of total I/O size.                                                                                │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 99.98% of overall I/O time of the workload.                                              │
+│  │   │   └── 'write' size is 97.56% (125.00 MB) of total I/O size.                                                                                │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 99.97% of overall I/O time of the workload.                                              │
+│  │   │   └── 'write' size is 97.56% (125.00 MB) of total I/O size.                                                                                │
+│  │   └── (36 more)                                                                                                                                │
+│  ├── proc_name > node_name (1 bottlenecks)                                                                                                        │
+│  │   └── 1 node has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                             │
+│  │       └── 'write' size is 97.56% (5000.00 MB) of total I/O size.                                                                               │
+│  ├── proc_name > app_name (1 bottlenecks)                                                                                                         │
+│  │   └── 1 app has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                              │
+│  │       └── 'write' size is 97.56% (5000.00 MB) of total I/O size.                                                                               │
+│  └── proc_name (39 bottlenecks)                                                                                                                   │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                          │
+│      │   └── 'write' size is 97.56% (125.00 MB) of total I/O size.                                                                                │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 99.98% of overall I/O time of the workload.                                           │
+│      │   └── 'write' size is 97.56% (125.00 MB) of total I/O size.                                                                                │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 99.97% of overall I/O time of the workload.                                           │
+│      │   └── 'write' size is 97.56% (125.00 MB) of total I/O size.                                                                                │
+│      └── (36 more)                                                                                                                                │
+│  operation_imbalance (80 bottlenecks)                                                                                                             │
+│  ├── proc_name > rank (39 bottlenecks)                                                                                                            │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                             │
+│  │   │   └── 'write' operations are 99.90% (1000 operations) of total I/O operations.                                                             │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 99.98% of overall I/O time of the workload.                                              │
+│  │   │   └── 'write' operations are 99.90% (1000 operations) of total I/O operations.                                                             │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 99.97% of overall I/O time of the workload.                                              │
+│  │   │   └── 'write' operations are 99.90% (1000 operations) of total I/O operations.                                                             │
+│  │   └── (36 more)                                                                                                                                │
+│  ├── proc_name > node_name (1 bottlenecks)                                                                                                        │
+│  │   └── 1 node has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                             │
+│  │       └── 'write' operations are 99.90% (40000 operations) of total I/O operations.                                                            │
+│  ├── proc_name > app_name (1 bottlenecks)                                                                                                         │
+│  │   └── 1 app has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                              │
+│  │       └── 'write' operations are 99.90% (40000 operations) of total I/O operations.                                                            │
+│  └── proc_name (39 bottlenecks)                                                                                                                   │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                          │
+│      │   └── 'write' operations are 99.90% (1000 operations) of total I/O operations.                                                             │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 99.98% of overall I/O time of the workload.                                           │
+│      │   └── 'write' operations are 99.90% (1000 operations) of total I/O operations.                                                             │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 99.97% of overall I/O time of the workload.                                           │
+│      │   └── 'write' operations are 99.90% (1000 operations) of total I/O operations.                                                             │
+│      └── (36 more)                                                                                                                                │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭────────────────────────────────────────────────────────────────────── Debug ──────────────────────────────────────────────────────────────────────╮
+│  Data Reduction  raw - 40040 (100%)                                                                                                               │
+│                  └── time - avg. 39 (0.10%) - max. 40 (0.10%) - min. 39 (0.10%) - sum. 158 (0.39%)                                                │
+│                      ├── proc_name - 39 (0.10%)                                                                                                   │
+│                      ├── proc_name > app_name - 40 (0.10%)                                                                                        │
+│                      ├── proc_name > node_name - 40 (0.10%)                                                                                       │
+│                      └── proc_name > rank - 39 (0.10%)                                                                                            │
+│  Counts                         Count  Processed Record Count                                                                                     │
+│                   Perspectives  4      158                                                                                                        │
+│                   Bottlenecks   240    80                                                                                                         │
+│                   Rules         6      480                                                                                                        │
+│  Throughputs                    Record Throughput   Throughput                                                                                    │
+│                   Perspectives  103.32 records/sec  2.62 perspectives/sec                                                                         │
+│                   Bottlenecks   94.59 records/sec   283.78 bottlenecks/sec                                                                        │
+│                   Rules         142.72 records/sec                                                                                                │
+│  Severities      total - 240 bottlenecks (100%)                                                                                                   │
+│                  ├── critical - 24 bottlenecks (10.00%)                                                                                           │
+│                  └── rest - 216 bottlenecks (90.00%)                                                                                              │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─────────────────────────────────────────────────────────────── I/O Characteristics ───────────────────────────────────────────────────────────────╮
+│  I/O Time             0.75 seconds                                                                                                                │
+│                       ├── Read - 0.72 seconds (95.91%)                                                                                            │
+│                       ├── Write - 0.03 seconds (4.23%)                                                                                            │
+│                       └── Metadata - 0.00 seconds (0.00%)                                                                                         │
+│  I/O Ops              40,040 ops                                                                                                                  │
+│                       ├── Read - 40 ops (0.10%)                                                                                                   │
+│                       ├── Write - 40,000 ops (99.90%)                                                                                             │
+│                       └── Metadata - 0 ops (0.00%)                                                                                                │
+│  I/O Size             5.00 GB                                                                                                                     │
+│                       ├── Read - 0.12 GB (2.44%)                                                                                                  │
+│                       └── Write - 4.88 GB (97.56%)                                                                                                │
+│  Read Xfer            4 MB - 40 ops                                                                                                               │
+│                       └── 1-4 MB - 40 ops (100.00%)                                                                                               │
+│  Write Xfer           256 KB - 40 ops                                                                                                             │
+│                       └── 64-256 KB - 40 ops (100.00%)                                                                                            │
+│  Node(s)              1 node(s)                                                                                                                   │
+│                       └── localhost - 0.75 s (100.00%) - 0.12/4.88 GB R/W (2.44/97.56%) - 40,040 ops (100.00%)                                    │
+│  App(s)               1 app(s)                                                                                                                    │
+│                       └── app - 0.75 s (100.00%) - 0.12/4.88 GB R/W (2.44/97.56%) - 40,040 ops (100.00%)                                          │
+│  Process(es)/Rank(s)  40 process(es)/rank(s)                                                                                                      │
+│  Files                0 files                                                                                                                     │
+│                       ├── Shared: N/A                                                                                                             │
+│                       └── FPP: N/A                                                                                                                │
+│  Access Pattern       100.00% Sequential - 0.00% Random                                                                                           │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────────────────────────────── I/O Bottlenecks ─────────────────────────────────────────────────────────────────╮
+│  small_reads (80 bottlenecks)                                                                                                                     │
+│  ├── proc_name > rank (39 bottlenecks)                                                                                                            │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                             │
+│  │   │   ├── 'read' time is 95.89% (0.72 seconds) of I/O time.                                                                                    │
+│  │   │   └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 99.98% of overall I/O time of the workload.                                              │
+│  │   │   ├── 'read' time is 95.92% (0.72 seconds) of I/O time.                                                                                    │
+│  │   │   └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 99.97% of overall I/O time of the workload.                                              │
+│  │   │   ├── 'read' time is 95.93% (0.72 seconds) of I/O time.                                                                                    │
+│  │   │   └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│  │   └── (36 more)                                                                                                                                │
+│  ├── proc_name > node_name (1 bottlenecks)                                                                                                        │
+│  │   └── 1 node has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                             │
+│  │       ├── 'read' time is 95.91% (0.72 seconds) of I/O time.                                                                                    │
+│  │       └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│  ├── proc_name > app_name (1 bottlenecks)                                                                                                         │
+│  │   └── 1 app has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                              │
+│  │       ├── 'read' time is 95.91% (0.72 seconds) of I/O time.                                                                                    │
+│  │       └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│  └── proc_name (39 bottlenecks)                                                                                                                   │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                          │
+│      │   ├── 'read' time is 95.89% (0.72 seconds) of I/O time.                                                                                    │
+│      │   └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 99.98% of overall I/O time of the workload.                                           │
+│      │   ├── 'read' time is 95.92% (0.72 seconds) of I/O time.                                                                                    │
+│      │   └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 99.97% of overall I/O time of the workload.                                           │
+│      │   ├── 'read' time is 95.93% (0.72 seconds) of I/O time.                                                                                    │
+│      │   └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│      └── (36 more)                                                                                                                                │
+│  size_imbalance (80 bottlenecks)                                                                                                                  │
+│  ├── proc_name > rank (39 bottlenecks)                                                                                                            │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                             │
+│  │   │   └── 'write' size is 97.56% (125.00 MB) of total I/O size.                                                                                │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 99.98% of overall I/O time of the workload.                                              │
+│  │   │   └── 'write' size is 97.56% (125.00 MB) of total I/O size.                                                                                │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 99.97% of overall I/O time of the workload.                                              │
+│  │   │   └── 'write' size is 97.56% (125.00 MB) of total I/O size.                                                                                │
+│  │   └── (36 more)                                                                                                                                │
+│  ├── proc_name > node_name (1 bottlenecks)                                                                                                        │
+│  │   └── 1 node has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                             │
+│  │       └── 'write' size is 97.56% (5000.00 MB) of total I/O size.                                                                               │
+│  ├── proc_name > app_name (1 bottlenecks)                                                                                                         │
+│  │   └── 1 app has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                              │
+│  │       └── 'write' size is 97.56% (5000.00 MB) of total I/O size.                                                                               │
+│  └── proc_name (39 bottlenecks)                                                                                                                   │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                          │
+│      │   └── 'write' size is 97.56% (125.00 MB) of total I/O size.                                                                                │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 99.98% of overall I/O time of the workload.                                           │
+│      │   └── 'write' size is 97.56% (125.00 MB) of total I/O size.                                                                                │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 99.97% of overall I/O time of the workload.                                           │
+│      │   └── 'write' size is 97.56% (125.00 MB) of total I/O size.                                                                                │
+│      └── (36 more)                                                                                                                                │
+│  operation_imbalance (80 bottlenecks)                                                                                                             │
+│  ├── proc_name > rank (39 bottlenecks)                                                                                                            │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                             │
+│  │   │   └── 'write' operations are 99.90% (1000 operations) of total I/O operations.                                                             │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 99.98% of overall I/O time of the workload.                                              │
+│  │   │   └── 'write' operations are 99.90% (1000 operations) of total I/O operations.                                                             │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 99.97% of overall I/O time of the workload.                                              │
+│  │   │   └── 'write' operations are 99.90% (1000 operations) of total I/O operations.                                                             │
+│  │   └── (36 more)                                                                                                                                │
+│  ├── proc_name > node_name (1 bottlenecks)                                                                                                        │
+│  │   └── 1 node has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                             │
+│  │       └── 'write' operations are 99.90% (40000 operations) of total I/O operations.                                                            │
+│  ├── proc_name > app_name (1 bottlenecks)                                                                                                         │
+│  │   └── 1 app has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                              │
+│  │       └── 'write' operations are 99.90% (40000 operations) of total I/O operations.                                                            │
+│  └── proc_name (39 bottlenecks)                                                                                                                   │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                          │
+│      │   └── 'write' operations are 99.90% (1000 operations) of total I/O operations.                                                             │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 99.98% of overall I/O time of the workload.                                           │
+│      │   └── 'write' operations are 99.90% (1000 operations) of total I/O operations.                                                             │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 99.97% of overall I/O time of the workload.                                           │
+│      │   └── 'write' operations are 99.90% (1000 operations) of total I/O operations.                                                             │
+│      └── (36 more)                                                                                                                                │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭────────────────────────────────────────────────────────────────────── Debug ──────────────────────────────────────────────────────────────────────╮
+│  Data Reduction  raw - 40040 (100%)                                                                                                               │
+│                  └── time - avg. 39 (0.10%) - max. 40 (0.10%) - min. 39 (0.10%) - sum. 158 (0.39%)                                                │
+│                      ├── proc_name - 39 (0.10%)                                                                                                   │
+│                      ├── proc_name > app_name - 40 (0.10%)                                                                                        │
+│                      ├── proc_name > node_name - 40 (0.10%)                                                                                       │
+│                      └── proc_name > rank - 39 (0.10%)                                                                                            │
+│  Counts                         Count  Processed Record Count                                                                                     │
+│                   Perspectives  4      158                                                                                                        │
+│                   Bottlenecks   240    80                                                                                                         │
+│                   Rules         6      480                                                                                                        │
+│  Throughputs                    Record Throughput   Throughput                                                                                    │
+│                   Perspectives  103.84 records/sec  2.63 perspectives/sec                                                                         │
+│                   Bottlenecks   94.12 records/sec   282.35 bottlenecks/sec                                                                        │
+│                   Rules         127.69 records/sec                                                                                                │
+│  Severities      total - 240 bottlenecks (100%)                                                                                                   │
+│                  ├── critical - 24 bottlenecks (10.00%)                                                                                           │
+│                  └── rest - 216 bottlenecks (90.00%)                                                                                              │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─────────────────────────────────────────────────────────────── I/O Characteristics ───────────────────────────────────────────────────────────────╮
+│  I/O Time             0.75 seconds                                                                                                                │
+│                       ├── Read - 0.72 seconds (95.91%)                                                                                            │
+│                       ├── Write - 0.03 seconds (4.23%)                                                                                            │
+│                       └── Metadata - 0.00 seconds (0.00%)                                                                                         │
+│  I/O Ops              40,040 ops                                                                                                                  │
+│                       ├── Read - 40 ops (0.10%)                                                                                                   │
+│                       ├── Write - 40,000 ops (99.90%)                                                                                             │
+│                       └── Metadata - 0 ops (0.00%)                                                                                                │
+│  I/O Size             5.00 GB                                                                                                                     │
+│                       ├── Read - 0.12 GB (2.44%)                                                                                                  │
+│                       └── Write - 4.88 GB (97.56%)                                                                                                │
+│  Read Xfer            4 MB - 40 ops                                                                                                               │
+│                       └── 1-4 MB - 40 ops (100.00%)                                                                                               │
+│  Write Xfer           256 KB - 40 ops                                                                                                             │
+│                       └── 64-256 KB - 40 ops (100.00%)                                                                                            │
+│  Node(s)              1 node(s)                                                                                                                   │
+│                       └── localhost - 0.75 s (100.00%) - 0.12/4.88 GB R/W (2.44/97.56%) - 40,040 ops (100.00%)                                    │
+│  App(s)               1 app(s)                                                                                                                    │
+│                       └── app - 0.75 s (100.00%) - 0.12/4.88 GB R/W (2.44/97.56%) - 40,040 ops (100.00%)                                          │
+│  Process(es)/Rank(s)  40 process(es)/rank(s)                                                                                                      │
+│  Files                0 files                                                                                                                     │
+│                       ├── Shared: N/A                                                                                                             │
+│                       └── FPP: N/A                                                                                                                │
+│  Access Pattern       100.00% Sequential - 0.00% Random                                                                                           │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────────────────────────────── I/O Bottlenecks ─────────────────────────────────────────────────────────────────╮
+│  small_reads (80 bottlenecks)                                                                                                                     │
+│  ├── proc_name > rank (39 bottlenecks)                                                                                                            │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                             │
+│  │   │   ├── 'read' time is 95.89% (0.72 seconds) of I/O time.                                                                                    │
+│  │   │   └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 99.98% of overall I/O time of the workload.                                              │
+│  │   │   ├── 'read' time is 95.92% (0.72 seconds) of I/O time.                                                                                    │
+│  │   │   └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 99.97% of overall I/O time of the workload.                                              │
+│  │   │   ├── 'read' time is 95.93% (0.72 seconds) of I/O time.                                                                                    │
+│  │   │   └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│  │   └── (36 more)                                                                                                                                │
+│  ├── proc_name > node_name (1 bottlenecks)                                                                                                        │
+│  │   └── 1 node has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                             │
+│  │       ├── 'read' time is 95.91% (0.72 seconds) of I/O time.                                                                                    │
+│  │       └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│  ├── proc_name > app_name (1 bottlenecks)                                                                                                         │
+│  │   └── 1 app has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                              │
+│  │       ├── 'read' time is 95.91% (0.72 seconds) of I/O time.                                                                                    │
+│  │       └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│  └── proc_name (39 bottlenecks)                                                                                                                   │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                          │
+│      │   ├── 'read' time is 95.89% (0.72 seconds) of I/O time.                                                                                    │
+│      │   └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 99.98% of overall I/O time of the workload.                                           │
+│      │   ├── 'read' time is 95.92% (0.72 seconds) of I/O time.                                                                                    │
+│      │   └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 99.97% of overall I/O time of the workload.                                           │
+│      │   ├── 'read' time is 95.93% (0.72 seconds) of I/O time.                                                                                    │
+│      │   └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│      └── (36 more)                                                                                                                                │
+│  size_imbalance (80 bottlenecks)                                                                                                                  │
+│  ├── proc_name > rank (39 bottlenecks)                                                                                                            │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                             │
+│  │   │   └── 'write' size is 97.56% (125.00 MB) of total I/O size.                                                                                │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 99.98% of overall I/O time of the workload.                                              │
+│  │   │   └── 'write' size is 97.56% (125.00 MB) of total I/O size.                                                                                │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 99.97% of overall I/O time of the workload.                                              │
+│  │   │   └── 'write' size is 97.56% (125.00 MB) of total I/O size.                                                                                │
+│  │   └── (36 more)                                                                                                                                │
+│  ├── proc_name > node_name (1 bottlenecks)                                                                                                        │
+│  │   └── 1 node has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                             │
+│  │       └── 'write' size is 97.56% (5000.00 MB) of total I/O size.                                                                               │
+│  ├── proc_name > app_name (1 bottlenecks)                                                                                                         │
+│  │   └── 1 app has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                              │
+│  │       └── 'write' size is 97.56% (5000.00 MB) of total I/O size.                                                                               │
+│  └── proc_name (39 bottlenecks)                                                                                                                   │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                          │
+│      │   └── 'write' size is 97.56% (125.00 MB) of total I/O size.                                                                                │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 99.98% of overall I/O time of the workload.                                           │
+│      │   └── 'write' size is 97.56% (125.00 MB) of total I/O size.                                                                                │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 99.97% of overall I/O time of the workload.                                           │
+│      │   └── 'write' size is 97.56% (125.00 MB) of total I/O size.                                                                                │
+│      └── (36 more)                                                                                                                                │
+│  operation_imbalance (80 bottlenecks)                                                                                                             │
+│  ├── proc_name > rank (39 bottlenecks)                                                                                                            │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                             │
+│  │   │   └── 'write' operations are 99.90% (1000 operations) of total I/O operations.                                                             │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 99.98% of overall I/O time of the workload.                                              │
+│  │   │   └── 'write' operations are 99.90% (1000 operations) of total I/O operations.                                                             │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 99.97% of overall I/O time of the workload.                                              │
+│  │   │   └── 'write' operations are 99.90% (1000 operations) of total I/O operations.                                                             │
+│  │   └── (36 more)                                                                                                                                │
+│  ├── proc_name > node_name (1 bottlenecks)                                                                                                        │
+│  │   └── 1 node has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                             │
+│  │       └── 'write' operations are 99.90% (40000 operations) of total I/O operations.                                                            │
+│  ├── proc_name > app_name (1 bottlenecks)                                                                                                         │
+│  │   └── 1 app has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                              │
+│  │       └── 'write' operations are 99.90% (40000 operations) of total I/O operations.                                                            │
+│  └── proc_name (39 bottlenecks)                                                                                                                   │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                          │
+│      │   └── 'write' operations are 99.90% (1000 operations) of total I/O operations.                                                             │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 99.98% of overall I/O time of the workload.                                           │
+│      │   └── 'write' operations are 99.90% (1000 operations) of total I/O operations.                                                             │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 99.97% of overall I/O time of the workload.                                           │
+│      │   └── 'write' operations are 99.90% (1000 operations) of total I/O operations.                                                             │
+│      └── (36 more)                                                                                                                                │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭────────────────────────────────────────────────────────────────────── Debug ──────────────────────────────────────────────────────────────────────╮
+│  Data Reduction  raw - 40040 (100%)                                                                                                               │
+│                  └── time - avg. 39 (0.10%) - max. 40 (0.10%) - min. 39 (0.10%) - sum. 158 (0.39%)                                                │
+│                      ├── proc_name - 39 (0.10%)                                                                                                   │
+│                      ├── proc_name > app_name - 40 (0.10%)                                                                                        │
+│                      ├── proc_name > node_name - 40 (0.10%)                                                                                       │
+│                      └── proc_name > rank - 39 (0.10%)                                                                                            │
+│  Counts                         Count  Processed Record Count                                                                                     │
+│                   Perspectives  4      158                                                                                                        │
+│                   Bottlenecks   240    80                                                                                                         │
+│                   Rules         6      480                                                                                                        │
+│  Throughputs                    Record Throughput   Throughput                                                                                    │
+│                   Perspectives  102.59 records/sec  2.60 perspectives/sec                                                                         │
+│                   Bottlenecks   88.98 records/sec   266.95 bottlenecks/sec                                                                        │
+│                   Rules         155.33 records/sec                                                                                                │
+│  Severities      total - 240 bottlenecks (100%)                                                                                                   │
+│                  ├── critical - 24 bottlenecks (10.00%)                                                                                           │
+│                  └── rest - 216 bottlenecks (90.00%)                                                                                              │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─────────────────────────────────────────────────────────────── I/O Characteristics ───────────────────────────────────────────────────────────────╮
+│  I/O Time             0.75 seconds                                                                                                                │
+│                       ├── Read - 0.72 seconds (95.91%)                                                                                            │
+│                       ├── Write - 0.03 seconds (4.23%)                                                                                            │
+│                       └── Metadata - 0.00 seconds (0.00%)                                                                                         │
+│  I/O Ops              40,040 ops                                                                                                                  │
+│                       ├── Read - 40 ops (0.10%)                                                                                                   │
+│                       ├── Write - 40,000 ops (99.90%)                                                                                             │
+│                       └── Metadata - 0 ops (0.00%)                                                                                                │
+│  I/O Size             5.00 GB                                                                                                                     │
+│                       ├── Read - 0.12 GB (2.44%)                                                                                                  │
+│                       └── Write - 4.88 GB (97.56%)                                                                                                │
+│  Read Xfer            4 MB - 40 ops                                                                                                               │
+│                       └── 1-4 MB - 40 ops (100.00%)                                                                                               │
+│  Write Xfer           256 KB - 40 ops                                                                                                             │
+│                       └── 64-256 KB - 40 ops (100.00%)                                                                                            │
+│  Node(s)              1 node(s)                                                                                                                   │
+│                       └── localhost - 0.75 s (100.00%) - 0.12/4.88 GB R/W (2.44/97.56%) - 40,040 ops (100.00%)                                    │
+│  App(s)               1 app(s)                                                                                                                    │
+│                       └── app - 0.75 s (100.00%) - 0.12/4.88 GB R/W (2.44/97.56%) - 40,040 ops (100.00%)                                          │
+│  Process(es)/Rank(s)  40 process(es)/rank(s)                                                                                                      │
+│  Files                0 files                                                                                                                     │
+│                       ├── Shared: N/A                                                                                                             │
+│                       └── FPP: N/A                                                                                                                │
+│  Access Pattern       100.00% Sequential - 0.00% Random                                                                                           │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────────────────────────────── I/O Bottlenecks ─────────────────────────────────────────────────────────────────╮
+│  small_reads (80 bottlenecks)                                                                                                                     │
+│  ├── proc_name > rank (39 bottlenecks)                                                                                                            │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                             │
+│  │   │   ├── 'read' time is 95.89% (0.72 seconds) of I/O time.                                                                                    │
+│  │   │   └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 99.98% of overall I/O time of the workload.                                              │
+│  │   │   ├── 'read' time is 95.92% (0.72 seconds) of I/O time.                                                                                    │
+│  │   │   └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 99.97% of overall I/O time of the workload.                                              │
+│  │   │   ├── 'read' time is 95.93% (0.72 seconds) of I/O time.                                                                                    │
+│  │   │   └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│  │   └── (36 more)                                                                                                                                │
+│  ├── proc_name > node_name (1 bottlenecks)                                                                                                        │
+│  │   └── 1 node has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                             │
+│  │       ├── 'read' time is 95.91% (0.72 seconds) of I/O time.                                                                                    │
+│  │       └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│  ├── proc_name > app_name (1 bottlenecks)                                                                                                         │
+│  │   └── 1 app has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                              │
+│  │       ├── 'read' time is 95.91% (0.72 seconds) of I/O time.                                                                                    │
+│  │       └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│  └── proc_name (39 bottlenecks)                                                                                                                   │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                          │
+│      │   ├── 'read' time is 95.89% (0.72 seconds) of I/O time.                                                                                    │
+│      │   └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 99.98% of overall I/O time of the workload.                                           │
+│      │   ├── 'read' time is 95.92% (0.72 seconds) of I/O time.                                                                                    │
+│      │   └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 99.97% of overall I/O time of the workload.                                           │
+│      │   ├── 'read' time is 95.93% (0.72 seconds) of I/O time.                                                                                    │
+│      │   └── Average 'read's are 3.20 KB, which is smaller than 256 KB.                                                                           │
+│      └── (36 more)                                                                                                                                │
+│  size_imbalance (80 bottlenecks)                                                                                                                  │
+│  ├── proc_name > rank (39 bottlenecks)                                                                                                            │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                             │
+│  │   │   └── 'write' size is 97.56% (125.00 MB) of total I/O size.                                                                                │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 99.98% of overall I/O time of the workload.                                              │
+│  │   │   └── 'write' size is 97.56% (125.00 MB) of total I/O size.                                                                                │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 99.97% of overall I/O time of the workload.                                              │
+│  │   │   └── 'write' size is 97.56% (125.00 MB) of total I/O size.                                                                                │
+│  │   └── (36 more)                                                                                                                                │
+│  ├── proc_name > node_name (1 bottlenecks)                                                                                                        │
+│  │   └── 1 node has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                             │
+│  │       └── 'write' size is 97.56% (5000.00 MB) of total I/O size.                                                                               │
+│  ├── proc_name > app_name (1 bottlenecks)                                                                                                         │
+│  │   └── 1 app has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                              │
+│  │       └── 'write' size is 97.56% (5000.00 MB) of total I/O size.                                                                               │
+│  └── proc_name (39 bottlenecks)                                                                                                                   │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                          │
+│      │   └── 'write' size is 97.56% (125.00 MB) of total I/O size.                                                                                │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 99.98% of overall I/O time of the workload.                                           │
+│      │   └── 'write' size is 97.56% (125.00 MB) of total I/O size.                                                                                │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 99.97% of overall I/O time of the workload.                                           │
+│      │   └── 'write' size is 97.56% (125.00 MB) of total I/O size.                                                                                │
+│      └── (36 more)                                                                                                                                │
+│  operation_imbalance (80 bottlenecks)                                                                                                             │
+│  ├── proc_name > rank (39 bottlenecks)                                                                                                            │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                             │
+│  │   │   └── 'write' operations are 99.90% (1000 operations) of total I/O operations.                                                             │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 99.98% of overall I/O time of the workload.                                              │
+│  │   │   └── 'write' operations are 99.90% (1000 operations) of total I/O operations.                                                             │
+│  │   ├── 1 rank has an I/O time of 0.75 seconds which is 99.97% of overall I/O time of the workload.                                              │
+│  │   │   └── 'write' operations are 99.90% (1000 operations) of total I/O operations.                                                             │
+│  │   └── (36 more)                                                                                                                                │
+│  ├── proc_name > node_name (1 bottlenecks)                                                                                                        │
+│  │   └── 1 node has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                             │
+│  │       └── 'write' operations are 99.90% (40000 operations) of total I/O operations.                                                            │
+│  ├── proc_name > app_name (1 bottlenecks)                                                                                                         │
+│  │   └── 1 app has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                              │
+│  │       └── 'write' operations are 99.90% (40000 operations) of total I/O operations.                                                            │
+│  └── proc_name (39 bottlenecks)                                                                                                                   │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 100.00% of overall I/O time of the workload.                                          │
+│      │   └── 'write' operations are 99.90% (1000 operations) of total I/O operations.                                                             │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 99.98% of overall I/O time of the workload.                                           │
+│      │   └── 'write' operations are 99.90% (1000 operations) of total I/O operations.                                                             │
+│      ├── 1 process has an I/O time of 0.75 seconds which is 99.97% of overall I/O time of the workload.                                           │
+│      │   └── 'write' operations are 99.90% (1000 operations) of total I/O operations.                                                             │
+│      └── (36 more)                                                                                                                                │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭────────────────────────────────────────────────────────────────────── Debug ──────────────────────────────────────────────────────────────────────╮
+│  Data Reduction  raw - 40040 (100%)                                                                                                               │
+│                  └── time - avg. 39 (0.10%) - max. 40 (0.10%) - min. 39 (0.10%) - sum. 158 (0.39%)                                                │
+│                      ├── proc_name - 39 (0.10%)                                                                                                   │
+│                      ├── proc_name > app_name - 40 (0.10%)                                                                                        │
+│                      ├── proc_name > node_name - 40 (0.10%)                                                                                       │
+│                      └── proc_name > rank - 39 (0.10%)                                                                                            │
+│  Counts                         Count  Processed Record Count                                                                                     │
+│                   Perspectives  4      158                                                                                                        │
+│                   Bottlenecks   240    80                                                                                                         │
+│                   Rules         6      480                                                                                                        │
+│  Throughputs                    Record Throughput   Throughput                                                                                    │
+│                   Perspectives  103.56 records/sec  2.62 perspectives/sec                                                                         │
+│                   Bottlenecks   91.88 records/sec   275.63 bottlenecks/sec                                                                        │
+│                   Rules         156.25 records/sec                                                                                                │
+│  Severities      total - 240 bottlenecks (100%)                                                                                                   │
+│                  ├── critical - 24 bottlenecks (10.00%)                                                                                           │
+│                  └── rest - 216 bottlenecks (90.00%)                                                                                              │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

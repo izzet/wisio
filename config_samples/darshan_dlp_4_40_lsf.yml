@@ -13,9 +13,9 @@ cluster_config:
     - "-G asccasc"
     - "-q pdebug"
     - "-W 120"
-    - "-o .wisio/darshan_dlp_8_40_lsf/worker_logs/%J.log"
-    - "-e .wisio/darshan_dlp_8_40_lsf/worker_logs/%J.log"
-  local_dir: "/var/tmp/wisio/darshan_dlp_8_40_lsf"
+    - "-o .wisio/darshan_dlp_4_40_lsf/worker_logs/%J.log"
+    - "-e .wisio/darshan_dlp_4_40_lsf/worker_logs/%J.log"
+  local_dir: "/var/tmp/wisio/darshan_dlp_4_40_lsf"
   memory: 1600
   n_threads_per_worker: 16
   n_workers: 8
@@ -23,9 +23,9 @@ cluster_config:
 debug: true
 metrics:
   - "time"
-trace_path: "/p/gpfs1/iopp/wisio_logs/darshan_dlp_overhead_8_40/overhead.darshan"
+trace_path: "/p/gpfs1/iopp/wisio_logs/darshan_dlp_overhead_4_40/overhead.darshan"
 view_types:
   - "time_range"
   - "proc_name"
   - "file_name"
-working_dir: ".wisio/darshan_dlp_8_40_lsf"
+working_dir: ".wisio/darshan_dlp_4_40_lsf"

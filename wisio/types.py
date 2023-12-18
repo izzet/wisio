@@ -28,6 +28,12 @@ class BottleneckResult:
 
 
 @dataclass
+class RawStats:
+    job_time: dd.core.Scalar
+    total_count: dd.core.Scalar
+
+
+@dataclass
 class RuleReason:
     condition: str
     message: str

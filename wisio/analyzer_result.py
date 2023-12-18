@@ -25,6 +25,7 @@ from .types import (
     Characteristics,
     MainView,
     Metric,
+    RawStats,
     RuleResultsPerViewPerMetricPerRule,
     ViewKey,
     ViewResultsPerViewPerMetric,
@@ -41,7 +42,7 @@ class AnalyzerResultOutput(object):
         debug: bool,
         evaluated_views: BottlenecksPerViewPerMetric,
         main_view: MainView,
-        original_total_count: int,
+        raw_stats: RawStats,
         view_results: ViewResultsPerViewPerMetric,
     ) -> None:
         self.bottlenecks = bottlenecks
@@ -49,13 +50,17 @@ class AnalyzerResultOutput(object):
         self.debug = debug
         self.evaluated_views = evaluated_views
         self.main_view = main_view
-        self.original_total_count = original_total_count
+        self.raw_stats = raw_stats
         self.view_results = view_results
 
     def console(self, max_bottlenecks_per_view_type=3):
+        raw_job_time = self.raw_stats.job_time.compute()
+
         char_table = Table(box=None, show_header=False)
         char_table.add_column(style="cyan")
         char_table.add_column()
+
+        char_table.add_row('Job Time', f"{raw_job_time:.2f} seconds")
 
         # Add each key-value pair to the table as a row
         for char in self.characteristics.values():
@@ -80,8 +85,12 @@ class AnalyzerResultOutput(object):
                     for result in self.bottlenecks[rule][metric][view_key]:
                         tree_dict[rule][view_key].append(result)
 
+        # TODO metric
+        metric = 'time'
+
         bott_table = Table(box=None, show_header=False)
         bott_count = 0
+        severity_dict = {}
         for rule in tree_dict:
             rule_tree = Tree(rule)
             total_count = 0
@@ -94,6 +103,9 @@ class AnalyzerResultOutput(object):
                 if view_record_count == 0:
                     continue
                 for result in results:
+                    severity = result.extra_data[f"{metric}_score"]
+                    severity_dict[severity] = severity_dict[severity] if severity in severity_dict else 0
+                    severity_dict[severity] = severity_dict[severity] + 1
                     if result.reasons is None or len(result.reasons) == 0:
                         view_tree.add(result.description)
                     else:
@@ -117,6 +129,8 @@ class AnalyzerResultOutput(object):
         bott_panel = Panel(bott_table, title='I/O Bottlenecks')
 
         if self.debug:
+            raw_total_count = self.raw_stats.total_count.compute()
+
             elapsed_times = {}
             for (_, event) in get_client().get_events('elapsed_times'):
                 elapsed_times[event['key']] = event['elapsed_time']
@@ -125,7 +139,7 @@ class AnalyzerResultOutput(object):
             debug_table.add_column(style="cyan")
             debug_table.add_column()
 
-            reduction_tree = Tree(f"raw - {self.original_total_count} (100%)")
+            reduction_tree = Tree(f"raw - {raw_total_count} (100%)")
             view_count = 0
             total_record_count = 0
             for metric in self.view_results:
@@ -134,7 +148,7 @@ class AnalyzerResultOutput(object):
                 for view_key, view_result in self.view_results[metric].items():
                     view_count = view_count + 1
                     view_record_count = len(view_result.view)
-                    view_record_per = view_record_count/self.original_total_count
+                    view_record_per = view_record_count/raw_total_count
                     metric_tree.add(
                         f"{view_name(view_key, ' > ')} - {view_record_count} ({view_record_per*100:.2f}%)")
                     counts.append(view_record_count)
@@ -145,10 +159,10 @@ class AnalyzerResultOutput(object):
                 total_record_count = total_record_count + sum_count
                 metric_tree.label = (
                     f"{metric}"
-                    f" - avg. {avg_count} ({avg_count/self.original_total_count*100:.2f}%)"
-                    f" - max. {max_count} ({max_count/self.original_total_count*100:.2f}%)"
-                    f" - min. {min_count} ({min_count/self.original_total_count*100:.2f}%)"
-                    f" - sum. {sum_count} ({sum_count/self.original_total_count*100:.2f}%)"
+                    f" - avg. {avg_count} ({avg_count/raw_total_count*100:.2f}%)"
+                    f" - max. {max_count} ({max_count/raw_total_count*100:.2f}%)"
+                    f" - min. {min_count} ({min_count/raw_total_count*100:.2f}%)"
+                    f" - sum. {sum_count} ({sum_count/raw_total_count*100:.2f}%)"
                 )
                 reduction_tree.add(metric_tree)
             debug_table.add_row('Data Reduction', reduction_tree)
@@ -159,28 +173,61 @@ class AnalyzerResultOutput(object):
                     bott_record_count = bott_record_count + \
                         len(self.evaluated_views[metric][view_key].bottlenecks)
 
-            thruput_table = Table(box=None, show_header=False)
+            rule_count = len(self.bottlenecks)
+
+            count_table = Table(box=None, show_header=True)
+            count_table.add_column()
+            count_table.add_column('Count')
+            count_table.add_column('Processed Record Count')
+
+            count_table.add_row(
+                'Perspectives', f"{view_count}", f"{total_record_count}")
+            count_table.add_row(
+                'Bottlenecks', f"{bott_count}", f"{bott_record_count}")
+            count_table.add_row(
+                'Rules', f"{rule_count}", f"{bott_record_count*rule_count}")
+
+            debug_table.add_row('Counts', count_table)
+
+            thruput_table = Table(box=None, show_header=True)
             thruput_table.add_column()
-            thruput_table.add_column()
-            thruput_table.add_column()
+            thruput_table.add_column('Throughput')
+            thruput_table.add_column('Record Throughput')
 
             thruput_table.add_row(
-                'Multi-perspective View',
-                f"{total_record_count/elapsed_times[EVENT_COMP_PERS]:.2f} records/sec",
+                'Perspectives',
                 f"{view_count/elapsed_times[EVENT_COMP_PERS]:.2f} perspectives/sec",
+                f"{total_record_count/elapsed_times[EVENT_COMP_PERS]:.2f} records/sec",
             )
             thruput_table.add_row(
-                'Bottleneck Detection',
-                f"{bott_record_count/elapsed_times[EVENT_DET_BOTT]:.2f} records/sec",
+                'Bottlenecks',
                 f"{bott_count/elapsed_times[EVENT_DET_BOTT]:.2f} bottlenecks/sec",
+                f"{bott_record_count/elapsed_times[EVENT_DET_BOTT]:.2f} records/sec",
             )
             thruput_table.add_row(
-                'Rule Engine',
-                f"{(bott_record_count*len(self.bottlenecks))/(elapsed_times[EVENT_ATT_REASONS]):.2f} records/sec",
-                ''
+                'Rules',
+                f"{rule_count/(elapsed_times[EVENT_ATT_REASONS]):.2f} rules/sec",
+                f"{(bott_record_count*rule_count)/(elapsed_times[EVENT_ATT_REASONS]):.2f} records/sec",
             )
 
             debug_table.add_row('Throughputs', thruput_table)
+
+            severity_tree = Tree(f"total - {bott_count} bottlenecks (100%)")
+            severity_total = 0
+            for severity in severity_dict:
+                severity_tree.add((
+                    f"{severity} - "
+                    f"{severity_dict[severity]} bottlenecks "
+                    f"({severity_dict[severity]/bott_count*100:.2f}%)"
+                ))
+                severity_total = severity_total + severity_dict[severity]
+            severity_tree.add((
+                f"rest - "
+                f"{bott_count - severity_total} bottlenecks "
+                f"({(bott_count - severity_total)/bott_count*100:.2f}%)"
+            ))
+
+            debug_table.add_row('Severities', severity_tree)
 
             debug_panel = Panel(debug_table, title='Debug')
 
@@ -627,7 +674,7 @@ class AnalysisResult(object):
         evaluated_views: BottlenecksPerViewPerMetric,
         main_view: MainView,
         metric_boundaries,
-        original_total_count: int,
+        raw_stats: RawStats,
         view_results: ViewResultsPerViewPerMetric,
     ):
         self.bottlenecks = bottlenecks
@@ -636,7 +683,7 @@ class AnalysisResult(object):
         self.evaluated_views = evaluated_views
         self.main_view = main_view
         self.metric_boundaries = metric_boundaries
-        self.original_total_count = original_total_count
+        self.raw_stats = raw_stats
         self.view_results = view_results
 
         self.output = AnalyzerResultOutput(
@@ -645,7 +692,7 @@ class AnalysisResult(object):
             debug=debug,
             evaluated_views=evaluated_views,
             main_view=main_view,
-            original_total_count=original_total_count,
+            raw_stats=raw_stats,
             view_results=view_results,
         )
 

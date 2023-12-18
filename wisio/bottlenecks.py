@@ -1,6 +1,11 @@
 import dask.dataframe as dd
 from typing import Dict, List
-from .analysis import IS_NORMALIZED, set_bound_columns, set_metric_percentages, set_metric_scores
+from .analysis import (
+    IS_NORMALIZED,
+    set_bound_columns,
+    set_metric_percentages,
+    set_metric_scores,
+)
 from .types import (
     BottleneckResult,
     BottlenecksPerViewPerMetric,
@@ -38,12 +43,14 @@ class BottleneckDetector(object):
             bottlenecks[metric] = {}
             for view_key, view_result in view_results[metric].items():
                 # Generate bottleneck views
-                bottlenecks[metric][view_key] = self._generate_bottlenecks_views(
+                bottleneck_views = self._generate_bottlenecks_views(
                     metric=metric,
                     metric_boundary=metric_boundaries[metric],
                     view_key=view_key,
                     view_result=view_result,
                 )
+
+                bottlenecks[metric][view_key] = bottleneck_views
         # Return bottleneck views
         return bottlenecks
 
