@@ -2,6 +2,8 @@ import argparse
 import yaml
 from dataclasses import dataclass, field
 from typing import List
+
+from .analyzer_result import AnalysisResult
 from .cluster_management import ClusterConfig
 from .darshan import DarshanAnalyzer
 from .recorder import RecorderAnalyzer
@@ -23,6 +25,11 @@ class Config:
     def __post_init__(self):
         if isinstance(self.cluster_config, dict):
             self.cluster_config = ClusterConfig(**self.cluster_config)
+
+
+def _handle_output(result: AnalysisResult, output_type: OutputType, show_debug: bool):
+    if output_type == 'console':
+        result.output.console(show_debug=show_debug)
 
 
 def _load_config(config_path: str):
@@ -61,8 +68,11 @@ def handle_darshan(darshan_parser, args):
             view_types=config.view_types,
         )
 
-        if config.output_type == 'console':
-            result.output.console()
+        _handle_output(
+            output_type=config.output_type,
+            result=result,
+            show_debug=config.debug,
+        )
 
 
 def handle_recorder(recorder_parser, args):
@@ -88,18 +98,11 @@ def handle_recorder(recorder_parser, args):
             view_types=config.view_types,
         )
 
-        if config.output_type == 'console':
-            result.output.console()
-
-
-def ask_questions():
-    question1 = input("Enter your answer to question 1: ")
-    question2 = input("Enter your answer to question 2: ")
-
-    # Process the answers (you can replace this with your logic)
-    result = f"Your answers were: Question 1 - {question1}, Question 2 - {question2}"
-
-    return result
+        _handle_output(
+            output_type=config.output_type,
+            result=result,
+            show_debug=config.debug,
+        )
 
 
 def main():

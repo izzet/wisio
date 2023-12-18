@@ -67,6 +67,7 @@ class RuleResult:
 class ViewResult:
     group_view: dd.DataFrame
     metric: str
+    slope_view: dd.DataFrame
     view: dd.DataFrame
     view_type: ViewType
 

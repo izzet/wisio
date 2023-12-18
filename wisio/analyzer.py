@@ -194,7 +194,6 @@ class Analyzer(abc.ABC):
         result = AnalysisResult(
             bottlenecks=bottlenecks,
             characteristics=characteristics,
-            debug=self.debug,
             evaluated_views=evaluated_views,
             main_view=main_view,
             metric_boundaries=metric_boundaries,
@@ -239,6 +238,7 @@ class Analyzer(abc.ABC):
             .persist()
         # Set hashed ids
         # main_view['id'] = main_view.index.map(set_id)
+        main_view['id'] = main_view.index.map(hash)
         # Return main_view
         return main_view
 
@@ -345,8 +345,8 @@ class Analyzer(abc.ABC):
         metric_boundary: dd.core.Scalar,
         slope_threshold=45,
     ) -> ViewResult:
-        # Compute group view
-        group_view = self._compute_group_view(
+        # Compute slope view
+        slope_view = self._compute_slope_view(
             metric=metric,
             metric_boundary=metric_boundary,
             parent_view=parent_view,
@@ -358,10 +358,10 @@ class Analyzer(abc.ABC):
         slope_col = f"{metric}_slope"
 
         # Filter by slope
-        filtered_view = group_view
+        filtered_view = slope_view
         if slope_threshold > 0:
-            filtered_view = group_view.query(
-                f"{slope_col} < {slope_threshold}")
+            filtered_view = slope_view \
+                .query(f"{slope_col} < {slope_threshold}")
 
         indices = filtered_view.index.unique()
 
@@ -374,6 +374,7 @@ class Analyzer(abc.ABC):
         return ViewResult(
             group_view=filtered_view,
             metric=metric,
+            slope_view=slope_view,
             view=view,
             view_type=view_type,
         )
@@ -395,7 +396,7 @@ class Analyzer(abc.ABC):
             return it.permutations(view_types, r + 1)
         return it.chain.from_iterable(map(_iter_permutations, range(len(view_types))))
 
-    def _compute_group_view(
+    def _compute_slope_view(
         self,
         parent_view: dd.DataFrame,
         view_type: str,
@@ -403,34 +404,38 @@ class Analyzer(abc.ABC):
         metric_boundary: dd.core.Scalar,
     ) -> dd.DataFrame:
         non_proc_agg_dict = self._get_agg_dict(
-            view_columns=parent_view.columns, is_proc=False)
+            view_columns=parent_view.columns,
+            is_proc=False,
+        )
         proc_agg_dict = self._get_agg_dict(
-            view_columns=parent_view.columns, is_proc=True)
+            view_columns=parent_view.columns,
+            is_proc=True,
+        )
 
         # Check view type
         if view_type is not COL_PROC_NAME:
             # Compute proc view first
-            group_view = parent_view \
+            slope_view = parent_view \
                 .groupby([view_type, COL_PROC_NAME]) \
                 .agg(non_proc_agg_dict) \
                 .map_partitions(set_bound_columns) \
                 .groupby([view_type]) \
                 .agg(proc_agg_dict)
         else:
-            # Compute group view
-            group_view = parent_view \
+            # Compute slope view
+            slope_view = parent_view \
                 .groupby([view_type]) \
                 .agg(non_proc_agg_dict) \
                 .map_partitions(set_bound_columns)
 
         # Set metric deltas & slope
-        group_view = group_view \
+        slope_view = slope_view \
             .sort_values(metric, ascending=False) \
             .map_partitions(set_metric_deltas, metric=metric, metric_boundary=metric_boundary) \
             .map_partitions(set_metric_slope, metric=metric)
 
-        # Return group view & normalization data
-        return group_view
+        # Return slope view
+        return slope_view
 
     @staticmethod
     def _get_agg_dict(view_columns: list, is_proc=False):
@@ -439,7 +444,7 @@ class Analyzer(abc.ABC):
                 x in col for x in 'duration time'.split()) else sum for col in view_columns}
         else:
             agg_dict = {col: sum for col in view_columns}
-        # agg_dict.pop('id')
+        agg_dict.pop('id')
         agg_dict['size_min'] = min
         agg_dict['size_max'] = max
         for view_type in VIEW_TYPES:

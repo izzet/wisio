@@ -39,7 +39,6 @@ class AnalyzerResultOutput(object):
         self,
         bottlenecks: RuleResultsPerViewPerMetricPerRule,
         characteristics: Characteristics,
-        debug: bool,
         evaluated_views: BottlenecksPerViewPerMetric,
         main_view: MainView,
         raw_stats: RawStats,
@@ -47,13 +46,12 @@ class AnalyzerResultOutput(object):
     ) -> None:
         self.bottlenecks = bottlenecks
         self.characteristics = characteristics
-        self.debug = debug
         self.evaluated_views = evaluated_views
         self.main_view = main_view
         self.raw_stats = raw_stats
         self.view_results = view_results
 
-    def console(self, max_bottlenecks_per_view_type=3):
+    def console(self, max_bottlenecks_per_view_type=3, show_debug=True):
         raw_job_time = self.raw_stats.job_time.compute()
 
         char_table = Table(box=None, show_header=False)
@@ -128,7 +126,7 @@ class AnalyzerResultOutput(object):
         char_panel = Panel(char_table, title='I/O Characteristics')
         bott_panel = Panel(bott_table, title='I/O Bottlenecks')
 
-        if self.debug:
+        if show_debug:
             raw_total_count = self.raw_stats.total_count.compute()
 
             elapsed_times = {}
@@ -531,10 +529,10 @@ class AnalysisResultPlots(object):
             _, ax = plt.subplots(figsize=figsize)
         legend_handles = []
         x_col = f"{metric}_per_rev_cs"
-        y_col = 'index_cs_per_rev'
+        y_col = 'count_cs_per_rev'
         for i, view_key in enumerate(view_keys):
             view_result = self.view_results[metric][view_key]
-            group_view = view_result.group_view.compute()
+            group_view = view_result.slope_view.compute()
             slope_cond = group_view[f"{metric}_slope"] < slope_threshold
             group_view.loc[slope_cond, f"{x_col}_line"] = group_view[x_col]
             line = group_view[f"{x_col}_line"].to_numpy()
@@ -547,7 +545,7 @@ class AnalysisResultPlots(object):
                 dotted[last_non_nan_index + 1:] = x[last_non_nan_index + 1:]
             mask = np.isfinite(dotted)
             color = f"C{i}" if color is None else color
-            ax.plot(dotted[mask], y[mask], c=color, ls='--')
+            ax.plot(dotted[mask], y[mask], c=color, ls=':')
             ax.plot(line, y, c=color)
             if len(legends) > 0:
                 legend_handles.append(
@@ -670,7 +668,6 @@ class AnalysisResult(object):
         self,
         bottlenecks: RuleResultsPerViewPerMetricPerRule,
         characteristics: Characteristics,
-        debug: bool,
         evaluated_views: BottlenecksPerViewPerMetric,
         main_view: MainView,
         metric_boundaries,
@@ -679,7 +676,6 @@ class AnalysisResult(object):
     ):
         self.bottlenecks = bottlenecks
         self.characteristics = characteristics
-        self.debug = debug
         self.evaluated_views = evaluated_views
         self.main_view = main_view
         self.metric_boundaries = metric_boundaries
@@ -689,7 +685,6 @@ class AnalysisResult(object):
         self.output = AnalyzerResultOutput(
             characteristics=characteristics,
             bottlenecks=bottlenecks,
-            debug=debug,
             evaluated_views=evaluated_views,
             main_view=main_view,
             raw_stats=raw_stats,
