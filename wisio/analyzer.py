@@ -10,7 +10,6 @@ from typing import Callable, Dict, List
 from .analysis import set_bound_columns, set_metric_deltas, set_metric_slope
 from .analysis_utils import set_file_dir, set_file_pattern, set_proc_name_parts
 from .analyzer_result import AnalysisResult
-from .bottlenecks import BottleneckDetector
 from .cluster_management import ClusterConfig, ClusterManager
 from .constants import (
     ACC_PAT_SUFFIXES,
@@ -29,6 +28,7 @@ from .constants import (
     IOCategory,
 )
 from .rule_engine import RuleEngine
+from .scoring import ViewEvaluator
 from .types import (
     AnalysisAccuracy,
     Metric,
@@ -77,7 +77,6 @@ class Analyzer(abc.ABC):
         checkpoint_dir: str = '',
         cluster_config: ClusterConfig = None,
         debug=False,
-        output_type: OutputType = 'console',
     ):
         if checkpoint:
             assert checkpoint_dir != '', 'Checkpoint directory must be defined'
@@ -87,7 +86,6 @@ class Analyzer(abc.ABC):
         self.cluster_config = cluster_config
         self.debug = debug
         self.name = name
-        self.output_type = output_type
 
         # Setup logging
         ensure_dir(working_dir)
@@ -108,6 +106,7 @@ class Analyzer(abc.ABC):
         metrics: List[Metric],
         raw_stats: RawStats,
         accuracy: AnalysisAccuracy = 'pessimistic',
+        metric_threshold: float = 0.5,
         slope_threshold: int = 45,
         view_types: List[ViewType] = ['file_name', 'proc_name', 'time_range'],
     ):
@@ -167,19 +166,20 @@ class Analyzer(abc.ABC):
             wait(view_tasks)
             view_results.update(logical_view_results)
 
-        # Detect bottlenecks
-        bottleneck_detector = BottleneckDetector()
+        # Evaluate views
+        view_evaluator = ViewEvaluator()
         with EventLogger(key=EVENT_DET_BOTT, message='Detect I/O bottlenecks'):
-            evaluated_views = bottleneck_detector.evaluate_views(
-                view_results=view_results,
-                metrics=metrics,
+            evaluated_views = view_evaluator.evaluate_views(
                 metric_boundaries=metric_boundaries,
+                metrics=metrics,
+                threshold=metric_threshold,
+                view_results=view_results,
             )
             evaluated_view_tasks, _ = unpack_collections(evaluated_views)
             wait(evaluated_view_tasks)
 
         # Execute rules
-        rule_engine = RuleEngine(rules=[])
+        rule_engine = RuleEngine(rules=[], raw_stats=raw_stats)
         with EventLogger(key=EVENT_ATT_REASONS, message='Attach reasons to I/O bottlenecks'):
             characteristics = rule_engine.process_characteristics(
                 main_view=main_view

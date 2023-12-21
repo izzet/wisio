@@ -11,7 +11,7 @@ Metric = Literal[
     'iops',
     'time',
 ]
-OutputType = Literal['console', 'html', 'json']
+OutputType = Literal['console', 'csv', 'html', 'json']
 ViewType = Literal[
     'file_name',
     'proc_name',
@@ -22,14 +22,16 @@ ViewKey = Union[Tuple[ViewType], Tuple[ViewType, ViewType],
 
 
 @dataclass
-class BottleneckResult:
-    bottlenecks: dd.DataFrame
-    details: dd.DataFrame
+class ScoringResult:
+    attached_records: dd.DataFrame
+    evaluated_groups: dd.DataFrame
+    potential_bottlenecks: dd.DataFrame
 
 
 @dataclass
 class RawStats:
     job_time: dd.core.Scalar
+    time_granularity: int
     total_count: dd.core.Scalar
 
 
@@ -74,14 +76,15 @@ class ViewResult:
 
 MainView = dd.DataFrame
 
-BottlenecksPerView = Dict[ViewKey, BottleneckResult]
-BottlenecksPerViewPerMetric = Dict[Metric, BottlenecksPerView]
 
 Characteristics = Dict[str, RuleResult]
 
 RuleResultsPerView = Dict[ViewKey, List[RuleResult]]
 RuleResultsPerViewPerMetric = Dict[Metric, RuleResultsPerView]
 RuleResultsPerViewPerMetricPerRule = Dict[str, RuleResultsPerViewPerMetric]
+
+ScoringPerView = Dict[ViewKey, ScoringResult]
+ScoringPerViewPerMetric = Dict[Metric, ScoringPerView]
 
 ViewResultsPerView = Dict[ViewKey, ViewResult]
 ViewResultsPerViewPerMetric = Dict[Metric, ViewResultsPerView]

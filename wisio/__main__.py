@@ -1,6 +1,7 @@
 import argparse
 import yaml
 from dataclasses import dataclass, field
+from time import time
 from typing import List
 
 from .analyzer_result import AnalysisResult
@@ -11,25 +12,52 @@ from .types import Metric, OutputType, ViewType
 
 
 @dataclass
+class OutputConfig:
+    file_path: str = None
+    max_bottlenecks_per_view_type: int = 3
+    name: str = None
+    show_debug: bool = False
+    type: OutputType = 'console'
+
+
+@dataclass
 class Config:
     trace_path: str
     checkpoint: bool = True
     checkpoint_dir: str = None
-    cluster_config: ClusterConfig = None
+    cluster: ClusterConfig = None
     debug: bool = False
+    metric_threshold: float = 0.5
     metrics: List[Metric] = field(default_factory=list)
-    output_type: OutputType = 'console'
+    output: OutputConfig = None
+    slope_threshold: int = 45
     view_types: List[ViewType] = field(default_factory=list)
     working_dir: str = '.wisio'
 
     def __post_init__(self):
-        if isinstance(self.cluster_config, dict):
-            self.cluster_config = ClusterConfig(**self.cluster_config)
+        if isinstance(self.cluster, dict):
+            self.cluster = ClusterConfig(**self.cluster)
+        if isinstance(self.output, dict):
+            self.output = OutputConfig(**self.output)
 
 
-def _handle_output(result: AnalysisResult, output_type: OutputType, show_debug: bool):
-    if output_type == 'console':
-        result.output.console(show_debug=show_debug)
+def _handle_output(result: AnalysisResult, config: Config):
+    output_config = config.output
+    if output_config.type == 'console':
+        result.output.console(
+            max_bottlenecks_per_view_type=output_config.max_bottlenecks_per_view_type,
+            show_debug=output_config.show_debug,
+        )
+    elif output_config.type == 'csv':
+        file_path = output_config.file_path
+        if file_path is None:
+            file_path = f"{config.working_dir}/{int(time())}.csv"
+        result.output.csv(
+            file_path=file_path,
+            max_bottlenecks_per_view_type=output_config.max_bottlenecks_per_view_type,
+            name=output_config.name,
+            show_debug=output_config.show_debug,
+        )
 
 
 def _load_config(config_path: str):
@@ -56,23 +84,20 @@ def handle_darshan(darshan_parser, args):
         analyzer = DarshanAnalyzer(
             checkpoint=config.checkpoint,
             checkpoint_dir=config.checkpoint_dir,
-            cluster_config=config.cluster_config,
+            cluster_config=config.cluster,
             debug=config.debug,
-            output_type=config.output_type,
             working_dir=config.working_dir,
         )
 
         result = analyzer.analyze_dxt(
-            trace_path_pattern=config.trace_path,
+            metric_threshold=config.metric_threshold,
             metrics=config.metrics,
+            slope_threshold=config.slope_threshold,
+            trace_path_pattern=config.trace_path,
             view_types=config.view_types,
         )
 
-        _handle_output(
-            output_type=config.output_type,
-            result=result,
-            show_debug=config.debug,
-        )
+        _handle_output(config=config, result=result)
 
 
 def handle_recorder(recorder_parser, args):
@@ -86,23 +111,20 @@ def handle_recorder(recorder_parser, args):
         analyzer = RecorderAnalyzer(
             checkpoint=config.checkpoint,
             checkpoint_dir=config.checkpoint_dir,
-            cluster_config=config.cluster_config,
+            cluster_config=config.cluster,
             debug=config.debug,
-            output_type=config.output_type,
             working_dir=config.working_dir,
         )
 
         result = analyzer.analyze_parquet(
-            trace_path=config.trace_path,
+            metric_threshold=config.metric_threshold,
             metrics=config.metrics,
+            slope_threshold=config.slope_threshold,
+            trace_path=config.trace_path,
             view_types=config.view_types,
         )
 
-        _handle_output(
-            output_type=config.output_type,
-            result=result,
-            show_debug=config.debug,
-        )
+        _handle_output(config=config, result=result)
 
 
 def main():

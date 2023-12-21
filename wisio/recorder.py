@@ -41,7 +41,6 @@ class RecorderAnalyzer(Analyzer):
         checkpoint_dir: str = '',
         cluster_config: ClusterConfig = None,
         debug=False,
-        output_type: OutputType = 'console',
     ):
         super().__init__(
             name='Recorder',
@@ -49,7 +48,6 @@ class RecorderAnalyzer(Analyzer):
             checkpoint_dir=checkpoint_dir,
             cluster_config=cluster_config,
             debug=debug,
-            output_type=output_type,
             working_dir=working_dir,
         )
 
@@ -58,6 +56,7 @@ class RecorderAnalyzer(Analyzer):
         trace_path: str,
         metrics: List[Metric] = ['time'],
         accuracy: AnalysisAccuracy = 'pessimistic',
+        metric_threshold: float = 0.5,
         slope_threshold: int = 45,
         time_granularity: int = 1e7,
         view_types: List[ViewType] = ['file_name', 'proc_name', 'time_range'],
@@ -72,12 +71,14 @@ class RecorderAnalyzer(Analyzer):
         # Prepare raw stats
         raw_stats = RawStats(
             job_time=job_time.persist(),
+            time_granularity=time_granularity,
             total_count=traces.index.count().persist(),
         )
 
         # Analyze traces
         return self.analyze_traces(
             accuracy=accuracy,
+            metric_threshold=metric_threshold,
             metrics=metrics,
             raw_stats=raw_stats,
             slope_threshold=slope_threshold,

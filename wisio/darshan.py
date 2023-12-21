@@ -36,7 +36,6 @@ class DarshanAnalyzer(Analyzer):
         checkpoint_dir: str = '',
         cluster_config: ClusterConfig = None,
         debug=False,
-        output_type: OutputType = 'console',
     ):
         super().__init__(
             name='Darshan',
@@ -44,7 +43,6 @@ class DarshanAnalyzer(Analyzer):
             checkpoint_dir=checkpoint_dir,
             cluster_config=cluster_config,
             debug=debug,
-            output_type=output_type,
             working_dir=working_dir,
         )
 
@@ -53,6 +51,7 @@ class DarshanAnalyzer(Analyzer):
         trace_path_pattern: str,
         metrics=['duration'],
         accuracy: AnalysisAccuracy = 'pessimistic',
+        metric_threshold: float = 0.5,
         slope_threshold: int = 45,
         time_granularity: int = 1e3,
         view_types: List[ViewType] = ['file_name', 'proc_name', 'time_range'],
@@ -67,12 +66,14 @@ class DarshanAnalyzer(Analyzer):
         # Prepare raw stats
         raw_stats = RawStats(
             job_time=delayed(job_time),
+            time_granularity=time_granularity,
             total_count=traces.index.count().persist(),
         )
 
         # Analyze traces
         return self.analyze_traces(
             accuracy=accuracy,
+            metric_threshold=metric_threshold,
             metrics=metrics,
             raw_stats=raw_stats,
             slope_threshold=slope_threshold,

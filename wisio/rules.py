@@ -10,7 +10,6 @@ from scipy.cluster.hierarchy import linkage, fcluster
 from typing import Dict, List, Union
 
 from .analysis_utils import set_proc_name_parts
-from .bottlenecks import BOTTLENECK_ORDER
 from .constants import (
     ACC_PAT_SUFFIXES,
     COL_APP_NAME,
@@ -28,13 +27,15 @@ from .constants import (
     XFER_SIZE_BIN_NAMES,
     AccessPattern,
 )
+from .scoring import SCORING_ORDER
 from .types import (
-    BottleneckResult,
     Metric,
+    RawStats,
     Rule,
     RuleReason,
     RuleResult,
     RuleResultReason,
+    ScoringResult,
     ViewKey,
 )
 from .utils.collection_utils import get_intervals
@@ -47,6 +48,7 @@ METADATA_ACCESS_RATIO_THRESHOLD = 0.5
 class KnownCharacteristics(Enum):
     ACCESS_PATTERN = 'access_pattern'
     APP_COUNT = 'app_count'
+    COMPLEXITY = 'complexity'
     FILE_COUNT = 'file_count'
     IO_COUNT = 'io_count'
     IO_SIZE = 'io_size'
@@ -54,6 +56,7 @@ class KnownCharacteristics(Enum):
     NODE_COUNT = 'node_count'
     PROC_COUNT = 'proc_count'
     READ_XFER_SIZE = 'read_xfer_size'
+    TIME_PERIOD = 'time_period'
     WRITE_XFER_SIZE = 'write_xfer_size'
 
 
@@ -70,7 +73,7 @@ class KnownRules(Enum):
 KNOWN_RULES = {
     KnownRules.EXCESSIVE_METADATA_ACCESS.value: Rule(
         name='Excessive metadata access',
-        condition='{metric}_threshold >= {threshold} & (metadata_time / time) >= 0.5',
+        condition='(metadata_time / time) >= 0.5',
         reasons=[
             RuleReason(
                 condition='(open_time > close_time) & (open_time > seek_time)',
@@ -97,7 +100,7 @@ specifically {{ "%.2f" | format((open_time / time) * 100) }}% ({{ "%.2f" | forma
     ),
     KnownRules.OPERATION_IMBALANCE.value: Rule(
         name='Operation imbalance',
-        condition='{metric}_threshold >= {threshold} & (abs(write_count - read_count) / count) > 0.1',
+        condition='(abs(write_count - read_count) / count) > 0.1',
         reasons=[
             RuleReason(
                 condition='read_count > write_count',
@@ -115,7 +118,7 @@ specifically {{ "%.2f" | format((open_time / time) * 100) }}% ({{ "%.2f" | forma
     ),
     KnownRules.RANDOM_OPERATIONS.value: Rule(
         name='Random operations',
-        condition='{metric}_threshold >= {threshold} & random_count / count > 0.5',
+        condition='random_count / count > 0.5',
         reasons=[
             RuleReason(
                 condition='random_count / count > 0.5',
@@ -128,7 +131,7 @@ Issued high number of random operations, specifically {{ "%.2f" | format((random
     ),
     KnownRules.SIZE_IMBALANCE.value: Rule(
         name='Size imbalance',
-        condition='{metric}_threshold >= {threshold} & size > 0 & (abs(write_size - read_size) / size) > 0.1',
+        condition='size > 0 & (abs(write_size - read_size) / size) > 0.1',
         reasons=[
             RuleReason(
                 condition='read_size > write_size',
@@ -146,7 +149,7 @@ Issued high number of random operations, specifically {{ "%.2f" | format((random
     ),
     KnownRules.SMALL_READS.value: Rule(
         name='Small reads',
-        condition='{metric}_threshold >= {threshold} & (read_time / time) > 0.5 & (read_size / count) < 262144',
+        condition='(read_time / time) > 0.5 & (read_size / count) < 262144',
         reasons=[
             RuleReason(
                 condition='(read_time / time) > 0.5',
@@ -164,7 +167,7 @@ Average 'read's are {{ "%.2f" | format(read_size / count / 1024) }} KB, which is
     ),
     KnownRules.SMALL_WRITES.value: Rule(
         name='Small writes',
-        condition='{metric}_threshold >= {threshold} & (write_time / time) > 0.5 & (write_size / count) < 262144',
+        condition='(write_time / time) > 0.5 & (write_size / count) < 262144',
         reasons=[
             RuleReason(
                 condition='(write_time / time) > 0.5',
@@ -201,20 +204,19 @@ class BottleneckRule(RuleHandler):
         self,
         metric: Metric,
         metric_boundary: dd.core.Scalar,
+        scoring_result: ScoringResult,
         view_key: ViewKey,
-        bottleneck_result: BottleneckResult,
         characteristics: Dict[str, RuleResult] = None,
-        threshold: float = 0.5,
     ) -> Dict[str, Delayed]:
 
         view_type = view_key[-1]
 
         # takes around 0.015 seconds
-        bottlenecks = bottleneck_result.bottlenecks \
-            .query(self.rule.condition.format(metric=metric, threshold=threshold))
+        bottlenecks = scoring_result.potential_bottlenecks \
+            .query(self.rule.condition)
 
         # takes around 0.02 seconds
-        details = bottleneck_result.details \
+        details = scoring_result.attached_records \
             .query(f"{view_type} in @indices", local_dict={'indices': bottlenecks.index})
 
         tasks = {}
@@ -410,7 +412,7 @@ class BottleneckRule(RuleHandler):
             agg_dict = {}
             agg_dict[view_type] = set
         else:
-            agg_dict = {col: set for col in BOTTLENECK_ORDER[view_type]}
+            agg_dict = {col: set for col in SCORING_ORDER[view_type]}
             agg_dict.pop(view_type)
 
             detail_groups = filtered_details \
@@ -441,6 +443,7 @@ class CharacteristicRule(RuleHandler):
         self,
         result: Dict[str, Union[str, int, pd.DataFrame, pd.Series]],
         characteristics: Dict[str, RuleResult] = None,
+        raw_stats: RawStats = None,
     ) -> RuleResult:
         raise NotImplementedError
 
@@ -466,6 +469,7 @@ class CharacteristicAccessPatternRule(CharacteristicRule):
         self,
         result: Dict[str, Union[str, int, pd.DataFrame, pd.Series]],
         characteristics: Dict[str, RuleResult] = None,
+        raw_stats: RawStats = None,
     ) -> RuleResult:
         acc_pat_sum = result['acc_pat_sum']
 
@@ -483,6 +487,40 @@ class CharacteristicAccessPatternRule(CharacteristicRule):
                 f"{sequential_count/total_count*100:.2f}% Sequential - "
                 f"{random_count/total_count*100:.2f}% Random"
             )
+        )
+
+
+class CharacteristicComplexityRule(CharacteristicRule):
+
+    def __init__(self) -> None:
+        super().__init__(rule_key=KnownCharacteristics.COMPLEXITY.value)
+
+    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
+
+        tasks = {}
+
+        return tasks
+
+    def handle_task_results(
+        self,
+        result: dict,
+        characteristics: Dict[str, RuleResult],
+        raw_stats: RawStats = None
+    ) -> RuleResult:
+
+        proc_names = characteristics[KnownCharacteristics.PROC_COUNT.value]['proc_names']
+        time_ranges = characteristics[KnownCharacteristics.TIME_PERIOD.value]['total_count']
+        files = characteristics[KnownCharacteristics.FILE_COUNT.value]['total_count']
+
+        complexity = np.log10(proc_names * time_ranges * files)
+
+        return RuleResult(
+            description='Complexity',
+            detail_list=None,
+            extra_data=None,
+            reasons=None,
+            value=complexity,
+            value_fmt=f"{complexity:.2f}",
         )
 
 
@@ -518,6 +556,7 @@ class CharacteristicFileCountRule(CharacteristicRule):
         self,
         result: Dict[str, Union[str, int, pd.DataFrame, pd.Series]],
         characteristics: Dict[str, RuleResult] = None,
+        raw_stats: RawStats = None,
     ) -> RuleResult:
         total_count = int(result['total_count'])
         fpp_count = int(result['fpp_count'])
@@ -563,6 +602,7 @@ class CharacteristicIOOpsRule(CharacteristicRule):
         self,
         result: Dict[str, Union[str, int, pd.DataFrame, pd.Series]],
         characteristics: Dict[str, RuleResult] = None,
+        raw_stats: RawStats = None,
     ) -> RuleResult:
         total_count = int(result['total_count'])
 
@@ -603,6 +643,7 @@ class CharacteristicIOSizeRule(CharacteristicRule):
         self,
         result: Dict[str, Union[str, int, pd.DataFrame, pd.Series]],
         characteristics: Dict[str, RuleResult] = None,
+        raw_stats: RawStats = None,
     ) -> RuleResult:
         total_size = int(result['total_size'])
 
@@ -653,6 +694,7 @@ class CharacteristicIOTimeRule(CharacteristicRule):
         self,
         result: Dict[str, Union[str, int, pd.DataFrame, pd.Series]],
         characteristics: Dict[str, RuleResult] = None,
+        raw_stats: RawStats = None,
     ) -> RuleResult:
         total_time = result['total_time']
 
@@ -721,6 +763,7 @@ class CharacteristicProcessCount(CharacteristicRule):
         self,
         result: Dict[str, Union[str, int, pd.DataFrame, pd.Series]],
         characteristics: Dict[str, RuleResult] = None,
+        raw_stats: RawStats = None,
     ) -> RuleResult:
 
         if self.col == 'proc_name':
@@ -766,6 +809,39 @@ class CharacteristicProcessCount(CharacteristicRule):
         )
 
 
+class CharacteristicTimePeriodCountRule(CharacteristicRule):
+
+    def __init__(self) -> None:
+        super().__init__(rule_key=KnownCharacteristics.TIME_PERIOD.value)
+
+    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
+
+        tasks = {}
+        tasks['total_count'] = main_view \
+            .map_partitions(lambda df: df.index.get_level_values(COL_TIME_RANGE)) \
+            .nunique()
+
+        return tasks
+
+    def handle_task_results(
+        self,
+        result: Dict[str, int],
+        characteristics: Dict[str, RuleResult] = None,
+        raw_stats: RawStats = None,
+    ) -> RuleResult:
+
+        value = int(result[f"total_count"])
+
+        return RuleResult(
+            description='Time Period(s)',
+            detail_list=None,
+            extra_data=None,
+            reasons=None,
+            value=value,
+            value_fmt=f"{value} time period(s) (Time granularity: {raw_stats.time_granularity})",
+        )
+
+
 class CharacteristicXferSizeRule(CharacteristicRule):
 
     def __init__(self, rule_key: str) -> None:
@@ -797,6 +873,7 @@ class CharacteristicXferSizeRule(CharacteristicRule):
         self,
         result: Dict[str, Union[str, int, pd.DataFrame, pd.Series]],
         characteristics: Dict[str, RuleResult] = None,
+        raw_stats: RawStats = None,
     ) -> RuleResult:
 
         count_col, min_col, max_col, per_col, xfer_col = (

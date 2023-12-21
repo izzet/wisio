@@ -11,22 +11,25 @@ from .rules import (
     KNOWN_RULES,
     BottleneckRule,
     CharacteristicAccessPatternRule,
+    CharacteristicComplexityRule,
     CharacteristicFileCountRule,
     CharacteristicIOOpsRule,
     CharacteristicIOSizeRule,
     CharacteristicIOTimeRule,
     CharacteristicProcessCount,
     CharacteristicRule,
+    CharacteristicTimePeriodCountRule,
     CharacteristicXferSizeRule,
     KnownCharacteristics as kc,
 )
 from .types import (
-    BottleneckResult,
-    BottlenecksPerViewPerMetric,
     Characteristics,
     Metric,
+    RawStats,
     RuleResult,
     RuleResultsPerViewPerMetricPerRule,
+    ScoringPerViewPerMetric,
+    ScoringResult,
     ViewKey,
     ViewType,
 )
@@ -35,7 +38,8 @@ from .utils.collection_utils import deepmerge
 
 class RuleEngine(object):
 
-    def __init__(self, rules: Dict[ViewType, List[str]]) -> None:
+    def __init__(self, rules: Dict[ViewType, List[str]], raw_stats: RawStats) -> None:
+        self.raw_stats = raw_stats
         self.rules = rules
 
     def process_characteristics(self, main_view: dd.DataFrame) -> Characteristics:
@@ -50,7 +54,9 @@ class RuleEngine(object):
             CharacteristicProcessCount(rule_key=kc.APP_COUNT.value),
             CharacteristicProcessCount(rule_key=kc.PROC_COUNT.value),
             CharacteristicFileCountRule(),
+            CharacteristicTimePeriodCountRule(),
             CharacteristicAccessPatternRule(),
+            CharacteristicComplexityRule(),
         ]
 
         rules_bag = db.from_sequence(rules)
@@ -62,7 +68,9 @@ class RuleEngine(object):
             .flatten()
 
         results = db.zip(rules_bag, tasks) \
-            .map(self._handle_characteristic_task_results, characteristics=tasks.fold(deepmerge)) \
+            .map(self._handle_characteristic_task_results,
+                 characteristics=tasks.fold(deepmerge),
+                 raw_stats=self.raw_stats) \
             .compute()
 
         characteristics = ft.reduce(deepmerge, results)
@@ -77,10 +85,9 @@ class RuleEngine(object):
 
     def process_bottlenecks(
         self,
-        evaluated_views: BottlenecksPerViewPerMetric,
+        evaluated_views: ScoringPerViewPerMetric,
         characteristics: Dict[str, RuleResult],
         metric_boundaries: Dict[Metric, dd.core.Scalar],
-        threshold=0.5,
     ) -> RuleResultsPerViewPerMetricPerRule:
 
         rules = {rule: BottleneckRule(rule_key=rule, rule=KNOWN_RULES[rule])
@@ -106,8 +113,7 @@ class RuleEngine(object):
             .map(self._define_bottleneck_tasks,
                  rules=rules,
                  characteristics=characteristics,
-                 metric_boundaries=metric_boundaries,
-                 threshold=threshold) \
+                 metric_boundaries=metric_boundaries) \
             .map(compute) \
             .flatten()
 
@@ -130,32 +136,32 @@ class RuleEngine(object):
     def _handle_characteristic_task_results(
         zipped: Tuple[CharacteristicRule, Dict[str, Delayed]],
         characteristics: Dict[str, Union[dict, list, int, float]],
+        raw_stats: RawStats,
     ):
         rule, result = zipped
         characteristic = {}
         characteristic[rule.rule_key] = rule.handle_task_results(
             result=result[rule.rule_key],
             characteristics=characteristics,
+            raw_stats=raw_stats,
         )
         return characteristic
 
     @staticmethod
     def _define_bottleneck_tasks(
-        zipped: Tuple[str, str, ViewKey, BottleneckResult],
+        zipped: Tuple[str, str, ViewKey, ScoringResult],
         rules: Dict[str, BottleneckRule],
         characteristics: Dict[str, RuleResult],
         metric_boundaries: Dict[Metric, dd.core.Scalar],
-        threshold: float,
     ):
-        rule, metric, view_key, bottleneck_result = zipped
+        rule, metric, view_key, scoring_result = zipped
         rule_impl = rules[rule]
         return rule_impl.define_tasks(
             metric,
             metric_boundary=metric_boundaries[metric],
             view_key=view_key,
-            bottleneck_result=bottleneck_result,
+            scoring_result=scoring_result,
             characteristics=characteristics,
-            threshold=threshold,
         )
 
     @staticmethod
