@@ -278,13 +278,13 @@ class Analyzer(abc.ABC):
 
             view_results[metric] = {}
 
-            for view_permutation in self.view_permutations(view_types=view_types):
+            for view_key in self.view_permutations(view_types=view_types):
 
-                view_type = view_permutation[-1]
-                parent_view_type = view_permutation[:-1]
+                view_type = view_key[-1]
+                parent_view_key = view_key[:-1]
 
                 parent_view_result = view_results[metric].get(
-                    parent_view_type, None)
+                    parent_view_key, None)
                 parent_view = main_view if parent_view_result is None else parent_view_result.view
 
                 view_result = self.compute_view(
@@ -292,10 +292,11 @@ class Analyzer(abc.ABC):
                     metric_boundary=metric_boundaries[metric],
                     parent_view=parent_view,
                     slope_threshold=slope_threshold,
+                    view_key=view_key,
                     view_type=view_type,
                 )
 
-                view_results[metric][view_permutation] = view_result
+                view_results[metric][view_key] = view_result
 
         return view_results
 
@@ -308,38 +309,45 @@ class Analyzer(abc.ABC):
         view_types: List[ViewType],
         view_results: Dict[Metric, Dict[ViewKey, ViewResult]],
     ):
-        main_view_with_logical_columns = self._set_logical_columns(
-            view=main_view, view_types=view_types)
 
         for metric in metrics:
 
-            for parent_view_type, logical_view_type in LOGICAL_VIEW_TYPES:
+            for view_key in LOGICAL_VIEW_TYPES:
+
+                view_type = view_key[-1]
+                parent_view_key = view_key[:-1]
+                parent_view_type = parent_view_key[0]
 
                 if parent_view_type not in view_types:
                     continue
 
-                view_permutation = (parent_view_type, logical_view_type)
-                view_type = view_permutation[-1]
-
                 parent_view_result = view_results[metric].get(
-                    parent_view_type, None)
-                parent_view = main_view_with_logical_columns if parent_view_result is None else parent_view_result.view
+                    parent_view_key, None)
+                parent_view = main_view if parent_view_result is None else parent_view_result.view
+
+                if view_type not in parent_view.columns:
+                    parent_view = self._set_logical_columns(
+                        view=parent_view,
+                        view_types=[parent_view_type],
+                    )
 
                 view_result = self.compute_view(
                     metric=metric,
                     metric_boundary=metric_boundaries[metric],
                     parent_view=parent_view,
                     slope_threshold=slope_threshold,
+                    view_key=view_key,
                     view_type=view_type,
                 )
 
-                view_results[metric][view_permutation] = view_result
+                view_results[metric][view_key] = view_result
 
         return view_results
 
     def compute_view(
         self,
         parent_view: dd.DataFrame,
+        view_key: ViewKey,
         view_type: str,
         metric: str,
         metric_boundary: dd.core.Scalar,
