@@ -1,0 +1,35 @@
+checkpoint: false
+checkpoint_dir: "/p/gpfs1/iopp/wisio_logs/_checkpoints/recorder_genome_pegasus_32"
+cluster:
+  cluster_type: "lsf"
+  debug: false
+  job_directives_skip:
+    - "-n"
+    - "-R"
+    - "-M"
+    - "-P"
+    - "-W 00:30"
+  job_extra_directives:
+    - "-nnodes 1"
+    - "-G asccasc"
+    - "-q pbatch"
+    - "-W 120"
+    - "-o .wisio/recorder_genome_pegasus_32_lsf/worker_logs/%J.log"
+    - "-e .wisio/recorder_genome_pegasus_32_lsf/worker_logs/%J.log"
+  local_dir: "/var/tmp/wisio/recorder_genome_pegasus_32_lsf"
+  memory: 6400
+  n_threads_per_worker: 32
+  n_workers: 32
+  use_stdin: true
+debug: true
+metrics:
+  - "time"
+output:
+  name: Genome
+  type: csv
+trace_path: "/usr/workspace/iopp/wisio_logs/recorder_genome_pegasus_32/_parquet"
+view_types:
+  - "time_range"
+  - "proc_name"
+  - "file_name"
+working_dir: ".wisio/recorder_genome_pegasus_32_lsf"

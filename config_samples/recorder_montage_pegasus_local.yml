@@ -1,5 +1,5 @@
 checkpoint: false
-cluster_config:
+cluster:
   cluster_type: "local"
   debug: false
   n_workers: 8

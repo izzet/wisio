@@ -1,32 +1,35 @@
 checkpoint: false
-checkpoint_dir: "/usr/workspace/iopp/wisio_logs/_checkpoints/recorder_flash_sedov3d_hdf5"
-cluster_config:
-  cluster_type: "lsf"
+checkpoint_dir: /p/gpfs1/iopp/wisio_logs/_checkpoints/recorder_flash_sedov3d_hdf5
+cluster:
+  cluster_type: lsf
   debug: false
-  header_skip:
-    - "-n"
-    - "-R"
-    - "-M"
-    - "-P"
-    - "-W 00:30"
-  job_extra:
-    - "-nnodes 1"
-    - "-G asccasc"
-    - "-q pdebug"
-    - "-W 120"
-    - "-o .wisio/recorder_flash_sedov3d_hdf5_lsf/worker_logs/%J.log"
-    - "-e .wisio/recorder_flash_sedov3d_hdf5_lsf/worker_logs/%J.log"
-  local_dir: "/var/tmp/wisio/recorder_flash_sedov3d_hdf5_lsf"
+  job_directives_skip:
+  - -n
+  - -R
+  - -M
+  - -P
+  - -W 00:30
+  job_extra_directives:
+  - -nnodes 1
+  - -G asccasc
+  - -q pdebug
+  - -W 120
+  - -o .wisio/recorder_flash_sedov3d_hdf5_lsf/worker_logs/%J.log
+  - -e .wisio/recorder_flash_sedov3d_hdf5_lsf/worker_logs/%J.log
+  local_dir: /var/tmp/wisio/recorder_flash_sedov3d_hdf5_lsf
   memory: 1600
   n_threads_per_worker: 16
   n_workers: 8
   use_stdin: true
-debug: true
+debug: false
 metrics:
-  - "time"
-trace_path: "/p/gpfs1/iopp/wisio_logs/recorder_flash_sedov3d_hdf5/_parquet"
+- time
+output:
+  name: Flash
+  type: csv
+trace_path: /p/gpfs1/iopp/wisio_logs/recorder_flash_sedov3d_hdf5/_parquet
 view_types:
-  - "time_range"
-  - "proc_name"
-  - "file_name"
-working_dir: ".wisio/recorder_flash_sedov3d_hdf5_lsf"
+- time_range
+- proc_name
+- file_name
+working_dir: .wisio/recorder_flash_sedov3d_hdf5_lsf

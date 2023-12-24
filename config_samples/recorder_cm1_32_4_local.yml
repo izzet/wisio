@@ -1,17 +1,23 @@
 checkpoint: false
-cluster_config:
-  cluster_type: "local"
+cluster:
+  cluster_type: local
   debug: false
-  n_workers: 16
+  local_dir: /var/tmp/wisio/recorder_cm1_32_4_local
   memory: 0
-  local_dir: "/var/tmp/wisio/recorder_cm1_32_4_local"
+  n_workers: 8
 debug: true
+metric_threshold: 0
 metrics:
-  - "time"
-output_type: "console"
-trace_path: "/usr/workspace/iopp/wisio_logs/recorder_cm1_32_4/_parquet"
+- time
+output:
+  # file_path: ./.wisio/recorder_cm1_32_4_local/avg5.csv
+  # max_bottlenecks_per_view_type: 50
+  name: CM1
+  show_debug: true
+  type: csv
+trace_path: /usr/workspace/iopp/wisio_logs/recorder_cm1_32_4/_parquet
 view_types:
-  - "time_range"
-  - "proc_name"
-  - "file_name"
-working_dir: ".wisio/recorder_cm1_32_4_local"
+- time_range
+- proc_name
+# - file_name
+working_dir: ./.wisio/recorder_cm1_32_4_local
