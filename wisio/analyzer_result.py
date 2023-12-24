@@ -30,6 +30,7 @@ from .constants import (
     VIEW_TYPES,
 )
 from .types import (
+    AnalysisSetup,
     Characteristics,
     MainView,
     Metric,
@@ -43,7 +44,7 @@ from .types import (
 
 
 @dataclass
-class AnalyzerResultOutputCharacteristicsType(object):
+class AnalyzerResultOutputCharacteristicsType:
     complexity: float
     io_time: float
     job_time: float
@@ -57,7 +58,7 @@ class AnalyzerResultOutputCharacteristicsType(object):
 
 
 @dataclass
-class AnalyzerResultOutputCountsType(object):
+class AnalyzerResultOutputCountsType:
     raw_count: int
     hlm_count: int
     main_view_count: int
@@ -78,7 +79,7 @@ class AnalyzerResultOutputCountsType(object):
 
 
 @dataclass
-class AnalyzerResultOutputSeveritiesType(object):
+class AnalyzerResultOutputSeveritiesType:
     critical_count: Dict[str, int]
     very_high_count: Dict[str, int]
     high_count: Dict[str, int]
@@ -92,7 +93,7 @@ class AnalyzerResultOutputSeveritiesType(object):
 
 
 @dataclass
-class AnalyzerResultOutputThroughputsType(object):
+class AnalyzerResultOutputThroughputsType:
     bottlenecks: Dict[str, float]
     evaluated_records: Dict[str, float]
     perspectives: Dict[str, float]
@@ -102,7 +103,7 @@ class AnalyzerResultOutputThroughputsType(object):
 
 
 @dataclass
-class AnalyzerResultOutputTimingsType(object):
+class AnalyzerResultOutputTimingsType:
     read_traces: Dict[str, float]
     compute_hlm: Dict[str, float]
     compute_main_view: Dict[str, float]
@@ -112,9 +113,10 @@ class AnalyzerResultOutputTimingsType(object):
 
 
 @dataclass
-class AnalyzerResultOutputType(object):
+class AnalyzerResultOutputType:
     characteristics: AnalyzerResultOutputCharacteristicsType
     counts: AnalyzerResultOutputCountsType
+    setup: AnalysisSetup
     severities: AnalyzerResultOutputSeveritiesType
     throughputs: AnalyzerResultOutputThroughputsType
     timings: AnalyzerResultOutputTimingsType
@@ -124,6 +126,7 @@ class AnalyzerResultOutput(object):
 
     def __init__(
         self,
+        analysis_setup: AnalysisSetup,
         bottlenecks: RuleResultsPerViewPerMetricPerRule,
         characteristics: Characteristics,
         evaluated_views: ScoringPerViewPerMetric,
@@ -131,6 +134,7 @@ class AnalyzerResultOutput(object):
         raw_stats: RawStats,
         view_results: ViewResultsPerViewPerMetric,
     ) -> None:
+        self.analysis_setup = analysis_setup
         self.bottlenecks = bottlenecks
         self.characteristics = characteristics
         self.evaluated_views = evaluated_views
@@ -370,6 +374,7 @@ class AnalyzerResultOutput(object):
         return AnalyzerResultOutputType(
             characteristics=characteristics,
             counts=counts,
+            setup=self.analysis_setup,
             severities=severities,
             throughputs=throughputs,
             timings=timings,
@@ -1086,6 +1091,7 @@ class AnalysisResult(object):
 
     def __init__(
         self,
+        analysis_setup: AnalysisSetup,
         bottlenecks: RuleResultsPerViewPerMetricPerRule,
         characteristics: Characteristics,
         evaluated_views: ScoringPerViewPerMetric,
@@ -1094,6 +1100,7 @@ class AnalysisResult(object):
         raw_stats: RawStats,
         view_results: ViewResultsPerViewPerMetric,
     ):
+        self.analysis_setup = analysis_setup
         self.bottlenecks = bottlenecks
         self.characteristics = characteristics
         self.evaluated_views = evaluated_views
@@ -1103,6 +1110,7 @@ class AnalysisResult(object):
         self.view_results = view_results
 
         self.output = AnalyzerResultOutput(
+            analysis_setup=analysis_setup,
             characteristics=characteristics,
             bottlenecks=bottlenecks,
             evaluated_views=evaluated_views,

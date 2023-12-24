@@ -31,8 +31,8 @@ from .rule_engine import RuleEngine
 from .scoring import ViewEvaluator
 from .types import (
     AnalysisAccuracy,
+    AnalysisSetup,
     Metric,
-    OutputType,
     RawStats,
     ViewKey,
     ViewResult,
@@ -192,6 +192,18 @@ class Analyzer(abc.ABC):
 
         # Create result
         result = AnalysisResult(
+            analysis_setup=AnalysisSetup(
+                accuracy=accuracy,
+                checkpoint=self.checkpoint,
+                cluster_type=self.cluster_config.cluster_type,
+                debug=self.debug,
+                memory=self.cluster_config.memory,
+                metric_threshold=metric_threshold,
+                num_threads_per_worker=self.cluster_config.n_threads_per_worker,
+                num_workers=self.cluster_config.n_workers,
+                processes=self.cluster_config.processes,
+                slope_threshold=slope_threshold,
+            ),
             bottlenecks=bottlenecks,
             characteristics=characteristics,
             evaluated_views=evaluated_views,

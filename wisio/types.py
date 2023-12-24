@@ -22,6 +22,20 @@ ViewKey = Union[Tuple[ViewType], Tuple[ViewType, ViewType],
 
 
 @dataclass
+class AnalysisSetup:
+    accuracy: AnalysisAccuracy
+    checkpoint: bool
+    cluster_type: str
+    debug: bool
+    memory: int
+    metric_threshold: float
+    num_threads_per_worker: int
+    num_workers: int
+    processes: bool
+    slope_threshold: float
+
+
+@dataclass
 class ScoringResult:
     attached_records: dd.DataFrame
     evaluated_groups: dd.DataFrame
