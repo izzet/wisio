@@ -636,7 +636,7 @@ class CharacteristicIOSizeRule(CharacteristicRule):
 
     def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
         tasks = {}
-        tasks['total_size'] = main_view['size'].sum()
+        tasks['total_size'] = main_view['data_size'].sum()
         for io_type in IO_TYPES:
             if io_type != 'metadata':
                 size_col = f"{io_type}_size"
