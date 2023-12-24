@@ -1,11 +1,12 @@
 import abc
 import dask.dataframe as dd
 import inflect
-import jinja2
 import numpy as np
 import pandas as pd
 from dask.delayed import Delayed
+from dask.utils import format_bytes
 from enum import Enum
+from jinja2 import Environment
 from scipy.cluster.hierarchy import linkage, fcluster
 from typing import Dict, List, Union
 
@@ -39,10 +40,13 @@ from .types import (
     ViewKey,
 )
 from .utils.collection_utils import get_intervals
-from .utils.common_utils import convert_bytes_to_unit
 
 
 METADATA_ACCESS_RATIO_THRESHOLD = 0.5
+
+
+jinja_env = Environment()
+jinja_env.filters['format_bytes'] = format_bytes
 
 
 class KnownCharacteristics(Enum):
@@ -136,13 +140,13 @@ Issued high number of random operations, specifically {{ "%.2f" | format((random
             RuleReason(
                 condition='read_size > write_size',
                 message='''
-'read' size is {{ "%.2f" | format((read_size / size) * 100) }}% ({{ "%.2f" | format(read_size / 1024 / 1024) }} MB) of total I/O size.
+'read' size is {{ "%.2f" | format((read_size / size) * 100) }}% ({{ read_size | format_bytes }}) of total I/O size.
                 '''
             ),
             RuleReason(
                 condition='write_size > read_size',
                 message='''
-'write' size is {{ "%.2f" | format((write_size / size) * 100) }}% ({{ "%.2f" | format(write_size / 1024 / 1024) }} MB) of total I/O size.
+'write' size is {{ "%.2f" | format((write_size / size) * 100) }}% ({{ write_size | format_bytes }}) of total I/O size.
                 '''
             ),
         ]
@@ -160,7 +164,7 @@ Issued high number of random operations, specifically {{ "%.2f" | format((random
             RuleReason(
                 condition='(read_size / count) < 262144',
                 message='''
-Average 'read's are {{ "%.2f" | format(read_size / count / 1024) }} KB, which is smaller than 256 KB.
+Average 'read's are {{ read_size | format_bytes }}, which is smaller than {{ 262144 | format_bytes }}.
                 '''
             )
         ]
@@ -178,7 +182,7 @@ Average 'read's are {{ "%.2f" | format(read_size / count / 1024) }} KB, which is
             RuleReason(
                 condition='(write_size / count) < 262144',
                 message='''
-Average 'write's are {{ "%.2f" | format(write_size / count / 1024) }} KB, which is smaller than 256 KB
+Average 'write's are {{ write_size | format_bytes }}, which is smaller than {{ 262144 | format_bytes }}.
                 '''
             )
         ]
@@ -247,7 +251,7 @@ class BottleneckRule(RuleHandler):
         reasoning_templates = {}
         for i, reason in enumerate(self.rule.reasons):
             reasoning[i] = result[f"reason{i}"].to_dict()
-            reasoning_templates[i] = jinja2.Template(reason.message)
+            reasoning_templates[i] = jinja_env.from_string(reason.message)
 
         results = []
 
@@ -654,7 +658,7 @@ class CharacteristicIOSizeRule(CharacteristicRule):
                 size = int(result[size_col])
                 detail_list.append((
                     f"{io_type.capitalize()} - "
-                    f"{convert_bytes_to_unit(size, 'GB'):.2f} GB "
+                    f"{format_bytes(size)} "
                     f"({size/total_size*100:.2f}%)"
                 ))
 
@@ -664,7 +668,7 @@ class CharacteristicIOSizeRule(CharacteristicRule):
             extra_data=None,
             reasons=None,
             value=total_size,
-            value_fmt=f"{convert_bytes_to_unit(total_size, 'GB'):.2f} GB",
+            value_fmt=format_bytes(total_size),
         )
 
 
@@ -786,14 +790,14 @@ class CharacteristicProcessCount(CharacteristicRule):
         for node, row in pd.DataFrame(result[f"{self.col}s"]).iterrows():
             read_size = row['read_size']
             write_size = row['write_size']
-            read_size_gb = convert_bytes_to_unit(read_size, 'GB')
-            write_size_gb = convert_bytes_to_unit(write_size, 'GB')
+            read_size_fmt = format_bytes(read_size)
+            write_size_fmt = format_bytes(write_size)
             read_size_per = read_size / total_size * 100
             write_size_per = write_size / total_size * 100
             detail_list.append(' - '.join([
                 node,
                 f"{row['time']:.2f} s ({row['time'] / max_io_time * 100:.2f}%)",
-                f"{read_size_gb:.2f}/{write_size_gb:.2f} GB R/W ({read_size_per:.2f}/{write_size_per:.2f}%)",
+                f"{read_size_fmt}/{write_size_fmt} R/W ({read_size_per:.2f}/{write_size_per:.2f}%)",
                 f"{int(row['count']):,} ops ({row['count'] / total_ops * 100:.2f}%)"
             ]))
 
