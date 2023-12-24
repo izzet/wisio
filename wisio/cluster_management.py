@@ -17,9 +17,9 @@ class ClusterConfig:
     dashboard_port: int = None
     death_timeout: int = None
     debug: bool = False
-    header_skip: List[str] = None
     host: str = None
-    job_extra: List[str] = None
+    job_directives_skip: List[str] = None
+    job_extra_directives: List[str] = None
     local_dir: str = None
     memory: int = 1600
     n_threads_per_worker: int = 16
@@ -67,8 +67,8 @@ class ClusterManager(object):
             return LSFCluster(
                 cores=self.config.n_workers * self.config.n_threads_per_worker,
                 death_timeout=self.config.death_timeout,
-                header_skip=self.config.header_skip,
-                job_extra=self.config.job_extra,
+                job_directives_skip=self.config.job_directives_skip,
+                job_extra_directives=self.config.job_extra_directives,
                 local_directory=self.config.local_dir,
                 memory=f"{self.config.memory}GB",
                 processes=self.config.n_workers,
