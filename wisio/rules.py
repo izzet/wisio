@@ -820,10 +820,14 @@ class CharacteristicTimePeriodCountRule(CharacteristicRule):
 
     def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
 
+        x = main_view.reset_index()
+
         tasks = {}
-        tasks['total_count'] = main_view \
-            .map_partitions(lambda df: df.index.get_level_values(COL_TIME_RANGE)) \
-            .nunique()
+
+        if COL_TIME_RANGE in x.columns:
+            tasks['total_count'] = x[COL_TIME_RANGE].nunique()
+        else:
+            tasks['total_count'] = 0
 
         return tasks
 
