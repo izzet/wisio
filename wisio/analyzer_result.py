@@ -12,10 +12,9 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.tree import Tree
-from scipy.stats import skew, skewtest
+from scipy.stats import skew
 from typing import Dict, List, Set, Tuple
 
-from wisio.rules import KnownCharacteristics
 
 from .analysis import DELTA_BIN_NAMES, DELTA_BINS
 from .constants import (
@@ -26,9 +25,8 @@ from .constants import (
     EVENT_COMP_MAIN_VIEW,
     EVENT_COMP_PERS,
     EVENT_DET_BOTT,
-    EVENT_READ_TRACES,
-    VIEW_TYPES,
 )
+from .rules import KnownCharacteristics
 from .types import (
     AnalysisSetup,
     Characteristics,
@@ -41,6 +39,7 @@ from .types import (
     ViewResultsPerViewPerMetric,
     view_name,
 )
+from .utils.dask_utils import flatten_column_names
 
 
 @dataclass
@@ -603,26 +602,6 @@ class AnalyzerResultOutput(object):
         else:
             Console().print(char_panel, bott_panel)
 
-    def _colored_description(self, description: str, result_score: str = None):
-        if result_score is None:
-            return description
-        if result_score == DELTA_BIN_NAMES[0]:
-            return description
-        elif result_score == DELTA_BIN_NAMES[1]:
-            return f"[light_cyan3]{description}"
-        elif result_score == DELTA_BIN_NAMES[2]:
-            return f"[chartreuse2]{description}"
-        elif result_score == DELTA_BIN_NAMES[3]:
-            return f"[yellow4]{description}"
-        elif result_score == DELTA_BIN_NAMES[4]:
-            return f"[yellow3]{description}"
-        elif result_score == DELTA_BIN_NAMES[5]:
-            return f"[orange3]{description}"
-        elif result_score == DELTA_BIN_NAMES[6]:
-            return f"[dark_orange3]{description}"
-        elif result_score == DELTA_BIN_NAMES[7]:
-            return f"[red3]{description}"
-
     def csv(self, name: str, file_path: str, max_bottlenecks_per_view_type=3, show_debug=True):
 
         output = self._create_output_type()
@@ -657,6 +636,62 @@ class AnalyzerResultOutput(object):
         output_df.index.set_names(['type', 'value'], inplace=True)
 
         output_df.sort_index().to_csv(file_path, encoding='utf8')
+
+        timings_df = self._create_timings_df()
+
+        timings_df.sort_values(['type', 'key']).to_csv(
+            file_path.replace('.csv', '_timings.csv'), encoding='utf8')
+
+        # TODO
+        metric = 'time'
+        view_result = self.view_results[metric][('time_range',)]
+        view_result.slope_view[[f"{metric}_slope", f"{metric}_per_rev_cs", 'count_cs_per_rev']] \
+            .compute() \
+            .to_csv(file_path.replace('.csv', '_slope.csv'), encoding='utf8')
+
+    def _colored_description(self, description: str, result_score: str = None):
+        if result_score is None:
+            return description
+        if result_score == DELTA_BIN_NAMES[0]:
+            return description
+        elif result_score == DELTA_BIN_NAMES[1]:
+            return f"[light_cyan3]{description}"
+        elif result_score == DELTA_BIN_NAMES[2]:
+            return f"[chartreuse2]{description}"
+        elif result_score == DELTA_BIN_NAMES[3]:
+            return f"[yellow4]{description}"
+        elif result_score == DELTA_BIN_NAMES[4]:
+            return f"[yellow3]{description}"
+        elif result_score == DELTA_BIN_NAMES[5]:
+            return f"[orange3]{description}"
+        elif result_score == DELTA_BIN_NAMES[6]:
+            return f"[dark_orange3]{description}"
+        elif result_score == DELTA_BIN_NAMES[7]:
+            return f"[red3]{description}"
+
+    def _create_timings_df(self):
+        timing_events = get_client().get_events('timings')
+
+        timings = []
+        for _, timing in timing_events:
+            timings.append(timing)
+
+        timings_df = pd.DataFrame(timings)
+
+        timings_df = timings_df[['key', 'type', 'time', 'size']] \
+            .groupby(['key', 'type']) \
+            .max() \
+            .reset_index() \
+            .pivot(index='key', columns='type', values=['size', 'time'])
+
+        timings_df['time', 'elapsed'] = timings_df['time',
+                                                   'end'] - timings_df['time', 'start']
+
+        timings_df = flatten_column_names(timings_df)
+
+        timings_df['type'] = timings_df.index.map(lambda x: x.split('_')[-1])
+
+        return timings_df
 
 
 class AnalysisResultPlots(object):
