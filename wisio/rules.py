@@ -164,7 +164,7 @@ Issued high number of random operations, specifically {{ "%.2f" | format((random
             RuleReason(
                 condition='(read_size / count) < 262144',
                 message='''
-Average 'read's are {{ read_size | format_bytes }}, which is smaller than {{ 262144 | format_bytes }}.
+Average 'read's are {{ (read_size / count) | format_bytes }}, which is smaller than {{ 262144 | format_bytes }}.
                 '''
             )
         ]
@@ -182,7 +182,7 @@ Average 'read's are {{ read_size | format_bytes }}, which is smaller than {{ 262
             RuleReason(
                 condition='(write_size / count) < 262144',
                 message='''
-Average 'write's are {{ write_size | format_bytes }}, which is smaller than {{ 262144 | format_bytes }}.
+Average 'write's are {{ (write_size / count) | format_bytes }}, which is smaller than {{ 262144 | format_bytes }}.
                 '''
             )
         ]
