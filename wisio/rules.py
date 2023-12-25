@@ -551,7 +551,7 @@ class CharacteristicFileCountRule(CharacteristicRule):
                 .nunique() \
                 .to_frame()
 
-            fpp_count = fpp[fpp['proc_name'] == 1].count()
+            fpp_count = fpp[fpp['proc_name'] == 1]['proc_name'].count()
 
             tasks['fpp_count'] = fpp_count
         else:
