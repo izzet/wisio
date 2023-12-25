@@ -496,17 +496,17 @@ class AnalyzerResultOutput(object):
             count_table.add_row(
                 'Perspectives',
                 f"{output.counts.num_perspectives}",
-                f"{0}",
+                f"{output.counts.slope_filtered_records['time']}",
             )
             count_table.add_row(
                 'Bottlenecks',
                 f"{output.counts.num_bottlenecks['time']}",
-                f"{0}",
+                f"{output.counts.evaluated_records['time']}",
             )
             count_table.add_row(
                 'Rules',
                 f"{output.counts.num_rules}",
-                f"{0}",
+                f"{output.counts.reasoned_records['time']}",
             )
 
             debug_table.add_row('Counts', count_table)
