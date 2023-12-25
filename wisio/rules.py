@@ -274,6 +274,7 @@ class BottleneckRule(RuleHandler):
             )
 
             description, times, processes, files = self._describe_bottleneck(
+                ix=ix,
                 metric=metric,
                 metric_boundary=metric_boundary,
                 view_type=view_type,
@@ -308,6 +309,7 @@ class BottleneckRule(RuleHandler):
 
     def _describe_bottleneck(
         self,
+        ix: Union[str, int],
         metric: Metric,
         metric_boundary: Union[int, float],
         view_type: str,
@@ -372,7 +374,7 @@ class BottleneckRule(RuleHandler):
             count = len(unioned_dict[view_type])
 
             description = (
-                f"{count} {self.pluralize.plural_noun(accessor, count)} "
+                f"{count} {self.pluralize.plural_noun(accessor, count)} ({ix}) "
                 f"{self.pluralize.plural_verb('has', count)} an I/O time of "
                 f"{value:.2f} seconds which is {value/metric_boundary*100:.2f}% of overall I/O time of the workload."
             )
