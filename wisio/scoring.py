@@ -73,7 +73,7 @@ class ViewEvaluator(object):
             .map_partitions(set_metric_scores, view_type=view_type, metric=metric, value_col=col, metric_boundary=metric_boundary)
 
         potential_bottlenecks = evaluated_groups \
-            .query(f"{metric}_threshold > {threshold}") \
+            .query(f"{metric}_threshold >= {threshold}") \
             .persist()
 
         return ScoringResult(
