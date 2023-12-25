@@ -957,21 +957,17 @@ class AnalysisResultPlots(object):
         y_col = 'count_cs_per_rev'
         for i, view_key in enumerate(view_keys):
             view_result = self.view_results[metric][view_key]
-            group_view = view_result.slope_view.compute()
-            slope_cond = group_view[f"{metric}_slope"] < slope_threshold
-            group_view.loc[slope_cond, f"{x_col}_line"] = group_view[x_col]
-            line = group_view[f"{x_col}_line"].to_numpy()
-            x = group_view[x_col].to_numpy()
-            y = group_view[y_col].to_numpy()
-            last_non_nan_index = np.where(~np.isnan(line))[0][-1]
-            dotted = np.copy(line)
-            if np.all(np.isnan(line[last_non_nan_index + 1:])):
-                # complete dotted line if all values after last non-nan are nan
-                dotted[last_non_nan_index + 1:] = x[last_non_nan_index + 1:]
-            mask = np.isfinite(dotted)
+            slope_view = view_result.slope_view.compute()
             color = f"C{i}" if color is None else color
-            ax.plot(dotted[mask], y[mask], c=color, ls=':')
-            ax.plot(line, y, c=color)
+            self._plot_slope(
+                ax=ax,
+                color=color,
+                metric=metric,
+                slope_threshold=slope_threshold,
+                slope_view=slope_view,
+                x_col=x_col,
+                y_col=y_col,
+            )
             if len(legends) > 0:
                 legend_handles.append(
                     Line2D([0], [0], color=color, label=legends[i]))
@@ -983,7 +979,31 @@ class AnalysisResultPlots(object):
             ax.set_ylabel(ylabel)
         if len(legend_handles) > 0:
             ax.legend(handles=legend_handles)
-        return ax, group_view
+        return ax, slope_view
+
+    @staticmethod
+    def _plot_slope(
+        ax: Axes,
+        color: str,
+        metric: Metric,
+        slope_threshold: int,
+        slope_view: pd.DataFrame,
+        x_col: str,
+        y_col: str,
+    ):
+        slope_cond = slope_view[f"{metric}_slope"] < slope_threshold
+        slope_view.loc[slope_cond, f"{x_col}_line"] = slope_view[x_col]
+        line = slope_view[f"{x_col}_line"].to_numpy()
+        x = slope_view[x_col].to_numpy()
+        y = slope_view[y_col].to_numpy()
+        last_non_nan_index = np.where(~np.isnan(line))[0][-1]
+        dotted = np.copy(line)
+        if np.all(np.isnan(line[last_non_nan_index + 1:])):
+            # complete dotted line if all values after last non-nan are nan
+            dotted[last_non_nan_index + 1:] = x[last_non_nan_index + 1:]
+        mask = np.isfinite(dotted)
+        ax.plot(dotted[mask], y[mask], c=color, ls=':')
+        ax.plot(line, y, c=color)
 
     def view_relations2(
         self,
