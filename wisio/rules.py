@@ -419,6 +419,10 @@ class BottleneckRule(RuleHandler):
             agg_dict = {col: set for col in SCORING_ORDER[view_type]}
             agg_dict.pop(view_type)
 
+            for agg_key in agg_dict.copy():
+                if agg_key not in view_types:
+                    agg_dict.pop(agg_key)
+
             detail_groups = filtered_details \
                 .reset_index() \
                 .groupby(view_type) \
