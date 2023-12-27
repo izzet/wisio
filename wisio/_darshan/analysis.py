@@ -49,7 +49,7 @@ def create_dxt_dataframe(trace_path: str, time_granularity=1e3):
             read_operation.append(['read'] * len((r[1]['length'].to_list())))
             read_offsets.append(r[1]['offset'].to_list())
             read_hostname.append([r[4]] * len((r[1]['length'].to_list())))
-            read_io_cat.append([2]*len((r[1]['length'].to_list())))
+            read_io_cat.append([IOCategory.READ.value]*len((r[1]['length'].to_list())))
 
         if not r[2].empty:
             write_id.append([r[3]] * len((r[2]['length'].to_list())))     
@@ -60,7 +60,7 @@ def create_dxt_dataframe(trace_path: str, time_granularity=1e3):
             write_operation.append(['write'] * len((r[2]['length'].to_list())))
             write_offsets.append(r[2]['offset'].to_list())
             write_hostname.append([r[4]] * len((r[2]['length'].to_list())))
-            write_io_cat.append([1]*len((r[2]['length'].to_list())))
+            write_io_cat.append([IOCategory.WRITE.value]*len((r[2]['length'].to_list())))
 
     file_name = [rep.data['name_records'][element] for nestedlist in read_id for element in nestedlist]
     rank = [f"app#localhost#{element}#0" for nestedlist in read_rank for element in nestedlist]
