@@ -33,6 +33,7 @@ class AnalysisSetup:
     num_workers: int
     processes: bool
     slope_threshold: float
+    verbose: bool
 
 
 @dataclass

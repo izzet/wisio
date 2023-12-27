@@ -32,6 +32,7 @@ class Config:
     output: OutputConfig = None
     slope_threshold: int = 45
     view_types: List[ViewType] = field(default_factory=list)
+    verbose: bool = False
     working_dir: str = '.wisio'
 
     def __post_init__(self):
@@ -86,6 +87,7 @@ def handle_darshan(darshan_parser, args):
             checkpoint_dir=config.checkpoint_dir,
             cluster_config=config.cluster,
             debug=config.debug,
+            verbose=config.verbose,
             working_dir=config.working_dir,
         )
 
@@ -113,6 +115,7 @@ def handle_recorder(recorder_parser, args):
             checkpoint_dir=config.checkpoint_dir,
             cluster_config=config.cluster,
             debug=config.debug,
+            verbose=config.verbose,
             working_dir=config.working_dir,
         )
 

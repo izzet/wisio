@@ -77,6 +77,7 @@ class Analyzer(abc.ABC):
         checkpoint_dir: str = '',
         cluster_config: ClusterConfig = None,
         debug=False,
+        verbose=False,
     ):
         if checkpoint:
             assert checkpoint_dir != '', 'Checkpoint directory must be defined'
@@ -86,6 +87,7 @@ class Analyzer(abc.ABC):
         self.cluster_config = cluster_config
         self.debug = debug
         self.name = name
+        self.verbose = verbose
 
         # Setup logging
         ensure_dir(working_dir)
@@ -179,7 +181,7 @@ class Analyzer(abc.ABC):
             wait(evaluated_view_tasks)
 
         # Execute rules
-        rule_engine = RuleEngine(rules=[], raw_stats=raw_stats)
+        rule_engine = RuleEngine(rules=[], raw_stats=raw_stats, verbose=self.verbose)
         with EventLogger(key=EVENT_ATT_REASONS, message='Attach reasons to I/O bottlenecks'):
             characteristics = rule_engine.process_characteristics(
                 main_view=main_view
@@ -203,6 +205,7 @@ class Analyzer(abc.ABC):
                 num_workers=self.cluster_config.n_workers,
                 processes=self.cluster_config.processes,
                 slope_threshold=slope_threshold,
+                verbose=self.verbose,
             ),
             bottlenecks=bottlenecks,
             characteristics=characteristics,

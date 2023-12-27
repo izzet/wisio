@@ -41,6 +41,7 @@ class RecorderAnalyzer(Analyzer):
         checkpoint_dir: str = '',
         cluster_config: ClusterConfig = None,
         debug=False,
+        verbose=False,
     ):
         super().__init__(
             name='Recorder',
@@ -48,6 +49,7 @@ class RecorderAnalyzer(Analyzer):
             checkpoint_dir=checkpoint_dir,
             cluster_config=cluster_config,
             debug=debug,
+            verbose=verbose,
             working_dir=working_dir,
         )
 

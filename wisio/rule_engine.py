@@ -38,9 +38,15 @@ from .utils.collection_utils import deepmerge
 
 class RuleEngine(object):
 
-    def __init__(self, rules: Dict[ViewType, List[str]], raw_stats: RawStats) -> None:
+    def __init__(
+        self,
+        rules: Dict[ViewType, List[str]],
+        raw_stats: RawStats,
+        verbose: bool = False,
+    ) -> None:
         self.raw_stats = raw_stats
         self.rules = rules
+        self.verbose = verbose
 
     def process_characteristics(self, main_view: dd.DataFrame) -> Characteristics:
 
@@ -90,7 +96,7 @@ class RuleEngine(object):
         metric_boundaries: Dict[Metric, dd.core.Scalar],
     ) -> RuleResultsPerViewPerMetricPerRule:
 
-        rules = {rule: BottleneckRule(rule_key=rule, rule=KNOWN_RULES[rule])
+        rules = {rule: BottleneckRule(rule_key=rule, rule=KNOWN_RULES[rule], verbose=self.verbose)
                  for rule in KNOWN_RULES}
 
         metrics = list(evaluated_views.keys())

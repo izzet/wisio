@@ -39,7 +39,7 @@ from .types import (
     ScoringResult,
     ViewKey,
 )
-from .utils.collection_utils import get_intervals
+from .utils.collection_utils import get_intervals, join_with_and
 
 
 METADATA_ACCESS_RATIO_THRESHOLD = 0.5
@@ -199,10 +199,11 @@ class RuleHandler(abc.ABC):
 
 class BottleneckRule(RuleHandler):
 
-    def __init__(self, rule_key: str, rule: Rule) -> None:
+    def __init__(self, rule_key: str, rule: Rule, verbose: bool = False) -> None:
         super().__init__(rule_key=rule_key)
         self.rule = rule
         self.pluralize = inflect.engine()
+        self.verbose = verbose
 
     def define_tasks(
         self,
@@ -364,23 +365,24 @@ class BottleneckRule(RuleHandler):
             time_period_name = f" ({time_intervals[0]}) " if len(time_intervals) == 1 else ' '
             time_period_noun = self.pluralize.plural_noun('time period', len(time_intervals))
 
-            # 32 processes access 1 file pattern within 6 time periods and have an I/O time of 2.92 seconds which
-            # is 70.89% of overall I/O time of the workload.
-            description = (
-                f"{len(processes)} {accessor_noun}{accessor_name}{accessor_verb} "
-                f"{len(files)} {accessed_noun}{accessed_name}"
-                f"within {len(time_intervals)} {time_period_noun}{time_period_name}"
-                f"and {self.pluralize.plural_verb('has', len(processes))} an I/O time of {value:.2f} seconds which is "
-                f"{value/metric_boundary*100:.2f}% of overall I/O time of the workload."
-            )
-
-            # description = (
-            #     f"{self.pluralize.join(processes)} {self.pluralize.plural_verb('access', len(processes))} "
-            #     f"{self.pluralize.plural_noun('file', len(files))} {self.pluralize.join(files)} "
-            #     f"during the {join_with_and(values=time_intervals)}th {self.pluralize.plural_noun('second', len(time_intervals))} "
-            #     f"and {self.pluralize.plural_verb('has', len(processes))} an I/O time of {value:.2f} seconds which is "
-            #     f"{value/metric_boundary*100:.2f}% of overall I/O time of the workload."
-            # )
+            if self.verbose:
+                description = (
+                    f"{self.pluralize.join(processes)} {accessor_noun} {accessor_verb} "
+                    f"{accessed_noun} {self.pluralize.join(files)} "
+                    f"during the {join_with_and(values=time_intervals)}th {time_period_noun} "
+                    f"and {self.pluralize.plural_verb('has', len(processes))} an I/O time of {value:.2f} seconds which is "
+                    f"{value/metric_boundary*100:.2f}% of overall I/O time of the workload."
+                )
+            else:
+                # 32 processes access 1 file pattern within 6 time periods and have an I/O time of 2.92 seconds which
+                # is 70.89% of overall I/O time of the workload.
+                description = (
+                    f"{len(processes)} {accessor_noun}{accessor_name}{accessor_verb} "
+                    f"{len(files)} {accessed_noun}{accessed_name}"
+                    f"within {len(time_intervals)} {time_period_noun}{time_period_name}"
+                    f"and {self.pluralize.plural_verb('has', len(processes))} an I/O time of {value:.2f} seconds which is "
+                    f"{value/metric_boundary*100:.2f}% of overall I/O time of the workload."
+                )
 
         else:
 
