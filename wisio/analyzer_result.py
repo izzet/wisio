@@ -596,6 +596,28 @@ class AnalyzerResultOutput(object):
 
             debug_table.add_row('Severities', severity_tree)
 
+            setup_table = Table(box=None, show_header=False)
+            setup_table.add_column()
+            setup_table.add_column()
+            setup_table.add_row('Accuracy', output.setup.accuracy)
+            setup_table.add_row(
+                'Checkpoint', 'enabled' if output.setup.checkpoint else 'disabled')
+            setup_table.add_row('Cluster memory', f"{output.setup.memory}")
+            setup_table.add_row('Cluster # of workers',
+                                f"{output.setup.num_workers}")
+            setup_table.add_row('Cluster # of threads per workers',
+                                f"{output.setup.num_threads_per_worker}")
+            setup_table.add_row(
+                'Cluster processes', 'enabled' if output.setup.processes else 'disabled')
+            setup_table.add_row('Cluster type', output.setup.cluster_type)
+            setup_table.add_row(
+                'Debug', 'enabled' if output.setup.debug else 'disabled')
+            setup_table.add_row('Metric threshold',
+                                f"{output.setup.metric_threshold:.2f}")
+            setup_table.add_row('Slope threshold',
+                                f"{output.setup.slope_threshold:.2f}")
+            debug_table.add_row('Setup', setup_table)
+
             debug_panel = Panel(debug_table, title='Debug')
 
             Console().print(char_panel, bott_panel, debug_panel)
