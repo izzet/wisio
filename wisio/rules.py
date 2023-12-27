@@ -346,16 +346,30 @@ class BottleneckRule(RuleHandler):
             time_intervals = get_intervals(values=times)
 
             accessor = HUMANIZED_VIEW_TYPES['proc_name'].lower()
+            accessor_name = ' '
             accessed = HUMANIZED_VIEW_TYPES['file_name'].lower()
+            accessed_name = ' '
             if view_type in [COL_FILE_NAME, COL_FILE_DIR, COL_FILE_PATTERN]:
                 accessed = HUMANIZED_VIEW_TYPES[view_type].lower()
+                if len(files) == 1:
+                    accessed_name = f" ({ix}) "
             if view_type in [COL_APP_NAME, COL_NODE_NAME, COL_PROC_NAME, COL_RANK]:
                 accessor = HUMANIZED_VIEW_TYPES[view_type].lower()
+                if len(processes) == 1:
+                    accessor_name = f" ({ix}) "
 
+            accessor_noun = self.pluralize.plural_noun(accessor, len(processes))
+            accessor_verb = self.pluralize.plural_verb('accesses', len(processes))
+            accessed_noun = self.pluralize.plural_noun(accessed, len(files))
+            time_period_name = f" ({time_intervals[0]}) " if len(time_intervals) == 1 else ' '
+            time_period_noun = self.pluralize.plural_noun('time period', len(time_intervals))
+
+            # 32 processes access 1 file pattern within 6 time periods and have an I/O time of 2.92 seconds which
+            # is 70.89% of overall I/O time of the workload.
             description = (
-                f"{len(processes)} {self.pluralize.plural_noun(accessor, len(processes))} "
-                f"{self.pluralize.plural_verb('accesses', len(processes))} {len(files)} {self.pluralize.plural_noun(accessed, len(files))} "
-                f"within {len(time_intervals)} {self.pluralize.plural_noun('time period', len(time_intervals))} "
+                f"{len(processes)} {accessor_noun}{accessor_name}{accessor_verb} "
+                f"{len(files)} {accessed_noun}{accessed_name}"
+                f"within {len(time_intervals)} {time_period_noun}{time_period_name}"
                 f"and {self.pluralize.plural_verb('has', len(processes))} an I/O time of {value:.2f} seconds which is "
                 f"{value/metric_boundary*100:.2f}% of overall I/O time of the workload."
             )
