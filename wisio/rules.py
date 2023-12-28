@@ -1,5 +1,6 @@
 import abc
 import dask.dataframe as dd
+import functools as ft
 import inflect
 import numpy as np
 import pandas as pd
@@ -534,11 +535,12 @@ class CharacteristicComplexityRule(CharacteristicRule):
         raw_stats: RawStats = None
     ) -> RuleResult:
 
-        proc_names = characteristics[KnownCharacteristics.PROC_COUNT.value]['proc_names']
-        time_ranges = characteristics[KnownCharacteristics.TIME_PERIOD.value]['total_count']
-        files = characteristics[KnownCharacteristics.FILE_COUNT.value]['total_count']
+        process_count = characteristics[KnownCharacteristics.PROC_COUNT.value]['proc_names']
+        time_period_count = characteristics[KnownCharacteristics.TIME_PERIOD.value]['total_count']
+        file_count = characteristics[KnownCharacteristics.FILE_COUNT.value]['total_count']
 
-        complexity = np.log10(proc_names * time_ranges * files)
+        complexities = np.array([process_count, time_period_count, file_count])
+        complexity = np.log10(ft.reduce(np.multiply, complexities[complexities != 0]))
 
         return RuleResult(
             description='Complexity',
