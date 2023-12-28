@@ -267,8 +267,8 @@ class Analyzer(abc.ABC):
             metric_boundary = None
             if metric == 'time':
                 metric_boundary = main_view \
-                    .groupby(['proc_name']) \
-                    .sum()['time'] \
+                    .groupby([COL_PROC_NAME]) \
+                    .sum()[metric] \
                     .max() \
                     .persist()
             elif metric == 'bw':
