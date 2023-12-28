@@ -70,7 +70,7 @@ class RuleEngine(object):
 
         tasks = db.zip(rules_bag, main_view_bag) \
             .map(self._define_characteristic_tasks) \
-            .map(compute) \
+            .map(compute, optimize_graph=True) \
             .flatten()
 
         results = db.zip(rules_bag, tasks) \
@@ -120,7 +120,7 @@ class RuleEngine(object):
                  rules=rules,
                  characteristics=characteristics,
                  metric_boundaries=metric_boundaries) \
-            .map(compute) \
+            .map(compute, optimize_graph=True) \
             .flatten()
 
         results = db.zip(rules_bag, metrics_bag, view_keys_bag, tasks) \
