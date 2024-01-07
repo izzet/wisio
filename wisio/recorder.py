@@ -12,8 +12,7 @@ from .utils.logger import ElapsedTimeLogger
 
 
 CAT_POSIX = 0
-CHECKPOINT_MAIN_VIEW = '_main_view'
-CHECKPOINT_HLM = '_hlm'
+CHECKPOINT_RAW_STATS = '_raw_stats'
 DROPPED_COLS = [
     'app',
     'bandwidth',
@@ -65,16 +64,19 @@ class RecorderAnalyzer(Analyzer):
     ):
         # Read traces
         with ElapsedTimeLogger(message='Read traces'):
-            traces, job_time = self.read_parquet_files(
+            traces, job_time, total_count = self.read_parquet_files(
                 trace_path=trace_path,
                 time_granularity=time_granularity,
             )
 
         # Prepare raw stats
-        raw_stats = RawStats(
-            job_time=job_time.persist(),
-            time_granularity=time_granularity,
-            total_count=traces.index.count().persist(),
+        raw_stats = self.restore_extra_data(
+            data_name=CHECKPOINT_RAW_STATS,
+            fallback=lambda: dict(
+                job_time=job_time.persist(),
+                time_granularity=time_granularity,
+                total_count=total_count.persist(),
+            )
         )
 
         # Analyze traces
@@ -82,7 +84,7 @@ class RecorderAnalyzer(Analyzer):
             accuracy=accuracy,
             metric_threshold=metric_threshold,
             metrics=metrics,
-            raw_stats=raw_stats,
+            raw_stats=RawStats(**raw_stats),
             slope_threshold=slope_threshold,
             traces=traces,
             view_types=view_types,
@@ -112,7 +114,9 @@ class RecorderAnalyzer(Analyzer):
             .rename(columns=RENAMED_COLS) \
             .drop(columns=DROPPED_COLS, errors='ignore')
 
-        return traces, job_time
+        total_count = traces.index.count()
+
+        return traces, job_time, total_count
 
     @staticmethod
     def _compute_time_ranges(global_min_max: dict, time_granularity: int):

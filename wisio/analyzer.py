@@ -1,11 +1,12 @@
 import abc
 import dask.dataframe as dd
 import itertools as it
+import json
 import logging
 import os
-from dask.base import unpack_collections
-from dask.distributed import wait
-from typing import Callable, Dict, List
+from dask.base import compute, unpack_collections
+from dask.distributed import fire_and_forget, get_client, wait
+from typing import Callable, Dict, List, Tuple
 
 from .analysis import set_bound_columns, set_metric_deltas, set_metric_slope
 from .analysis_utils import set_file_dir, set_file_pattern, set_proc_name_parts
@@ -40,10 +41,11 @@ from .types import (
 )
 from .utils.dask_utils import EventLogger, flatten_column_names
 from .utils.file_utils import ensure_dir
-from .utils.logger import setup_logging
+from .utils.json_encoders import NpEncoder
 
 
 CHECKPOINT_MAIN_VIEW = '_main_view'
+CHECKPOINT_METRIC_BOUNDARIES = '_metric_boundaries'
 CHECKPOINT_HLM = '_hlm'
 EXTRA_COLS = ['io_cat', 'acc_pat', 'func_id']
 HLM_AGG = {
@@ -115,32 +117,37 @@ class Analyzer(abc.ABC):
         # Compute high-level metrics
         with EventLogger(key=EVENT_COMP_HLM, message='Compute high-level metrics'):
             hlm = self.load_view(
-                view_name=CHECKPOINT_HLM,
+                view_name='_'.join([CHECKPOINT_HLM, *sorted(view_types)]),
                 fallback=lambda: self.compute_high_level_metrics(
                     traces=traces,
                     view_types=view_types,
                 ),
                 force=False,
+                persist=True,
             )
             wait(hlm)
 
         # Compute main view
         with EventLogger(key=EVENT_COMP_MAIN_VIEW, message='Compute main view'):
             main_view = self.load_view(
-                view_name=CHECKPOINT_MAIN_VIEW,
+                view_name='_'.join([CHECKPOINT_MAIN_VIEW, *sorted(view_types)]),
                 fallback=lambda: self.compute_main_view(
                     hlm=hlm,
                     view_types=view_types,
                 ),
                 force=False,
+                persist=True,
             )
             wait(main_view)
 
         # Compute upper bounds
         with EventLogger(key=EVENT_COMP_METBD, message='Compute metric boundaries'):
-            metric_boundaries = self.compute_metric_boundaries(
-                main_view=main_view,
-                metrics=metrics,
+            metric_boundaries = self.restore_extra_data(
+                data_name='_'.join([CHECKPOINT_METRIC_BOUNDARIES, *sorted(metrics), *sorted(view_types)]),
+                fallback=lambda: self.compute_metric_boundaries(
+                    main_view=main_view,
+                    metrics=metrics,
+                ),
             )
             metric_boundaries_tasks, _ = unpack_collections(metric_boundaries)
             wait(metric_boundaries_tasks)
@@ -412,6 +419,28 @@ class Analyzer(abc.ABC):
                 self.cluster_manager.client.cancel(view)
             return dd.read_parquet(f"{view_path}")
         return fallback()
+
+    def restore_extra_data(self, data_name: str, fallback: Callable[[], dict], force=False, persist=False):
+        if self.checkpoint:
+            data_path = f"{self.checkpoint_dir}/{data_name}.json"
+            if force or not os.path.exists(data_path):
+                data = fallback()
+                fire_and_forget(
+                    get_client().submit(
+                        self.store_extra_data,
+                        data=get_client().submit(compute, data),
+                        data_path=data_path
+                    )
+                )
+                return data
+            with open(data_path, 'r') as f:
+                return json.load(f)
+        return fallback()
+
+    @staticmethod
+    def store_extra_data(data: Tuple[Dict], data_path: str):
+        with open(data_path, 'w') as f:
+            return json.dump(data[0], f, cls=NpEncoder)
 
     @staticmethod
     def view_permutations(view_types: List[ViewType]):
