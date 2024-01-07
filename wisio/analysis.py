@@ -44,8 +44,18 @@ DELTA_BIN_NAMES = [
     'medium',
     'high',
     'very high',
-    'critical'
+    'critical',
 ]
+DELTA_BIN_INITIALS = {
+    'none': 'NA',
+    'trivial': 'TR',
+    'very low': 'VL',
+    'low': 'LO',
+    'medium': 'MD',
+    'high': 'HI',
+    'very high': 'VH',
+    'critical': 'CR',
+}
 IS_NORMALIZED = dict(
     att_perf=True,
     bw=True,
@@ -77,8 +87,7 @@ def set_bound_columns(ddf: Union[dd.DataFrame, pd.DataFrame], is_initial=False):
 
     # records which tend towards 1 >> 0.9
     ddf['intensity'] = 0.0
-    ddf['intensity'] = ddf['intensity'].mask(
-        ddf['size'] > 0, ddf['count'] / ddf['size'])
+    ddf['intensity'] = ddf['intensity'].mask(ddf['size'] > 0, ddf['count'] / ddf['size'])
 
     if not is_initial:
         return ddf.drop(columns=['bw_intensity'])
@@ -180,8 +189,7 @@ def set_metric_slope(df: pd.DataFrame, metric: str):
     df[per_rev_cs_col] = (1 - df[per_col]).cumsum()
     df[per_rev_cs_diff_col] = df[per_rev_cs_col].diff().fillna(0)
 
-    df[slope_col] = np.rad2deg(np.arctan2(
-        df['count_cs_per_rev_diff'], df[per_rev_cs_diff_col]))
+    df[slope_col] = np.rad2deg(np.arctan2(df['count_cs_per_rev_diff'], df[per_rev_cs_diff_col]))
     df[slope_col] = df[slope_col].fillna(0)
 
     return df

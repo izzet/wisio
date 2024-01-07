@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import venn
+from dask.base import compute
 from dataclasses import asdict, dataclass
 from distributed import get_client
 from matplotlib import ticker
@@ -16,7 +17,7 @@ from scipy.stats import skew
 from typing import Dict, List, Set, Tuple
 
 
-from .analysis import DELTA_BIN_NAMES, DELTA_BINS
+from .analysis import DELTA_BIN_INITIALS, DELTA_BIN_NAMES, DELTA_BINS
 from .constants import (
     COL_PROC_NAME,
     COL_TIME_RANGE,
@@ -62,7 +63,9 @@ class AnalyzerResultOutputCountsType:
     hlm_count: int
     main_view_count: int
     avg_perspective_count: Dict[str, int]
-    avg_perspective_std: Dict[str, float]
+    avg_perspective_count_std: Dict[str, float]
+    avg_perspective_critical_count: Dict[str, int]
+    avg_perspective_critical_count_std: Dict[str, float]
     perspective_skewness: Dict[str, float]
     root_perspective_skewness: Dict[str, float]
     per_records_discarded: Dict[str, float]
@@ -73,6 +76,8 @@ class AnalyzerResultOutputCountsType:
     num_rules: int
     evaluated_records: Dict[str, int]
     perspective_count_tree: Dict[str, Dict[str, int]]
+    perspective_critical_count_tree: Dict[str, Dict[str, int]]
+    perspective_record_count_tree: Dict[str, Dict[str, int]]
     reasoned_records: Dict[str, int]
     slope_filtered_records: Dict[str, int]
 
@@ -80,15 +85,17 @@ class AnalyzerResultOutputCountsType:
 @dataclass
 class AnalyzerResultOutputSeveritiesType:
     critical_count: Dict[str, int]
+    critical_tree: Dict[str, Dict[str, int]]
     very_high_count: Dict[str, int]
+    very_high_tree: Dict[str, Dict[str, int]]
     high_count: Dict[str, int]
+    high_tree: Dict[str, Dict[str, int]]
     medium_count: Dict[str, int]
     low_count: Dict[str, int]
     very_low_count: Dict[str, int]
     trivial_count: Dict[str, int]
     none_count: Dict[str, int]
     rest_count: Dict[str, int]
-    critical_tree: Dict[str, Dict[str, int]]
 
 
 @dataclass
@@ -143,7 +150,17 @@ class AnalyzerResultOutput(object):
 
     def _create_output_type(self):
 
-        job_time = float(self.raw_stats.job_time.compute())
+        raw_stats, = compute(self.raw_stats)
+
+        complexity = 0
+        io_time = 0
+        job_time = float(raw_stats.job_time)
+        num_apps = 0
+        num_files = 0
+        num_nodes = 0
+        num_ops = 0
+        num_procs = 0
+        num_time_periods = 0
         for characteristic in self.characteristics:
             characteristic_value = self.characteristics[characteristic].value
             if characteristic == KnownCharacteristics.APP_COUNT.value:
@@ -178,26 +195,36 @@ class AnalyzerResultOutput(object):
         )
 
         main_view_count = len(self.main_view)
-        raw_count = int(self.raw_stats.total_count.compute())
+        raw_count = int(raw_stats.total_count)
         perspective_count_tree = {}
+        perspective_critical_count_tree = {}
+        perspective_record_count_tree = {}
         num_metrics = 0
         perspectives = set()
         root_view_type_counts = {}
         for metric in self.view_results:
             perspective_count_tree[metric] = {}
+            perspective_critical_count_tree[metric] = {}
+            perspective_record_count_tree[metric] = {}
             root_view_type_counts[metric] = []
             num_metrics = num_metrics + 1
             for view_key, view_result in self.view_results[metric].items():
                 count_key = view_name(view_key, '->')
-                count = len(view_result.view)
-                perspective_count_tree[metric][count_key] = count
+                bot_important_count = len(view_result.view)
+                view_critical_count = len(view_result.critical_view)
+                view_record_count = len(view_result.records)
+                perspective_count_tree[metric][count_key] = bot_important_count
+                perspective_critical_count_tree[metric][count_key] = view_critical_count
+                perspective_record_count_tree[metric][count_key] = view_record_count
                 perspectives.add(view_key)
                 if len(view_key) == 1:
-                    root_view_type_counts[metric].append(count)
+                    root_view_type_counts[metric].append(view_critical_count)
         num_metrics = num_metrics
         num_perspectives = len(perspectives)
         avg_perspective_count = {}
-        avg_perspective_std = {}
+        avg_perspective_count_std = {}
+        avg_perspective_critical_count = {}
+        avg_perspective_critical_count_std = {}
         per_records_discarded = {}
         per_records_retained = {}
         perspective_skewness = {}
@@ -207,77 +234,96 @@ class AnalyzerResultOutput(object):
                                   for count_key in perspective_count_tree[metric]]
             perspective_avg = np.average(perspective_counts)
             perspective_std = np.std(perspective_counts)
-            perspective_records_per = perspective_avg/raw_count
+
+            perspective_critical_counts = [perspective_critical_count_tree[metric][count_key]
+                                           for count_key in perspective_critical_count_tree[metric]]
+            perspective_critical_avg = np.average(perspective_critical_counts)
+            perspective_critical_std = np.std(perspective_critical_counts)
+
             avg_perspective_count[metric] = perspective_avg
-            avg_perspective_std[metric] = perspective_std
-            per_records_discarded[metric] = 1-perspective_records_per
-            per_records_retained[metric] = perspective_records_per
+            avg_perspective_count_std[metric] = perspective_std
+            avg_perspective_critical_count[metric] = perspective_critical_avg
+            avg_perspective_critical_count_std[metric] = perspective_critical_std
+
+            perspective_critical_per = perspective_critical_avg/raw_count
+            per_records_discarded[metric] = 1-perspective_critical_per
+            per_records_retained[metric] = perspective_critical_per
+
             perspective_skewness[metric] = abs(skew(perspective_counts))
             root_perspective_skewness[metric] = abs(skew(
                 root_view_type_counts[metric]))
 
         num_bottlenecks = {}
         num_rules = 0
-        critical_count = {}
-        very_high_count = {}
-        high_count = {}
-        medium_count = {}
-        low_count = {}
-        very_low_count = {}
-        trivial_count = {}
-        none_count = {}
-        rest_count = {}
-        critical_tree = {}
+        bot_critical_count = {}
+        bot_critical_tree = {}
+        bot_very_high_count = {}
+        bot_very_high_tree = {}
+        bot_high_count = {}
+        bot_high_tree = {}
+        bot_medium_count = {}
+        bot_low_count = {}
+        bot_very_low_count = {}
+        bot_trivial_count = {}
+        bot_none_count = {}
+        bot_rest_count = {}
         for rule in self.bottlenecks:
             num_rules = num_rules + 1
             for metric in self.bottlenecks[rule]:
                 num_bottlenecks[metric] = num_bottlenecks.get(metric, 0)
-                critical_count[metric] = critical_count.get(metric, 0)
-                very_high_count[metric] = very_high_count.get(metric, 0)
-                high_count[metric] = high_count.get(metric, 0)
-                medium_count[metric] = medium_count.get(metric, 0)
-                low_count[metric] = low_count.get(metric, 0)
-                very_low_count[metric] = very_low_count.get(metric, 0)
-                trivial_count[metric] = trivial_count.get(metric, 0)
-                none_count[metric] = none_count.get(metric, 0)
-                rest_count[metric] = rest_count.get(metric, 0)
-                critical_tree[metric] = critical_tree.get(metric, {})
+                bot_critical_count[metric] = bot_critical_count.get(metric, 0)
+                bot_critical_tree[metric] = bot_critical_tree.get(metric, {})
+                bot_very_high_count[metric] = bot_very_high_count.get(metric, 0)
+                bot_very_high_tree[metric] = bot_very_high_tree.get(metric, {})
+                bot_high_count[metric] = bot_high_count.get(metric, 0)
+                bot_high_tree[metric] = bot_high_tree.get(metric, {})
+                bot_medium_count[metric] = bot_medium_count.get(metric, 0)
+                bot_low_count[metric] = bot_low_count.get(metric, 0)
+                bot_very_low_count[metric] = bot_very_low_count.get(metric, 0)
+                bot_trivial_count[metric] = bot_trivial_count.get(metric, 0)
+                bot_none_count[metric] = bot_none_count.get(metric, 0)
+                bot_rest_count[metric] = bot_rest_count.get(metric, 0)
                 for view_key, results in self.bottlenecks[rule][metric].items():
                     count_key = view_name(view_key, '->')
-                    count = critical_tree[metric].get(count_key, 0)
-                    critical_tree[metric][count_key] = count
+                    bot_critical_tree[metric][count_key] = bot_critical_tree[metric].get(count_key, 0)
+                    bot_very_high_tree[metric][count_key] = bot_very_high_tree[metric].get(count_key, 0)
+                    bot_high_tree[metric][count_key] = bot_high_tree[metric].get(count_key, 0)
                     for result in results:
                         result_score = result.extra_data[f"{metric}_score"]
                         if result_score == DELTA_BIN_NAMES[0]:
-                            none_count[metric] = none_count[metric] + 1
+                            bot_none_count[metric] = bot_none_count[metric] + 1
                         elif result_score == DELTA_BIN_NAMES[1]:
-                            trivial_count[metric] = trivial_count[metric] + 1
+                            bot_trivial_count[metric] = bot_trivial_count[metric] + 1
                         elif result_score == DELTA_BIN_NAMES[2]:
-                            very_low_count[metric] = very_low_count[metric] + 1
+                            bot_very_low_count[metric] = bot_very_low_count[metric] + 1
                         elif result_score == DELTA_BIN_NAMES[3]:
-                            low_count[metric] = low_count[metric] + 1
+                            bot_low_count[metric] = bot_low_count[metric] + 1
                         elif result_score == DELTA_BIN_NAMES[4]:
-                            medium_count[metric] = medium_count[metric] + 1
+                            bot_medium_count[metric] = bot_medium_count[metric] + 1
                         elif result_score == DELTA_BIN_NAMES[5]:
-                            high_count[metric] = high_count[metric] + 1
+                            bot_high_count[metric] = bot_high_count[metric] + 1
+                            bot_high_tree[metric][count_key] = bot_high_tree[metric][count_key] + 1
                         elif result_score == DELTA_BIN_NAMES[6]:
-                            very_high_count[metric] = very_high_count[metric] + 1
+                            bot_very_high_count[metric] = bot_very_high_count[metric] + 1
+                            bot_very_high_tree[metric][count_key] = bot_very_high_tree[metric][count_key] + 1
                         elif result_score == DELTA_BIN_NAMES[7]:
-                            critical_count[metric] = critical_count[metric] + 1
-                            critical_tree[metric][count_key] = critical_tree[metric][count_key] + 1
+                            bot_critical_count[metric] = bot_critical_count[metric] + 1
+                            bot_critical_tree[metric][count_key] = bot_critical_tree[metric][count_key] + 1
                         num_bottlenecks[metric] = num_bottlenecks[metric] + 1
 
         severities = AnalyzerResultOutputSeveritiesType(
-            critical_count=critical_count,
-            critical_tree=critical_tree,
-            high_count=high_count,
-            low_count=low_count,
-            medium_count=medium_count,
-            none_count=none_count,
-            rest_count=rest_count,
-            trivial_count=trivial_count,
-            very_high_count=very_high_count,
-            very_low_count=very_low_count,
+            critical_count=bot_critical_count,
+            critical_tree=bot_critical_tree,
+            high_count=bot_high_count,
+            high_tree=bot_high_tree,
+            low_count=bot_low_count,
+            medium_count=bot_medium_count,
+            none_count=bot_none_count,
+            rest_count=bot_rest_count,
+            trivial_count=bot_trivial_count,
+            very_high_count=bot_very_high_count,
+            very_high_tree=bot_very_high_tree,
+            very_low_count=bot_very_low_count,
         )
 
         elapsed_times = {}
@@ -323,7 +369,9 @@ class AnalyzerResultOutput(object):
 
         counts = AnalyzerResultOutputCountsType(
             avg_perspective_count=avg_perspective_count,
-            avg_perspective_std=avg_perspective_std,
+            avg_perspective_count_std=avg_perspective_count_std,
+            avg_perspective_critical_count=avg_perspective_critical_count,
+            avg_perspective_critical_count_std=avg_perspective_critical_count_std,
             evaluated_records=evaluated_records,
             hlm_count=main_view_count,
             main_view_count=main_view_count,
@@ -334,6 +382,8 @@ class AnalyzerResultOutput(object):
             per_records_discarded=per_records_discarded,
             per_records_retained=per_records_retained,
             perspective_count_tree=perspective_count_tree,
+            perspective_critical_count_tree=perspective_critical_count_tree,
+            perspective_record_count_tree=perspective_record_count_tree,
             perspective_skewness=perspective_skewness,
             raw_count=raw_count,
             reasoned_records=reasoned_records,
@@ -416,11 +466,12 @@ class AnalyzerResultOutput(object):
         # TODO metric
         metric = 'time'
 
-        bott_table = Table(box=None, show_header=False)
-        bott_count = 0
+        bot_table = Table(box=None, show_header=False)
+        bot_count = 0
         for rule in tree_dict:
             rule_tree = Tree(rule)
             total_count = 0
+            bot_cur = bot_count
             for view_key in tree_dict[rule]:
                 results = tree_dict[rule][view_key]
                 view_record_count = len(results)
@@ -430,31 +481,31 @@ class AnalyzerResultOutput(object):
                 if view_record_count == 0:
                     continue
                 for result in results:
+                    bot_cur = bot_cur + 1
                     result_score = result.extra_data[f"{metric}_score"]
+                    bot_desc = f"[{DELTA_BIN_INITIALS[result_score]}{bot_cur}] {result.description}"
                     if result.reasons is None or len(result.reasons) == 0:
-                        view_tree.add(self._colored_description(
-                            result.description, result_score))
+                        view_tree.add(self._colored_description(bot_desc, result_score))
                     else:
-                        bott_tree = Tree(self._colored_description(
-                            result.description, result_score))
+                        bot_tree = Tree(self._colored_description(bot_desc, result_score))
                         for reason in result.reasons:
-                            bott_tree.add(self._colored_description(
-                                reason.description, result_score))
-                        view_tree.add(bott_tree)
+                            bot_tree.add(self._colored_description(reason.description, result_score))
+                        view_tree.add(bot_tree)
                     if (max_bottlenecks_per_view_type > 0 and
                             len(view_tree.children) == max_bottlenecks_per_view_type and
                             view_record_count > max_bottlenecks_per_view_type):
-                        view_tree.add(
-                            f"({view_record_count - max_bottlenecks_per_view_type} more)")
+                        remaining_count = view_record_count - max_bottlenecks_per_view_type
+                        view_tree.add(f"({remaining_count} more)")
+                        bot_cur = bot_cur + remaining_count
                         break
                 rule_tree.add(view_tree)
-            bott_count = bott_count + total_count
+            bot_count = bot_count + total_count
             if len(rule_tree.children) > 0:
                 rule_tree.label = f"{rule_tree.label} ({total_count} bottlenecks)"
-                bott_table.add_row(rule_tree)
+                bot_table.add_row(rule_tree)
 
         char_panel = Panel(char_table, title='I/O Characteristics')
-        bott_panel = Panel(bott_table, title='I/O Bottlenecks')
+        bot_panel = Panel(bot_table, title='I/O Bottlenecks')
 
         if show_debug:
             main_view_count = output.counts.main_view_count
@@ -471,18 +522,22 @@ class AnalyzerResultOutput(object):
             for metric in output.counts.perspective_count_tree:
                 metric_tree = Tree((
                     f"{metric}: "
-                    f"avg. {output.counts.avg_perspective_count[metric]:.2f} "
-                    f"std. {output.counts.avg_perspective_std[metric]:.2f} "
+                    f"{output.counts.avg_perspective_count[metric]:.2f}±{output.counts.avg_perspective_count_std[metric]:.2f} "
                     f"({output.counts.avg_perspective_count[metric]/raw_total_count*100:.2f}% "
                     f"{output.counts.avg_perspective_count[metric]/main_view_count*100:.2f}%)"
+                    " -S> "
+                    f"{output.counts.avg_perspective_critical_count[metric]:.2f}±{output.counts.avg_perspective_critical_count_std[metric]:.2f} "
+                    f"({output.counts.avg_perspective_critical_count[metric]/raw_total_count*100:.2f}% "
+                    f"{output.counts.avg_perspective_critical_count[metric]/main_view_count*100:.2f}%)"
                 ))
-                for view_name_str in output.counts.perspective_count_tree[metric]:
-                    view_count = output.counts.perspective_count_tree[metric][view_name_str]
+                for count_key in output.counts.perspective_count_tree[metric]:
+                    view_count = output.counts.perspective_count_tree[metric][count_key]
+                    view_critical_count = output.counts.perspective_critical_count_tree[metric][count_key]
                     metric_tree.add((
-                        f"{view_name_str}: "
-                        f"{view_count} "
-                        f"({view_count/raw_total_count*100:.2f}% "
-                        f"{view_count/main_view_count*100:.2f}%)"
+                        f"{count_key}: "
+                        f"{view_count} ({view_count/raw_total_count*100:.2f}% {view_count/main_view_count*100:.2f}%)"
+                        " -S> "
+                        f"{view_critical_count} ({view_critical_count/raw_total_count*100:.2f}% {view_critical_count/main_view_count*100:.2f}%)"
                     ))
                 main_view_tree.add(metric_tree)
 
@@ -620,9 +675,9 @@ class AnalyzerResultOutput(object):
 
             debug_panel = Panel(debug_table, title='Debug')
 
-            Console().print(char_panel, bott_panel, debug_panel)
+            Console().print(char_panel, bot_panel, debug_panel)
         else:
-            Console().print(char_panel, bott_panel)
+            Console().print(char_panel, bot_panel)
 
     def csv(self, name: str, file_path: str, max_bottlenecks_per_view_type=3, show_debug=True):
 
@@ -636,20 +691,22 @@ class AnalyzerResultOutput(object):
         for ix, row in output_df.copy().iterrows():
             if isinstance(row[0], dict):
                 dropping_indices.append(ix)
+                type_type = ix[0]
+                value_type = ix[1]
                 nested_df = pd.json_normalize(row[0])
                 for _, nested_row in nested_df.iterrows():
                     secondary_ix = None
                     value = None
-                    if len(nested_df.columns) == 1:
-                        secondary_ix = f"{nested_row.index[0]}__{ix[1]}"
-                        value = nested_row[0]
-                        output_df.loc[(ix[0], secondary_ix),] = value
-                    else:
+                    if '_tree' in value_type:
                         for nested_col in nested_df.columns:
-                            suffix = ix[1].replace('_tree', '')
+                            suffix = value_type.replace('_tree', '')
                             secondary_ix = f"{nested_col.replace('.', '_').replace('->', '_')}_{suffix}"
                             value = nested_row[nested_col]
-                            output_df.loc[(ix[0], secondary_ix),] = value
+                            output_df.loc[(type_type, secondary_ix),] = value
+                    else:
+                        secondary_ix = f"{nested_row.index[0]}__{value_type}"
+                        value = nested_row[0]
+                        output_df.loc[(type_type, secondary_ix),] = value
 
         output_df = output_df \
             .drop(index=dropping_indices) \
@@ -659,17 +716,23 @@ class AnalyzerResultOutput(object):
 
         output_df.sort_index().to_csv(file_path, encoding='utf8')
 
-        timings_df = self._create_timings_df()
+        timings_df, timings_raw_df = self._create_timings_df()
 
         timings_df.sort_values(['type', 'key']).to_csv(
             file_path.replace('.csv', '_timings.csv'), encoding='utf8')
 
+        timings_df.sort_values(['time_start']).to_csv(
+            file_path.replace('.csv', '_timings_ordered.csv'), encoding='utf8')
+
+        timings_raw_df.to_csv(file_path.replace('.csv', '_timings_raw.csv'), encoding='utf8')
+
         # TODO
         metric = 'time'
-        view_result = self.view_results[metric][('time_range',)]
-        view_result.slope_view[[f"{metric}_slope", f"{metric}_per_rev_cs", 'count_cs_per_rev']] \
-            .compute() \
-            .to_csv(file_path.replace('.csv', '_slope.csv'), encoding='utf8')
+        if ('time_range',) in self.view_results[metric]:
+            view_result = self.view_results[metric][('time_range',)]
+            view_result.view[[f"{metric}_slope", f"{metric}_per_rev_cs", 'count_cs_per_rev']] \
+                .compute() \
+                .to_csv(file_path.replace('.csv', '_slope.csv'), encoding='utf8')
 
     def _colored_description(self, description: str, result_score: str = None):
         if result_score is None:
@@ -698,22 +761,24 @@ class AnalyzerResultOutput(object):
         for _, timing in timing_events:
             timings.append(timing)
 
-        timings_df = pd.DataFrame(timings)
+        raw_df = pd.DataFrame(timings)
 
-        timings_df = timings_df[['key', 'type', 'time', 'size']] \
-            .groupby(['key', 'type']) \
-            .max() \
+        timings_df = raw_df.copy()
+        timings_df['key_type'] = timings_df['key'] + '_' + timings_df['type']
+
+        timings_df = timings_df[['key_type', 'key', 'type', 'time', 'size']] \
+            .groupby(['key_type']) \
+            .first() \
             .reset_index() \
             .pivot(index='key', columns='type', values=['size', 'time'])
 
-        timings_df['time', 'elapsed'] = timings_df['time',
-                                                   'end'] - timings_df['time', 'start']
+        timings_df['time', 'elapsed'] = timings_df['time', 'end'] - timings_df['time', 'start']
 
         timings_df = flatten_column_names(timings_df)
 
         timings_df['type'] = timings_df.index.map(lambda x: x.split('_')[-1])
 
-        return timings_df
+        return timings_df, raw_df
 
 
 class AnalysisResultPlots(object):
@@ -987,7 +1052,7 @@ class AnalysisResultPlots(object):
         )
 
     def _metric_relations(self, view_key: ViewKey, metrics: List[Metric], labels: List[str]):
-        sets = [set(self.view_results[metric][view_key].view['id'].unique().compute())
+        sets = [set(self.view_results[metric][view_key].records['id'].unique().compute())
                 for metric in metrics]
         labels = self._venn_labels(sets, labels, metrics)
         fig, ax = venn.venn3(labels, names=metrics, figsize=(5, 5))
@@ -1014,14 +1079,14 @@ class AnalysisResultPlots(object):
         y_col = 'count_cs_per_rev'
         for i, view_key in enumerate(view_keys):
             view_result = self.view_results[metric][view_key]
-            slope_view = view_result.slope_view.compute()
+            view = view_result.view.compute()
             color = f"C{i}" if color is None else color
             self._plot_slope(
                 ax=ax,
                 color=color,
                 metric=metric,
                 slope_threshold=slope_threshold,
-                slope_view=slope_view,
+                view=view,
                 x_col=x_col,
                 y_col=y_col,
             )
@@ -1036,7 +1101,7 @@ class AnalysisResultPlots(object):
             ax.set_ylabel(ylabel)
         if len(legend_handles) > 0:
             ax.legend(handles=legend_handles)
-        return ax, slope_view
+        return ax, view
 
     @staticmethod
     def _plot_slope(
@@ -1044,15 +1109,15 @@ class AnalysisResultPlots(object):
         color: str,
         metric: Metric,
         slope_threshold: int,
-        slope_view: pd.DataFrame,
+        view: pd.DataFrame,
         x_col: str,
         y_col: str,
     ):
-        slope_cond = slope_view[f"{metric}_slope"] < slope_threshold
-        slope_view.loc[slope_cond, f"{x_col}_line"] = slope_view[x_col]
-        line = slope_view[f"{x_col}_line"].to_numpy()
-        x = slope_view[x_col].to_numpy()
-        y = slope_view[y_col].to_numpy()
+        slope_cond = view[f"{metric}_slope"] < slope_threshold
+        view.loc[slope_cond, f"{x_col}_line"] = view[x_col]
+        line = view[f"{x_col}_line"].to_numpy()
+        x = view[x_col].to_numpy()
+        y = view[y_col].to_numpy()
         last_non_nan_index = np.where(~np.isnan(line))[0][-1]
         dotted = np.copy(line)
         if np.all(np.isnan(line[last_non_nan_index + 1:])):
@@ -1095,7 +1160,7 @@ class AnalysisResultPlots(object):
     def _view_relations(self, metric: Metric, view_keys: List[ViewKey], labels: List[str]):
         names = [view_name(view_key).replace('_', '\_')
                  for view_key in view_keys]
-        sets = [set(self.view_results[metric][view_key].view['id'].unique().compute())
+        sets = [set(self.view_results[metric][view_key].records['id'].unique().compute())
                 for view_key in view_keys]
         labels = self._venn_labels(sets, labels, names)
         fig, ax = venn.venn3(labels, names=names, figsize=(5, 5))
