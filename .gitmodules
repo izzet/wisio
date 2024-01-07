@@ -1,7 +1,7 @@
-[submodule "external/Recorder"]
-	path = external/Recorder
+[submodule "converter/lib/Recorder"]
+	path = converter/lib/Recorder
 	url = git@github.com:hariharan-devarajan/Recorder.git
 	branch = pilgrim
-[submodule "external/cpp-logger"]
-	path = external/cpp-logger
+[submodule "converter/lib/cpp-logger"]
+	path = converter/lib/cpp-logger
 	url = git@github.com:hariharan-devarajan/cpp-logger.git

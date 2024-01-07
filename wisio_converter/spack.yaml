@@ -1,0 +1,8 @@
+spack:
+  specs:
+    - cmake
+    - nlohmann-json@3.10.5
+    - arrow-cpp@master
+    - pkg-config@0.27.1
+    - python@3.10.6
+  view: true
