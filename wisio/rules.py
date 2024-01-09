@@ -190,6 +190,8 @@ Average 'write's are {{ (write_size / count) | format_bytes }}, which is smaller
     ),
 }
 
+HUMANIZED_KNOWN_RULES = {rule: KNOWN_RULES[rule].name for rule in KNOWN_RULES}
+
 
 class RuleHandler(abc.ABC):
 

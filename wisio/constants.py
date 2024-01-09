@@ -43,7 +43,7 @@ HUMANIZED_VIEW_TYPES = dict(
     node_name='Node',
     proc_name='Process',
     rank='Rank',
-    time_range='Time Range',
+    time_range='Time Period',
 )
 
 XFER_SIZE_BINS = [

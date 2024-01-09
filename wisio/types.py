@@ -1,6 +1,7 @@
 import dask.dataframe as dd
 from dataclasses import dataclass
 from typing import Dict, List, Literal, Optional, Union, Tuple
+from .constants import HUMANIZED_VIEW_TYPES
 
 
 AnalysisAccuracy = Literal['accurate', 'optimistic', 'pessimistic']
@@ -103,6 +104,12 @@ ScoringPerViewPerMetric = Dict[Metric, ScoringPerView]
 
 ViewResultsPerView = Dict[ViewKey, ViewResult]
 ViewResultsPerViewPerMetric = Dict[Metric, ViewResultsPerView]
+
+
+def humanized_view_name(view_key_type: Union[ViewKey, ViewType], separator='_'):
+    if isinstance(view_key_type, tuple):
+        return separator.join([HUMANIZED_VIEW_TYPES[view_type] for view_type in view_key_type])
+    return HUMANIZED_VIEW_TYPES[view_key_type]
 
 
 def view_name(view_key_type: Union[ViewKey, ViewType], separator='_'):

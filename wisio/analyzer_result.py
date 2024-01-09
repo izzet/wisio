@@ -27,7 +27,7 @@ from .constants import (
     EVENT_COMP_PERS,
     EVENT_DET_BOTT,
 )
-from .rules import KnownCharacteristics
+from .rules import HUMANIZED_KNOWN_RULES, KnownCharacteristics
 from .types import (
     AnalysisSetup,
     Characteristics,
@@ -38,6 +38,7 @@ from .types import (
     ScoringPerViewPerMetric,
     ViewKey,
     ViewResultsPerViewPerMetric,
+    humanized_view_name,
     view_name,
 )
 from .utils.dask_utils import flatten_column_names
@@ -453,31 +454,29 @@ class AnalyzerResultOutput(object):
 
         tree_dict = {}
         for rule in self.bottlenecks:
-            tree_dict[rule] = {}
             for metric in self.bottlenecks[rule]:
                 for view_key in self.bottlenecks[rule][metric]:
-                    tree_dict[rule][view_key] = tree_dict[rule].get(
-                        view_key, [])
+                    tree_dict[view_key] = tree_dict.get(view_key, {})
+                    tree_dict[view_key][rule] = tree_dict[view_key].get(rule, [])
                     if len(self.bottlenecks[rule][metric][view_key]) == 0:
                         continue
                     for result in self.bottlenecks[rule][metric][view_key]:
-                        tree_dict[rule][view_key].append(result)
+                        tree_dict[view_key][rule].append(result)
 
         # TODO metric
         metric = 'time'
 
         bot_table = Table(box=None, show_header=False)
         bot_count = 0
-        for rule in tree_dict:
-            rule_tree = Tree(rule)
+        for view_key in tree_dict:
+            view_tree = Tree(f"{humanized_view_name(view_key, '->')} view")
             total_count = 0
             bot_cur = bot_count
-            for view_key in tree_dict[rule]:
-                results = tree_dict[rule][view_key]
+            for rule in tree_dict[view_key]:
+                results = tree_dict[view_key][rule]
                 view_record_count = len(results)
                 total_count = total_count + view_record_count
-                view_tree = Tree(
-                    f"{view_name(view_key, '->')} ({view_record_count} bottlenecks)")
+                rule_tree = Tree(f"{HUMANIZED_KNOWN_RULES[rule]} ({view_record_count} bottlenecks)")
                 if view_record_count == 0:
                     continue
                 for result in results:
@@ -485,24 +484,24 @@ class AnalyzerResultOutput(object):
                     result_score = result.extra_data[f"{metric}_score"]
                     bot_desc = f"[{DELTA_BIN_INITIALS[result_score]}{bot_cur}] {result.description}"
                     if result.reasons is None or len(result.reasons) == 0:
-                        view_tree.add(self._colored_description(bot_desc, result_score))
+                        rule_tree.add(self._colored_description(bot_desc, result_score))
                     else:
                         bot_tree = Tree(self._colored_description(bot_desc, result_score))
                         for reason in result.reasons:
                             bot_tree.add(self._colored_description(reason.description, result_score))
-                        view_tree.add(bot_tree)
+                        rule_tree.add(bot_tree)
                     if (max_bottlenecks_per_view_type > 0 and
-                            len(view_tree.children) == max_bottlenecks_per_view_type and
+                            len(rule_tree.children) == max_bottlenecks_per_view_type and
                             view_record_count > max_bottlenecks_per_view_type):
                         remaining_count = view_record_count - max_bottlenecks_per_view_type
-                        view_tree.add(f"({remaining_count} more)")
+                        rule_tree.add(f"({remaining_count} more)")
                         bot_cur = bot_cur + remaining_count
                         break
-                rule_tree.add(view_tree)
+                view_tree.add(rule_tree)
             bot_count = bot_count + total_count
-            if len(rule_tree.children) > 0:
-                rule_tree.label = f"{rule_tree.label} ({total_count} bottlenecks)"
-                bot_table.add_row(rule_tree)
+            if len(view_tree.children) > 0:
+                view_tree.label = f"{view_tree.label} ({total_count} bottlenecks)"
+                bot_table.add_row(view_tree)
 
         char_panel = Panel(char_table, title='I/O Characteristics')
         bot_panel = Panel(bot_table, title='I/O Bottlenecks')
