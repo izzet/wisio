@@ -12,6 +12,7 @@ from .types import AnalysisAccuracy, OutputType, RawStats, ViewType
 from .utils.logger import ElapsedTimeLogger
 
 
+CHECKPOINT_RAW_STATS = '_raw_stats'
 DXT_COLS = {
     'acc_pat': "uint64",
     'cat': "string",
@@ -66,10 +67,13 @@ class DarshanAnalyzer(Analyzer):
             )
 
         # Prepare raw stats
-        raw_stats = RawStats(
-            job_time=delayed(job_time),
-            time_granularity=time_granularity,
-            total_count=traces.index.count().persist(),
+        raw_stats = self.restore_extra_data(
+            data_name=CHECKPOINT_RAW_STATS,
+            fallback=lambda: dict(
+                job_time=delayed(job_time),
+                time_granularity=time_granularity,
+                total_count=traces.index.count().persist(),
+            )
         )
 
         # Analyze traces
@@ -77,7 +81,7 @@ class DarshanAnalyzer(Analyzer):
             accuracy=accuracy,
             metric_threshold=metric_threshold,
             metrics=metrics,
-            raw_stats=raw_stats,
+            raw_stats=RawStats(**raw_stats),
             slope_threshold=slope_threshold,
             traces=traces,
             view_types=view_types,
@@ -90,8 +94,7 @@ class DarshanAnalyzer(Analyzer):
 
         for trace_path in trace_paths:
             if df is None:
-                df, job_time = create_dxt_dataframe(
-                    trace_path, time_granularity)
+                df, job_time = create_dxt_dataframe(trace_path, time_granularity)
             else:
                 df = pd.concat(
                     [df, create_dxt_dataframe(trace_path, time_granularity)])
