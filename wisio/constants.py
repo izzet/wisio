@@ -59,27 +59,27 @@ XFER_SIZE_BINS = [
     np.inf
 ]
 XFER_SIZE_BIN_LABELS = [
-    '<4 KB',
-    '4-16 KB',
-    '16-64 KB',
-    '64-256 KB',
-    '256 KB-1 MB',
-    '1-4 MB',
-    '4-16 MB',
-    '16-64 MB',
-    '>64 MB',
+    '<4 kiB',
+    '4-16 kiB',
+    '16-64 kiB',
+    '64-256 kiB',
+    '256 kiB-1 MiB',
+    '1-4 MiB',
+    '4-16 MiB',
+    '16-64 MiB',
+    '>64 MiB',
 ]
 XFER_SIZE_BIN_NAMES = [
-    '<4 KB',
-    '4 KB',
-    '16 KB',
-    '64 KB',
-    '256 KB',
-    '1 MB',
-    '4 MB',
-    '16 MB',
-    '64 MB',
-    '>64 MB'
+    '<4 kiB',
+    '4 kiB',
+    '16 kiB',
+    '64 kiB',
+    '256 kiB',
+    '1 MiB',
+    '4 MiB',
+    '16 MiB',
+    '64 MiB',
+    '>64 MiB'
 ]
 
 EVENT_ATT_REASONS = 'attach_reasons'
