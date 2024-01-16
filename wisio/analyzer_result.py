@@ -729,7 +729,20 @@ class AnalyzerResultOutput(object):
         metric = 'time'
         if ('time_range',) in self.view_results[metric]:
             view_result = self.view_results[metric][('time_range',)]
-            view_result.view[[f"{metric}_slope", f"{metric}_per_rev_cs", 'count_cs_per_rev']] \
+            view_result.view[[
+                'count_sum',
+                'count',
+                'count_cs',
+                'count_cs_per',
+                'count_cs_per_rev',
+                'count_cs_per_rev_diff',
+                f"{metric}_sum",
+                f"{metric}",
+                f"{metric}_per",
+                f"{metric}_per_rev_cs",
+                f"{metric}_per_rev_cs_diff",
+                f"{metric}_slope",
+            ]] \
                 .compute() \
                 .to_csv(file_path.replace('.csv', '_slope.csv'), encoding='utf8')
 
