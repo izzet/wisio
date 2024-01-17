@@ -12,7 +12,7 @@ Metric = Literal[
     'iops',
     'time',
 ]
-OutputType = Literal['console', 'csv', 'html', 'json']
+OutputType = Literal['console', 'csv', 'html', 'json', 'sqlite']
 ViewType = Literal[
     'file_name',
     'proc_name',
@@ -23,7 +23,7 @@ ViewKey = Union[Tuple[ViewType], Tuple[ViewType, ViewType],
 
 
 @dataclass
-class AnalysisSetup:
+class AnalysisRuntimeConfig:
     accuracy: AnalysisAccuracy
     checkpoint: bool
     cluster_type: str
@@ -33,8 +33,10 @@ class AnalysisSetup:
     num_threads_per_worker: int
     num_workers: int
     processes: bool
+    run_id: str
     slope_threshold: float
     verbose: bool
+    working_dir: str
 
 
 @dataclass

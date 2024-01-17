@@ -2,6 +2,7 @@ import math
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import sqlite3
 import venn
 from dask.base import compute
 from dataclasses import asdict, dataclass
@@ -26,10 +27,11 @@ from .constants import (
     EVENT_COMP_MAIN_VIEW,
     EVENT_COMP_PERS,
     EVENT_DET_BOTT,
+    EVENT_READ_TRACES,
 )
 from .rules import HUMANIZED_KNOWN_RULES, KnownCharacteristics
 from .types import (
-    AnalysisSetup,
+    AnalysisRuntimeConfig,
     Characteristics,
     MainView,
     Metric,
@@ -123,7 +125,7 @@ class AnalyzerResultOutputTimingsType:
 class AnalyzerResultOutputType:
     characteristics: AnalyzerResultOutputCharacteristicsType
     counts: AnalyzerResultOutputCountsType
-    setup: AnalysisSetup
+    runtime_config: AnalysisRuntimeConfig
     severities: AnalyzerResultOutputSeveritiesType
     throughputs: AnalyzerResultOutputThroughputsType
     timings: AnalyzerResultOutputTimingsType
@@ -133,302 +135,21 @@ class AnalyzerResultOutput(object):
 
     def __init__(
         self,
-        analysis_setup: AnalysisSetup,
         bottlenecks: RuleResultsPerViewPerMetricPerRule,
         characteristics: Characteristics,
         evaluated_views: ScoringPerViewPerMetric,
         main_view: MainView,
         raw_stats: RawStats,
+        runtime_config: AnalysisRuntimeConfig,
         view_results: ViewResultsPerViewPerMetric,
     ) -> None:
-        self.analysis_setup = analysis_setup
         self.bottlenecks = bottlenecks
         self.characteristics = characteristics
         self.evaluated_views = evaluated_views
         self.main_view = main_view
         self.raw_stats = raw_stats
+        self.runtime_config = runtime_config
         self.view_results = view_results
-
-    def _create_output_type(self):
-
-        raw_stats, = compute(self.raw_stats)
-
-        complexity = 0
-        io_time = 0
-        job_time = float(raw_stats.job_time)
-        num_apps = 0
-        num_files = 0
-        num_nodes = 0
-        num_ops = 0
-        num_procs = 0
-        num_time_periods = 0
-        for characteristic in self.characteristics:
-            characteristic_value = self.characteristics[characteristic].value
-            if characteristic == KnownCharacteristics.APP_COUNT.value:
-                num_apps = int(characteristic_value)
-            elif characteristic == KnownCharacteristics.COMPLEXITY.value:
-                complexity = float(characteristic_value)
-            elif characteristic == KnownCharacteristics.FILE_COUNT.value:
-                num_files = int(characteristic_value)
-            elif characteristic == KnownCharacteristics.IO_COUNT.value:
-                num_ops = int(characteristic_value)
-            elif characteristic == KnownCharacteristics.IO_TIME.value:
-                io_time = float(characteristic_value)
-            elif characteristic == KnownCharacteristics.NODE_COUNT.value:
-                num_nodes = int(characteristic_value)
-            elif characteristic == KnownCharacteristics.PROC_COUNT.value:
-                num_procs = int(characteristic_value)
-            elif characteristic == KnownCharacteristics.TIME_PERIOD.value:
-                num_time_periods = int(characteristic_value)
-        per_io_time = io_time/job_time
-
-        characteristics = AnalyzerResultOutputCharacteristicsType(
-            complexity=complexity,
-            io_time=io_time,
-            job_time=job_time,
-            num_apps=num_apps,
-            num_files=num_files,
-            num_nodes=num_nodes,
-            num_ops=num_ops,
-            num_procs=num_procs,
-            num_time_periods=num_time_periods,
-            per_io_time=per_io_time,
-        )
-
-        main_view_count = len(self.main_view)
-        raw_count = int(raw_stats.total_count)
-        perspective_count_tree = {}
-        perspective_critical_count_tree = {}
-        perspective_record_count_tree = {}
-        num_metrics = 0
-        perspectives = set()
-        root_view_type_counts = {}
-        for metric in self.view_results:
-            perspective_count_tree[metric] = {}
-            perspective_critical_count_tree[metric] = {}
-            perspective_record_count_tree[metric] = {}
-            root_view_type_counts[metric] = []
-            num_metrics = num_metrics + 1
-            for view_key, view_result in self.view_results[metric].items():
-                count_key = view_name(view_key, '->')
-                bot_important_count = len(view_result.view)
-                view_critical_count = len(view_result.critical_view)
-                view_record_count = len(view_result.records)
-                perspective_count_tree[metric][count_key] = bot_important_count
-                perspective_critical_count_tree[metric][count_key] = view_critical_count
-                perspective_record_count_tree[metric][count_key] = view_record_count
-                perspectives.add(view_key)
-                if len(view_key) == 1:
-                    root_view_type_counts[metric].append(view_critical_count)
-        num_metrics = num_metrics
-        num_perspectives = len(perspectives)
-        avg_perspective_count = {}
-        avg_perspective_count_std = {}
-        avg_perspective_critical_count = {}
-        avg_perspective_critical_count_std = {}
-        per_records_discarded = {}
-        per_records_retained = {}
-        perspective_skewness = {}
-        root_perspective_skewness = {}
-        for metric in perspective_count_tree:
-            perspective_counts = [perspective_count_tree[metric][count_key]
-                                  for count_key in perspective_count_tree[metric]]
-            perspective_avg = np.average(perspective_counts)
-            perspective_std = np.std(perspective_counts)
-
-            perspective_critical_counts = [perspective_critical_count_tree[metric][count_key]
-                                           for count_key in perspective_critical_count_tree[metric]]
-            perspective_critical_avg = np.average(perspective_critical_counts)
-            perspective_critical_std = np.std(perspective_critical_counts)
-
-            avg_perspective_count[metric] = perspective_avg
-            avg_perspective_count_std[metric] = perspective_std
-            avg_perspective_critical_count[metric] = perspective_critical_avg
-            avg_perspective_critical_count_std[metric] = perspective_critical_std
-
-            perspective_critical_per = perspective_critical_avg/raw_count
-            per_records_discarded[metric] = 1-perspective_critical_per
-            per_records_retained[metric] = perspective_critical_per
-
-            perspective_skewness[metric] = abs(skew(perspective_counts))
-            root_perspective_skewness[metric] = abs(skew(
-                root_view_type_counts[metric]))
-
-        num_bottlenecks = {}
-        num_rules = 0
-        bot_critical_count = {}
-        bot_critical_tree = {}
-        bot_very_high_count = {}
-        bot_very_high_tree = {}
-        bot_high_count = {}
-        bot_high_tree = {}
-        bot_medium_count = {}
-        bot_low_count = {}
-        bot_very_low_count = {}
-        bot_trivial_count = {}
-        bot_none_count = {}
-        bot_rest_count = {}
-        for rule in self.bottlenecks:
-            num_rules = num_rules + 1
-            for metric in self.bottlenecks[rule]:
-                num_bottlenecks[metric] = num_bottlenecks.get(metric, 0)
-                bot_critical_count[metric] = bot_critical_count.get(metric, 0)
-                bot_critical_tree[metric] = bot_critical_tree.get(metric, {})
-                bot_very_high_count[metric] = bot_very_high_count.get(metric, 0)
-                bot_very_high_tree[metric] = bot_very_high_tree.get(metric, {})
-                bot_high_count[metric] = bot_high_count.get(metric, 0)
-                bot_high_tree[metric] = bot_high_tree.get(metric, {})
-                bot_medium_count[metric] = bot_medium_count.get(metric, 0)
-                bot_low_count[metric] = bot_low_count.get(metric, 0)
-                bot_very_low_count[metric] = bot_very_low_count.get(metric, 0)
-                bot_trivial_count[metric] = bot_trivial_count.get(metric, 0)
-                bot_none_count[metric] = bot_none_count.get(metric, 0)
-                bot_rest_count[metric] = bot_rest_count.get(metric, 0)
-                for view_key, results in self.bottlenecks[rule][metric].items():
-                    count_key = view_name(view_key, '->')
-                    bot_critical_tree[metric][count_key] = bot_critical_tree[metric].get(count_key, 0)
-                    bot_very_high_tree[metric][count_key] = bot_very_high_tree[metric].get(count_key, 0)
-                    bot_high_tree[metric][count_key] = bot_high_tree[metric].get(count_key, 0)
-                    for result in results:
-                        result_score = result.extra_data[f"{metric}_score"]
-                        if result_score == DELTA_BIN_NAMES[0]:
-                            bot_none_count[metric] = bot_none_count[metric] + 1
-                        elif result_score == DELTA_BIN_NAMES[1]:
-                            bot_trivial_count[metric] = bot_trivial_count[metric] + 1
-                        elif result_score == DELTA_BIN_NAMES[2]:
-                            bot_very_low_count[metric] = bot_very_low_count[metric] + 1
-                        elif result_score == DELTA_BIN_NAMES[3]:
-                            bot_low_count[metric] = bot_low_count[metric] + 1
-                        elif result_score == DELTA_BIN_NAMES[4]:
-                            bot_medium_count[metric] = bot_medium_count[metric] + 1
-                        elif result_score == DELTA_BIN_NAMES[5]:
-                            bot_high_count[metric] = bot_high_count[metric] + 1
-                            bot_high_tree[metric][count_key] = bot_high_tree[metric][count_key] + 1
-                        elif result_score == DELTA_BIN_NAMES[6]:
-                            bot_very_high_count[metric] = bot_very_high_count[metric] + 1
-                            bot_very_high_tree[metric][count_key] = bot_very_high_tree[metric][count_key] + 1
-                        elif result_score == DELTA_BIN_NAMES[7]:
-                            bot_critical_count[metric] = bot_critical_count[metric] + 1
-                            bot_critical_tree[metric][count_key] = bot_critical_tree[metric][count_key] + 1
-                        num_bottlenecks[metric] = num_bottlenecks[metric] + 1
-
-        severities = AnalyzerResultOutputSeveritiesType(
-            critical_count=bot_critical_count,
-            critical_tree=bot_critical_tree,
-            high_count=bot_high_count,
-            high_tree=bot_high_tree,
-            low_count=bot_low_count,
-            medium_count=bot_medium_count,
-            none_count=bot_none_count,
-            rest_count=bot_rest_count,
-            trivial_count=bot_trivial_count,
-            very_high_count=bot_very_high_count,
-            very_high_tree=bot_very_high_tree,
-            very_low_count=bot_very_low_count,
-        )
-
-        elapsed_times = {}
-        for _, event in get_client().get_events('elapsed_times'):
-            elapsed_times[event['key']] = event['elapsed_time']
-        attach_reasons = {}
-        compute_hlm = {}
-        compute_main_view = {}
-        compute_perspectives = {}
-        detect_bottlenecks = {}
-        read_traces = {}
-        attach_reasons['time'] = float(elapsed_times[EVENT_ATT_REASONS])
-        compute_hlm['time'] = float(elapsed_times[EVENT_COMP_HLM])
-        compute_main_view['time'] = float(elapsed_times[EVENT_COMP_MAIN_VIEW])
-        compute_perspectives['time'] = float(elapsed_times[EVENT_COMP_PERS])
-        detect_bottlenecks['time'] = float(elapsed_times[EVENT_DET_BOTT])
-        read_traces['time'] = 0
-        timings = AnalyzerResultOutputTimingsType(
-            attach_reasons=attach_reasons,
-            compute_hlm=compute_hlm,
-            compute_main_view=compute_main_view,
-            compute_perspectives=compute_perspectives,
-            detect_bottlenecks=detect_bottlenecks,
-            read_traces=read_traces,
-        )
-
-        evaluated_records = {}
-        reasoned_records = {}
-        slope_filtered_records = {}
-        for metric in self.evaluated_views:
-            evaluated_records[metric] = 0
-            reasoned_records[metric] = 0
-            slope_filtered_records[metric] = 0
-            for view_key in self.evaluated_views[metric]:
-                scoring = self.evaluated_views[metric][view_key]
-                view_evaluated_records = len(scoring.evaluated_groups)
-                view_slope_filtered_records = len(scoring.attached_records)
-                evaluated_records[metric] = evaluated_records[metric] + \
-                    view_evaluated_records
-                reasoned_records[metric] = evaluated_records[metric] * num_rules
-                slope_filtered_records[metric] = slope_filtered_records[metric] + \
-                    view_slope_filtered_records
-
-        counts = AnalyzerResultOutputCountsType(
-            avg_perspective_count=avg_perspective_count,
-            avg_perspective_count_std=avg_perspective_count_std,
-            avg_perspective_critical_count=avg_perspective_critical_count,
-            avg_perspective_critical_count_std=avg_perspective_critical_count_std,
-            evaluated_records=evaluated_records,
-            hlm_count=main_view_count,
-            main_view_count=main_view_count,
-            num_bottlenecks=num_bottlenecks,
-            num_metrics=num_metrics,
-            num_perspectives=num_perspectives,
-            num_rules=num_rules,
-            per_records_discarded=per_records_discarded,
-            per_records_retained=per_records_retained,
-            perspective_count_tree=perspective_count_tree,
-            perspective_critical_count_tree=perspective_critical_count_tree,
-            perspective_record_count_tree=perspective_record_count_tree,
-            perspective_skewness=perspective_skewness,
-            raw_count=raw_count,
-            reasoned_records=reasoned_records,
-            root_perspective_skewness=root_perspective_skewness,
-            slope_filtered_records=slope_filtered_records,
-        )
-
-        bottlenecks_tput = {}
-        perspectives_tput = {}
-        reasoned_records_tput = {}
-        rules_tput = {}
-        slope_filtered_records_tput = {}
-        evaluated_records_tput = {}
-
-        for metric in evaluated_records:
-            bottlenecks_tput[metric] = num_bottlenecks[metric] / \
-                detect_bottlenecks[metric]
-            evaluated_records_tput[metric] = evaluated_records[metric] / \
-                detect_bottlenecks[metric]
-            perspectives_tput[metric] = num_perspectives / \
-                compute_perspectives[metric]
-            reasoned_records_tput[metric] = (
-                evaluated_records[metric]*num_rules) / attach_reasons[metric]
-            rules_tput[metric] = num_rules / attach_reasons[metric]
-            slope_filtered_records_tput[metric] = slope_filtered_records[metric] / \
-                compute_perspectives[metric]
-
-        throughputs = AnalyzerResultOutputThroughputsType(
-            bottlenecks=bottlenecks_tput,
-            evaluated_records=evaluated_records_tput,
-            perspectives=perspectives_tput,
-            reasoned_records=reasoned_records_tput,
-            rules=rules_tput,
-            slope_filtered_records=slope_filtered_records_tput,
-        )
-
-        return AnalyzerResultOutputType(
-            characteristics=characteristics,
-            counts=counts,
-            setup=self.analysis_setup,
-            severities=severities,
-            throughputs=throughputs,
-            timings=timings,
-        )
 
     def console(self, max_bottlenecks_per_view_type=3, show_debug=True):
 
@@ -444,8 +165,7 @@ class AnalyzerResultOutput(object):
         # Add each key-value pair to the table as a row
         for char in self.characteristics.values():
             if char.detail_list is None:
-                char_table.add_row(char.description,
-                                   char.value_fmt)
+                char_table.add_row(char.description, char.value_fmt)
             else:
                 detail_tree = Tree(char.value_fmt)
                 for detail in char.detail_list:
@@ -653,24 +373,19 @@ class AnalyzerResultOutput(object):
             setup_table = Table(box=None, show_header=False)
             setup_table.add_column()
             setup_table.add_column()
-            setup_table.add_row('Accuracy', output.setup.accuracy)
-            setup_table.add_row(
-                'Checkpoint', 'enabled' if output.setup.checkpoint else 'disabled')
-            setup_table.add_row('Cluster memory', f"{output.setup.memory}")
-            setup_table.add_row('Cluster # of workers',
-                                f"{output.setup.num_workers}")
+            setup_table.add_row('Accuracy', output.runtime_config.accuracy)
+            setup_table.add_row('Checkpoint', 'enabled' if output.runtime_config.checkpoint else 'disabled')
+            setup_table.add_row('Cluster memory', f"{output.runtime_config.memory}")
+            setup_table.add_row('Cluster # of workers', f"{output.runtime_config.num_workers}")
             setup_table.add_row('Cluster # of threads per workers',
-                                f"{output.setup.num_threads_per_worker}")
-            setup_table.add_row(
-                'Cluster processes', 'enabled' if output.setup.processes else 'disabled')
-            setup_table.add_row('Cluster type', output.setup.cluster_type)
-            setup_table.add_row(
-                'Debug', 'enabled' if output.setup.debug else 'disabled')
-            setup_table.add_row('Metric threshold',
-                                f"{output.setup.metric_threshold:.2f}")
-            setup_table.add_row('Slope threshold',
-                                f"{output.setup.slope_threshold:.2f}")
-            debug_table.add_row('Setup', setup_table)
+                                f"{output.runtime_config.num_threads_per_worker}")
+            setup_table.add_row('Cluster processes',
+                                'enabled' if output.runtime_config.processes else 'disabled')
+            setup_table.add_row('Cluster type', output.runtime_config.cluster_type)
+            setup_table.add_row('Debug', 'enabled' if output.runtime_config.debug else 'disabled')
+            setup_table.add_row('Metric threshold', f"{output.runtime_config.metric_threshold:.2f}")
+            setup_table.add_row('Slope threshold', f"{output.runtime_config.slope_threshold:.2f}")
+            debug_table.add_row('Runtime Config', setup_table)
 
             debug_panel = Panel(debug_table, title='Debug')
 
@@ -678,8 +393,103 @@ class AnalyzerResultOutput(object):
         else:
             Console().print(char_panel, bot_panel)
 
-    def csv(self, name: str, file_path: str, max_bottlenecks_per_view_type=3, show_debug=True):
+    def csv(self, name: str, max_bottlenecks_per_view_type=3, show_debug=True):
 
+        run_file = f"{self.runtime_config.working_dir}/{self.runtime_config.run_id}"
+
+        self._create_output_df(name=name).to_csv(f"{run_file}_run.csv", encoding='utf8')
+
+        timings_df, timings_raw_df = self._create_timings_df()
+        timings_df.sort_values(['type', 'key']).to_csv(f"{run_file}_timings.csv", encoding='utf8')
+        timings_df.sort_values(['time_start']).to_csv(f"{run_file}_timings_ordered.csv", encoding='utf8')
+        timings_raw_df.to_csv(f"{run_file}_timings_raw.csv", encoding='utf8')
+
+        # TODO
+        metric = 'time'
+        if ('time_range',) in self.view_results[metric]:
+            view_result = self.view_results[metric][('time_range',)]
+            view_result.view[[
+                'count_sum',
+                'count',
+                'count_cs',
+                'count_cs_per',
+                'count_cs_per_rev',
+                'count_cs_per_rev_diff',
+                f"{metric}_sum",
+                f"{metric}",
+                f"{metric}_per",
+                f"{metric}_per_rev_cs",
+                f"{metric}_per_rev_cs_diff",
+                f"{metric}_slope",
+            ]] \
+                .compute() \
+                .to_csv(f"{run_file}_slope.csv", encoding='utf8')
+
+    def sqlite(self, name: str, run_db_path: str = None):
+
+        con = sqlite3.connect(f"{self.runtime_config.working_dir}/{self.runtime_config.run_id}.db")
+
+        output_df = self._create_output_df(name=name).reset_index()
+        output_df['key'] = output_df['type'] + '_' + output_df['value']
+        output_df = output_df.drop(columns=['type', 'value'])
+        output_sql_df = output_df.set_index('key').T
+
+        if run_db_path is None:
+            output_sql_df.to_sql('run', con=con, index_label='key')
+        else:
+            run_con = sqlite3.connect(run_db_path)
+            output_sql_df.to_sql('run', con=run_con, index_label='key', if_exists='append')
+            run_con.close()
+
+        timings_df, timings_raw_df = self._create_timings_df()
+        timings_df.sort_values(['type', 'key']).to_sql('timings', con=con)
+        timings_df.sort_values(['time_start']).to_sql('timings_ordered', con=con)
+        timings_raw_df.to_sql('timings_raw', con=con)
+
+        # TODO
+        metric = 'time'
+        if ('time_range',) in self.view_results[metric]:
+            view_result = self.view_results[metric][('time_range',)]
+            view_result.view[[
+                'count_sum',
+                'count',
+                'count_cs',
+                'count_cs_per',
+                'count_cs_per_rev',
+                'count_cs_per_rev_diff',
+                f"{metric}_sum",
+                f"{metric}",
+                f"{metric}_per",
+                f"{metric}_per_rev_cs",
+                f"{metric}_per_rev_cs_diff",
+                f"{metric}_slope",
+            ]] \
+                .compute() \
+                .to_sql('slope', con=con)
+
+        con.close()
+
+    def _colored_description(self, description: str, result_score: str = None):
+        if result_score is None:
+            return description
+        if result_score == DELTA_BIN_NAMES[0]:
+            return description
+        elif result_score == DELTA_BIN_NAMES[1]:
+            return f"[light_cyan3]{description}"
+        elif result_score == DELTA_BIN_NAMES[2]:
+            return f"[chartreuse2]{description}"
+        elif result_score == DELTA_BIN_NAMES[3]:
+            return f"[yellow4]{description}"
+        elif result_score == DELTA_BIN_NAMES[4]:
+            return f"[yellow3]{description}"
+        elif result_score == DELTA_BIN_NAMES[5]:
+            return f"[orange3]{description}"
+        elif result_score == DELTA_BIN_NAMES[6]:
+            return f"[dark_orange3]{description}"
+        elif result_score == DELTA_BIN_NAMES[7]:
+            return f"[red3]{description}"
+
+    def _create_output_df(self, name: str):
         output = self._create_output_type()
         output_dict = asdict(obj=output)
         output_df = pd.DataFrame.from_dict(output_dict, orient='index') \
@@ -701,11 +511,11 @@ class AnalyzerResultOutput(object):
                             suffix = value_type.replace('_tree', '')
                             secondary_ix = f"{nested_col.replace('.', '_').replace('->', '_')}_{suffix}"
                             value = nested_row[nested_col]
-                            output_df.loc[(type_type, secondary_ix),] = value
+                            output_df.loc[(type_type, secondary_ix),] = float(value)
                     else:
                         secondary_ix = f"{nested_row.index[0]}__{value_type}"
                         value = nested_row[0]
-                        output_df.loc[(type_type, secondary_ix),] = value
+                        output_df.loc[(type_type, secondary_ix),] = float(value)
 
         output_df = output_df \
             .drop(index=dropping_indices) \
@@ -713,58 +523,288 @@ class AnalyzerResultOutput(object):
 
         output_df.index.set_names(['type', 'value'], inplace=True)
 
-        output_df.sort_index().to_csv(file_path, encoding='utf8')
+        return output_df.sort_index()
 
-        timings_df, timings_raw_df = self._create_timings_df()
+    def _create_output_type(self):
 
-        timings_df.sort_values(['type', 'key']).to_csv(
-            file_path.replace('.csv', '_timings.csv'), encoding='utf8')
+        raw_stats, = compute(self.raw_stats)
 
-        timings_df.sort_values(['time_start']).to_csv(
-            file_path.replace('.csv', '_timings_ordered.csv'), encoding='utf8')
+        complexity = 0
+        io_time = 0
+        job_time = float(raw_stats.job_time)
+        num_apps = 0
+        num_files = 0
+        num_nodes = 0
+        num_ops = 0
+        num_procs = 0
+        num_time_periods = 0
+        for characteristic in self.characteristics:
+            characteristic_value = self.characteristics[characteristic].value
+            if characteristic == KnownCharacteristics.APP_COUNT.value:
+                num_apps = int(characteristic_value)
+            elif characteristic == KnownCharacteristics.COMPLEXITY.value:
+                complexity = float(characteristic_value)
+            elif characteristic == KnownCharacteristics.FILE_COUNT.value:
+                num_files = int(characteristic_value)
+            elif characteristic == KnownCharacteristics.IO_COUNT.value:
+                num_ops = int(characteristic_value)
+            elif characteristic == KnownCharacteristics.IO_TIME.value:
+                io_time = float(characteristic_value)
+            elif characteristic == KnownCharacteristics.NODE_COUNT.value:
+                num_nodes = int(characteristic_value)
+            elif characteristic == KnownCharacteristics.PROC_COUNT.value:
+                num_procs = int(characteristic_value)
+            elif characteristic == KnownCharacteristics.TIME_PERIOD.value:
+                num_time_periods = int(characteristic_value)
+        per_io_time = io_time/job_time
 
-        timings_raw_df.to_csv(file_path.replace('.csv', '_timings_raw.csv'), encoding='utf8')
+        characteristics = AnalyzerResultOutputCharacteristicsType(
+            complexity=complexity,
+            io_time=io_time,
+            job_time=job_time,
+            num_apps=num_apps,
+            num_files=num_files,
+            num_nodes=num_nodes,
+            num_ops=num_ops,
+            num_procs=num_procs,
+            num_time_periods=num_time_periods,
+            per_io_time=per_io_time,
+        )
 
-        # TODO
-        metric = 'time'
-        if ('time_range',) in self.view_results[metric]:
-            view_result = self.view_results[metric][('time_range',)]
-            view_result.view[[
-                'count_sum',
-                'count',
-                'count_cs',
-                'count_cs_per',
-                'count_cs_per_rev',
-                'count_cs_per_rev_diff',
-                f"{metric}_sum",
-                f"{metric}",
-                f"{metric}_per",
-                f"{metric}_per_rev_cs",
-                f"{metric}_per_rev_cs_diff",
-                f"{metric}_slope",
-            ]] \
-                .compute() \
-                .to_csv(file_path.replace('.csv', '_slope.csv'), encoding='utf8')
+        main_view_count = len(self.main_view)
+        raw_count = int(raw_stats.total_count)
+        perspective_count_tree = {}
+        perspective_critical_count_tree = {}
+        perspective_record_count_tree = {}
+        num_metrics = 0
+        perspectives = set()
+        root_view_type_counts = {}
+        for metric in self.view_results:
+            perspective_count_tree[metric] = {}
+            perspective_critical_count_tree[metric] = {}
+            perspective_record_count_tree[metric] = {}
+            root_view_type_counts[metric] = []
+            num_metrics = num_metrics + 1
+            for view_key, view_result in self.view_results[metric].items():
+                count_key = view_name(view_key, '->')
+                bot_important_count = len(view_result.view)
+                view_critical_count = len(view_result.critical_view)
+                view_record_count = len(view_result.records)
+                perspective_count_tree[metric][count_key] = bot_important_count
+                perspective_critical_count_tree[metric][count_key] = view_critical_count
+                perspective_record_count_tree[metric][count_key] = view_record_count
+                perspectives.add(view_key)
+                if len(view_key) == 1:
+                    root_view_type_counts[metric].append(view_critical_count)
+        num_metrics = num_metrics
+        num_perspectives = len(perspectives)
+        avg_perspective_count = {}
+        avg_perspective_count_std = {}
+        avg_perspective_critical_count = {}
+        avg_perspective_critical_count_std = {}
+        per_records_discarded = {}
+        per_records_retained = {}
+        perspective_skewness = {}
+        root_perspective_skewness = {}
+        for metric in perspective_count_tree:
+            perspective_counts = [perspective_count_tree[metric][count_key]
+                                  for count_key in perspective_count_tree[metric]]
+            perspective_avg = np.average(perspective_counts)
+            perspective_std = np.std(perspective_counts)
 
-    def _colored_description(self, description: str, result_score: str = None):
-        if result_score is None:
-            return description
-        if result_score == DELTA_BIN_NAMES[0]:
-            return description
-        elif result_score == DELTA_BIN_NAMES[1]:
-            return f"[light_cyan3]{description}"
-        elif result_score == DELTA_BIN_NAMES[2]:
-            return f"[chartreuse2]{description}"
-        elif result_score == DELTA_BIN_NAMES[3]:
-            return f"[yellow4]{description}"
-        elif result_score == DELTA_BIN_NAMES[4]:
-            return f"[yellow3]{description}"
-        elif result_score == DELTA_BIN_NAMES[5]:
-            return f"[orange3]{description}"
-        elif result_score == DELTA_BIN_NAMES[6]:
-            return f"[dark_orange3]{description}"
-        elif result_score == DELTA_BIN_NAMES[7]:
-            return f"[red3]{description}"
+            perspective_critical_counts = [perspective_critical_count_tree[metric][count_key]
+                                           for count_key in perspective_critical_count_tree[metric]]
+            perspective_critical_avg = np.average(perspective_critical_counts)
+            perspective_critical_std = np.std(perspective_critical_counts)
+
+            avg_perspective_count[metric] = perspective_avg
+            avg_perspective_count_std[metric] = perspective_std
+            avg_perspective_critical_count[metric] = perspective_critical_avg
+            avg_perspective_critical_count_std[metric] = perspective_critical_std
+
+            perspective_critical_per = perspective_critical_avg/raw_count
+            per_records_discarded[metric] = 1-perspective_critical_per
+            per_records_retained[metric] = perspective_critical_per
+
+            perspective_skewness[metric] = abs(skew(perspective_counts))
+            root_perspective_skewness[metric] = abs(skew(
+                root_view_type_counts[metric]))
+
+        num_bottlenecks = {}
+        num_rules = 0
+        bot_critical_count = {}
+        bot_critical_tree = {}
+        bot_very_high_count = {}
+        bot_very_high_tree = {}
+        bot_high_count = {}
+        bot_high_tree = {}
+        bot_medium_count = {}
+        bot_low_count = {}
+        bot_very_low_count = {}
+        bot_trivial_count = {}
+        bot_none_count = {}
+        bot_rest_count = {}
+        for rule in self.bottlenecks:
+            num_rules = num_rules + 1
+            for metric in self.bottlenecks[rule]:
+                num_bottlenecks[metric] = num_bottlenecks.get(metric, 0)
+                bot_critical_count[metric] = bot_critical_count.get(metric, 0)
+                bot_critical_tree[metric] = bot_critical_tree.get(metric, {})
+                bot_very_high_count[metric] = bot_very_high_count.get(metric, 0)
+                bot_very_high_tree[metric] = bot_very_high_tree.get(metric, {})
+                bot_high_count[metric] = bot_high_count.get(metric, 0)
+                bot_high_tree[metric] = bot_high_tree.get(metric, {})
+                bot_medium_count[metric] = bot_medium_count.get(metric, 0)
+                bot_low_count[metric] = bot_low_count.get(metric, 0)
+                bot_very_low_count[metric] = bot_very_low_count.get(metric, 0)
+                bot_trivial_count[metric] = bot_trivial_count.get(metric, 0)
+                bot_none_count[metric] = bot_none_count.get(metric, 0)
+                bot_rest_count[metric] = bot_rest_count.get(metric, 0)
+                for view_key, results in self.bottlenecks[rule][metric].items():
+                    count_key = view_name(view_key, '->')
+                    bot_critical_tree[metric][count_key] = bot_critical_tree[metric].get(count_key, 0)
+                    bot_very_high_tree[metric][count_key] = bot_very_high_tree[metric].get(count_key, 0)
+                    bot_high_tree[metric][count_key] = bot_high_tree[metric].get(count_key, 0)
+                    for result in results:
+                        result_score = result.extra_data[f"{metric}_score"]
+                        if result_score == DELTA_BIN_NAMES[0]:
+                            bot_none_count[metric] = bot_none_count[metric] + 1
+                        elif result_score == DELTA_BIN_NAMES[1]:
+                            bot_trivial_count[metric] = bot_trivial_count[metric] + 1
+                        elif result_score == DELTA_BIN_NAMES[2]:
+                            bot_very_low_count[metric] = bot_very_low_count[metric] + 1
+                        elif result_score == DELTA_BIN_NAMES[3]:
+                            bot_low_count[metric] = bot_low_count[metric] + 1
+                        elif result_score == DELTA_BIN_NAMES[4]:
+                            bot_medium_count[metric] = bot_medium_count[metric] + 1
+                        elif result_score == DELTA_BIN_NAMES[5]:
+                            bot_high_count[metric] = bot_high_count[metric] + 1
+                            bot_high_tree[metric][count_key] = bot_high_tree[metric][count_key] + 1
+                        elif result_score == DELTA_BIN_NAMES[6]:
+                            bot_very_high_count[metric] = bot_very_high_count[metric] + 1
+                            bot_very_high_tree[metric][count_key] = bot_very_high_tree[metric][count_key] + 1
+                        elif result_score == DELTA_BIN_NAMES[7]:
+                            bot_critical_count[metric] = bot_critical_count[metric] + 1
+                            bot_critical_tree[metric][count_key] = bot_critical_tree[metric][count_key] + 1
+                        num_bottlenecks[metric] = num_bottlenecks[metric] + 1
+
+        severities = AnalyzerResultOutputSeveritiesType(
+            critical_count=bot_critical_count,
+            critical_tree=bot_critical_tree,
+            high_count=bot_high_count,
+            high_tree=bot_high_tree,
+            low_count=bot_low_count,
+            medium_count=bot_medium_count,
+            none_count=bot_none_count,
+            rest_count=bot_rest_count,
+            trivial_count=bot_trivial_count,
+            very_high_count=bot_very_high_count,
+            very_high_tree=bot_very_high_tree,
+            very_low_count=bot_very_low_count,
+        )
+
+        elapsed_times = {}
+        for _, event in get_client().get_events('elapsed_times'):
+            elapsed_times[event['key']] = event['elapsed_time']
+        attach_reasons = {}
+        compute_hlm = {}
+        compute_main_view = {}
+        compute_perspectives = {}
+        detect_bottlenecks = {}
+        read_traces = {}
+        attach_reasons['time'] = float(elapsed_times[EVENT_ATT_REASONS])
+        compute_hlm['time'] = float(elapsed_times[EVENT_COMP_HLM])
+        compute_main_view['time'] = float(elapsed_times[EVENT_COMP_MAIN_VIEW])
+        compute_perspectives['time'] = float(elapsed_times[EVENT_COMP_PERS])
+        detect_bottlenecks['time'] = float(elapsed_times[EVENT_DET_BOTT])
+        read_traces['time'] = float(elapsed_times[EVENT_READ_TRACES])
+        timings = AnalyzerResultOutputTimingsType(
+            attach_reasons=attach_reasons,
+            compute_hlm=compute_hlm,
+            compute_main_view=compute_main_view,
+            compute_perspectives=compute_perspectives,
+            detect_bottlenecks=detect_bottlenecks,
+            read_traces=read_traces,
+        )
+
+        evaluated_records = {}
+        reasoned_records = {}
+        slope_filtered_records = {}
+        for metric in self.evaluated_views:
+            evaluated_records[metric] = 0
+            reasoned_records[metric] = 0
+            slope_filtered_records[metric] = 0
+            for view_key in self.evaluated_views[metric]:
+                scoring = self.evaluated_views[metric][view_key]
+                view_evaluated_records = len(scoring.evaluated_groups)
+                view_slope_filtered_records = len(scoring.attached_records)
+                evaluated_records[metric] = evaluated_records[metric] + \
+                    view_evaluated_records
+                reasoned_records[metric] = evaluated_records[metric] * num_rules
+                slope_filtered_records[metric] = slope_filtered_records[metric] + \
+                    view_slope_filtered_records
+
+        counts = AnalyzerResultOutputCountsType(
+            avg_perspective_count=avg_perspective_count,
+            avg_perspective_count_std=avg_perspective_count_std,
+            avg_perspective_critical_count=avg_perspective_critical_count,
+            avg_perspective_critical_count_std=avg_perspective_critical_count_std,
+            evaluated_records=evaluated_records,
+            hlm_count=main_view_count,
+            main_view_count=main_view_count,
+            num_bottlenecks=num_bottlenecks,
+            num_metrics=num_metrics,
+            num_perspectives=num_perspectives,
+            num_rules=num_rules,
+            per_records_discarded=per_records_discarded,
+            per_records_retained=per_records_retained,
+            perspective_count_tree=perspective_count_tree,
+            perspective_critical_count_tree=perspective_critical_count_tree,
+            perspective_record_count_tree=perspective_record_count_tree,
+            perspective_skewness=perspective_skewness,
+            raw_count=raw_count,
+            reasoned_records=reasoned_records,
+            root_perspective_skewness=root_perspective_skewness,
+            slope_filtered_records=slope_filtered_records,
+        )
+
+        bottlenecks_tput = {}
+        perspectives_tput = {}
+        reasoned_records_tput = {}
+        rules_tput = {}
+        slope_filtered_records_tput = {}
+        evaluated_records_tput = {}
+
+        for metric in evaluated_records:
+            bottlenecks_tput[metric] = num_bottlenecks[metric] / \
+                detect_bottlenecks[metric]
+            evaluated_records_tput[metric] = evaluated_records[metric] / \
+                detect_bottlenecks[metric]
+            perspectives_tput[metric] = num_perspectives / \
+                compute_perspectives[metric]
+            reasoned_records_tput[metric] = (
+                evaluated_records[metric]*num_rules) / attach_reasons[metric]
+            rules_tput[metric] = num_rules / attach_reasons[metric]
+            slope_filtered_records_tput[metric] = slope_filtered_records[metric] / \
+                compute_perspectives[metric]
+
+        throughputs = AnalyzerResultOutputThroughputsType(
+            bottlenecks=bottlenecks_tput,
+            evaluated_records=evaluated_records_tput,
+            perspectives=perspectives_tput,
+            reasoned_records=reasoned_records_tput,
+            rules=rules_tput,
+            slope_filtered_records=slope_filtered_records_tput,
+        )
+
+        return AnalyzerResultOutputType(
+            characteristics=characteristics,
+            counts=counts,
+            runtime_config=self.runtime_config,
+            severities=severities,
+            throughputs=throughputs,
+            timings=timings,
+        )
 
     def _create_timings_df(self):
         timing_events = get_client().get_events('timings')
@@ -1245,31 +1285,31 @@ class AnalysisResult(object):
 
     def __init__(
         self,
-        analysis_setup: AnalysisSetup,
         bottlenecks: RuleResultsPerViewPerMetricPerRule,
         characteristics: Characteristics,
         evaluated_views: ScoringPerViewPerMetric,
         main_view: MainView,
         metric_boundaries,
         raw_stats: RawStats,
+        runtime_config: AnalysisRuntimeConfig,
         view_results: ViewResultsPerViewPerMetric,
     ):
-        self.analysis_setup = analysis_setup
         self.bottlenecks = bottlenecks
         self.characteristics = characteristics
         self.evaluated_views = evaluated_views
         self.main_view = main_view
         self.metric_boundaries = metric_boundaries
         self.raw_stats = raw_stats
+        self.runtime_config = runtime_config
         self.view_results = view_results
 
         self.output = AnalyzerResultOutput(
-            analysis_setup=analysis_setup,
             characteristics=characteristics,
             bottlenecks=bottlenecks,
             evaluated_views=evaluated_views,
             main_view=main_view,
             raw_stats=raw_stats,
+            runtime_config=runtime_config,
             view_results=view_results,
         )
 

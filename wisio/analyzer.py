@@ -6,6 +6,7 @@ import logging
 import os
 from dask.base import compute, unpack_collections
 from dask.distributed import fire_and_forget, get_client, wait
+from time import time
 from typing import Callable, Dict, List, Tuple
 
 from .analysis import set_bound_columns, set_metric_deltas, set_metric_slope
@@ -32,7 +33,7 @@ from .rule_engine import RuleEngine
 from .scoring import ViewEvaluator
 from .types import (
     AnalysisAccuracy,
-    AnalysisSetup,
+    AnalysisRuntimeConfig,
     Metric,
     RawStats,
     ViewKey,
@@ -90,16 +91,15 @@ class Analyzer(abc.ABC):
         self.debug = debug
         self.name = name
         self.verbose = verbose
+        self.working_dir = working_dir
 
         # Setup logging
         ensure_dir(working_dir)
-        setup_logging(
-            filename=f"{working_dir}/{name.lower()}_analyzer.log", debug=debug)
+        setup_logging(filename=f"{working_dir}/{name.lower()}_analyzer.log", debug=debug)
         logging.info(f"Initializing {name} analyzer")
 
         # Init cluster manager
-        self.cluster_manager = ClusterManager(
-            working_dir=working_dir, config=cluster_config)
+        self.cluster_manager = ClusterManager(working_dir=working_dir, config=cluster_config)
 
         # Boot cluster
         self.cluster_manager.boot()
@@ -199,9 +199,15 @@ class Analyzer(abc.ABC):
                 metric_boundaries=metric_boundaries,
             )
 
-        # Create result
-        result = AnalysisResult(
-            analysis_setup=AnalysisSetup(
+        # Return result
+        return AnalysisResult(
+            bottlenecks=bottlenecks,
+            characteristics=characteristics,
+            evaluated_views=evaluated_views,
+            main_view=main_view,
+            metric_boundaries=metric_boundaries,
+            raw_stats=raw_stats,
+            runtime_config=AnalysisRuntimeConfig(
                 accuracy=accuracy,
                 checkpoint=self.checkpoint,
                 cluster_type=self.cluster_config.cluster_type,
@@ -211,15 +217,11 @@ class Analyzer(abc.ABC):
                 num_threads_per_worker=self.cluster_config.n_threads_per_worker,
                 num_workers=self.cluster_config.n_workers,
                 processes=self.cluster_config.processes,
+                run_id=f"{int(time())}",
                 slope_threshold=slope_threshold,
                 verbose=self.verbose,
+                working_dir=self.working_dir,
             ),
-            bottlenecks=bottlenecks,
-            characteristics=characteristics,
-            evaluated_views=evaluated_views,
-            main_view=main_view,
-            metric_boundaries=metric_boundaries,
-            raw_stats=raw_stats,
             view_results=view_results,
         )
 

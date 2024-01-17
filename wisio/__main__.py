@@ -13,9 +13,9 @@ from .types import Metric, OutputType, ViewType
 
 @dataclass
 class OutputConfig:
-    file_path: str = None
     max_bottlenecks_per_view_type: int = 3
     name: str = None
+    run_db_path: str = None
     show_debug: bool = False
     type: OutputType = 'console'
 
@@ -58,6 +58,11 @@ def _handle_output(result: AnalysisResult, config: Config):
             max_bottlenecks_per_view_type=output_config.max_bottlenecks_per_view_type,
             name=output_config.name,
             show_debug=output_config.show_debug,
+        )
+    elif output_config.type == 'sqlite':
+        result.output.sqlite(
+            name=output_config.name,
+            run_db_path=output_config.run_db_path,
         )
 
 
