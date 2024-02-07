@@ -4,23 +4,26 @@ import functools as ft
 import inflect
 import numpy as np
 import pandas as pd
+import time
 from dask.delayed import Delayed
 from dask.utils import format_bytes
 from enum import Enum
 from jinja2 import Environment
 from scipy.cluster.hierarchy import linkage, fcluster
-from typing import Dict, List, Union
+from typing import Dict, List, NamedTuple, Union
 
 from .analysis_utils import set_proc_name_parts
 from .constants import (
     ACC_PAT_SUFFIXES,
     COL_APP_NAME,
+    COL_COUNT,
     COL_FILE_DIR,
     COL_FILE_NAME,
     COL_FILE_PATTERN,
     COL_NODE_NAME,
     COL_PROC_NAME,
     COL_RANK,
+    COL_TIME,
     COL_TIME_RANGE,
     HUMANIZED_VIEW_TYPES,
     IO_TYPES,
@@ -39,6 +42,7 @@ from .types import (
     RuleResultReason,
     ScoringResult,
     ViewKey,
+    ViewResult,
 )
 from .utils.collection_utils import get_intervals, join_with_and
 
@@ -214,26 +218,22 @@ class BottleneckRule(RuleHandler):
         metric_boundary: dd.core.Scalar,
         scoring_result: ScoringResult,
         view_key: ViewKey,
-        characteristics: Dict[str, RuleResult] = None,
     ) -> Dict[str, Delayed]:
 
         view_type = view_key[-1]
 
-        # takes around 0.015 seconds
         bottlenecks = scoring_result.potential_bottlenecks \
             .query(self.rule.condition)
 
-        # takes around 0.02 seconds
         details = scoring_result.attached_records \
             .query(f"{view_type} in @indices", local_dict={'indices': bottlenecks.index})
 
         tasks = {}
         tasks['bottlenecks'] = bottlenecks
-        tasks['details'] = details
+        tasks['details'] = details.index
         tasks['metric_boundary'] = metric_boundary
 
         for i, reason in enumerate(self.rule.reasons):
-            # takes around 0.005 seconds
             tasks[f"reason{i}"] = bottlenecks.eval(reason.condition)
 
         return tasks
@@ -242,14 +242,35 @@ class BottleneckRule(RuleHandler):
         self,
         metric: Metric,
         view_key: ViewKey,
-        result: Dict[str, Union[str, int, pd.DataFrame, pd.Series]],
-        characteristics: Dict[str, RuleResult] = None,
+        result: Dict[str, Union[str, int, pd.DataFrame, pd.Series, pd.Index]],
     ) -> List[RuleResult]:
+
+        # t0 = time.perf_counter()
+
         view_type = view_key[-1]
 
         bottlenecks = result['bottlenecks']
-        details = result['details']
+
+        if len(bottlenecks) == 0:
+            return {}
+
+        details = result['details'].to_frame(index=False)
         metric_boundary = result['metric_boundary']
+
+        num_files = {}
+        num_ops = bottlenecks[COL_COUNT].to_dict()
+        num_processes = {}
+        num_time_periods = {}
+
+        for col in details.columns:
+            if col in [COL_FILE_NAME, COL_FILE_DIR, COL_FILE_PATTERN]:
+                num_files = details.groupby(view_type)[col].nunique().to_dict()
+            if col in [COL_APP_NAME, COL_NODE_NAME, COL_PROC_NAME, COL_RANK]:
+                num_processes = details.groupby(view_type)[col].nunique().to_dict()
+            if col == COL_TIME_RANGE:
+                num_time_periods = details.groupby(view_type)[col].nunique().to_dict()
+
+        # print('handle_task_results t1', time.perf_counter() - t0)
 
         reasoning = {}
         reasoning_templates = {}
@@ -257,57 +278,69 @@ class BottleneckRule(RuleHandler):
             reasoning[i] = result[f"reason{i}"].to_dict()
             reasoning_templates[i] = jinja_env.from_string(reason.message)
 
+        # print('handle_task_results t2', time.perf_counter() - t0)
+
         results = []
 
-        if len(bottlenecks) == 0:
-            return {}
+        for row in bottlenecks.itertuples():
 
-        # similar_bottlenecks = self._group_similar_behavior(
-        #     bottlenecks=bottlenecks,
-        #     metric=metric,
-        #     view_type=view_type,
-        # )
+            row_num_files = num_files.get(row.Index, 0)
+            row_num_ops = num_ops.get(row.Index, 0)
+            row_num_processes = num_processes.get(row.Index, 0)
+            row_num_time_periods = num_time_periods.get(row.Index, 0)
 
-        for ix, row in bottlenecks.iterrows():
-
-            unioned_details = self._union_details(
-                details=details,
-                behavior=1,
-                indices=[ix],
-                view_type=view_type,
-            )
-
-            description, times, processes, files = self._describe_bottleneck(
-                ix=ix,
+            description = self._describe_bottleneck(
+                ix=row.Index,
                 metric=metric,
                 metric_boundary=metric_boundary,
-                view_type=view_type,
+                num_files=row_num_files,
+                num_ops=row_num_ops,
+                num_processes=row_num_processes,
+                num_time_periods=row_num_time_periods,
                 row=row,
-                unioned_details=unioned_details,
+                view_type=view_type,
             )
 
-            extra_data = dict(row)
-            extra_data['file_name'] = files
-            extra_data['proc_name'] = processes
-            extra_data['time_range'] = times
+            row_dict = row._asdict()
+            row_dict['num_files'] = row_num_files
+            row_dict['num_ops'] = row_num_ops
+            row_dict['num_processes'] = row_num_processes
+            row_dict['num_time_periods'] = row_num_time_periods
+
+            # Fix index
+            row_dict[view_type] = row_dict['Index']
+            del row_dict['Index']
 
             reasons = []
             for i, reason in enumerate(self.rule.reasons):
-                if reasoning[i][ix]:
+                if reasoning[i][row.Index]:
                     reasons.append(RuleResultReason(
-                        description=reasoning_templates[i].render(row).strip()
+                        description=reasoning_templates[i].render(row_dict).strip()
                     ))
+
+            if len(reasons) == 0:
+                reasons.append(RuleResultReason(
+                    description='No reason found, further investigation needed.'
+                ))
 
             result = RuleResult(
                 description=description,
                 detail_list=None,
-                extra_data=extra_data,
+                extra_data=row_dict,
+                object_hash=hash('_'.join([
+                    '{:,.6f}'.format(row_dict['time']),
+                    f"{row_dict['num_files']}",
+                    f"{row_dict['num_processes']}",
+                    f"{row_dict['num_time_periods']}",
+                ])),
                 reasons=reasons,
-                value=0,
-                value_fmt='',
+                value=row_dict['time'],
+                value_fmt='{:,.6f}'.format(row_dict['time']),
             )
 
             results.append(result)
+
+        # print('handle_task_results t3', time.perf_counter() - t0, len(results))
 
         return results
 
@@ -316,89 +349,82 @@ class BottleneckRule(RuleHandler):
         ix: Union[str, int],
         metric: Metric,
         metric_boundary: Union[int, float],
+        num_files: int,
+        num_ops: int,
+        num_processes: int,
+        num_time_periods: int,
+        row: NamedTuple,
         view_type: str,
-        row: dict,
-        unioned_details: pd.DataFrame,
+        files=[],
+        processes=[],
+        time_periods=[],
     ) -> str:
 
-        files = []
-        processes = []
-        times = []
+        value = getattr(row, COL_TIME)
 
-        unioned_dict = unioned_details.to_dict(orient='index')[0]
-        unioned_dict[COL_FILE_NAME] = unioned_dict.get(COL_FILE_NAME, set())
-        unioned_dict[COL_PROC_NAME] = unioned_dict.get(COL_PROC_NAME, set())
-        unioned_dict[COL_TIME_RANGE] = unioned_dict.get(COL_TIME_RANGE, set())
+        if num_files > 0 and num_processes > 0 and num_time_periods > 0:
 
-        if view_type in [COL_FILE_NAME, COL_FILE_DIR, COL_FILE_PATTERN]:
-            files = list(sorted(unioned_dict[view_type]))
-            processes = list(sorted(unioned_dict[COL_PROC_NAME]))
-            times = list(sorted(unioned_dict[COL_TIME_RANGE]))
-        elif view_type in [COL_APP_NAME, COL_NODE_NAME, COL_PROC_NAME, COL_RANK]:
-            files = list(sorted(unioned_dict[COL_FILE_NAME]))
-            processes = list(sorted(unioned_dict[view_type]))
-            times = list(sorted(unioned_dict[COL_TIME_RANGE]))
-        else:
-            files = list(sorted(unioned_dict[COL_FILE_NAME]))
-            processes = list(sorted(unioned_dict[COL_PROC_NAME]))
-            times = list(sorted(unioned_dict[view_type]))
+            time_intervals = get_intervals(values=time_periods)
 
-        value = getattr(row, metric)
-
-        if len(files) > 0 and len(processes) > 0 and len(times) > 0:
-
-            time_intervals = get_intervals(values=times)
-
-            accessor = HUMANIZED_VIEW_TYPES['proc_name'].lower()
+            accessor = HUMANIZED_VIEW_TYPES[COL_PROC_NAME].lower()
             accessor_name = ' '
-            accessed = HUMANIZED_VIEW_TYPES['file_name'].lower()
+            accessed = HUMANIZED_VIEW_TYPES[COL_FILE_NAME].lower()
             accessed_name = ' '
             if view_type in [COL_FILE_NAME, COL_FILE_DIR, COL_FILE_PATTERN]:
                 accessed = HUMANIZED_VIEW_TYPES[view_type].lower()
-                if len(files) == 1:
+                if num_files == 1:
                     accessed_name = f" ({ix}) "
             if view_type in [COL_APP_NAME, COL_NODE_NAME, COL_PROC_NAME, COL_RANK]:
                 accessor = HUMANIZED_VIEW_TYPES[view_type].lower()
-                if len(processes) == 1:
+                if num_processes == 1:
                     accessor_name = f" ({ix}) "
 
-            accessor_noun = self.pluralize.plural_noun(accessor, len(processes))
-            accessor_verb = self.pluralize.plural_verb('accesses', len(processes))
-            accessed_noun = self.pluralize.plural_noun(accessed, len(files))
-            time_period_name = f" ({time_intervals[0]}) " if len(time_intervals) == 1 else ' '
-            time_period_noun = self.pluralize.plural_noun('time period', len(time_intervals))
+            accessor_noun = self.pluralize.plural_noun(accessor, num_processes)
+            accessor_verb = self.pluralize.plural_verb('accesses', num_processes)
+            accessed_noun = self.pluralize.plural_noun(accessed, num_files)
+            time_period_name = ' '  # f" ({time_intervals[0]}) " if num_time_periods == 1 else ' '
+            time_period_noun = self.pluralize.plural_noun('time period', num_time_periods)
 
             if self.verbose:
                 description = (
                     f"{self.pluralize.join(processes)} {accessor_noun} {accessor_verb} "
                     f"{accessed_noun} {self.pluralize.join(files)} "
                     f"during the {join_with_and(values=time_intervals)}th {time_period_noun} "
-                    f"and {self.pluralize.plural_verb('has', len(processes))} an I/O time of {value:.2f} seconds which is "
+                    f"and {self.pluralize.plural_verb('has', num_processes)} an I/O time of {value:.2f} seconds which is "
                     f"{value/metric_boundary*100:.2f}% of overall I/O time of the workload."
                 )
             else:
                 # 32 processes access 1 file pattern within 6 time periods and have an I/O time of 2.92 seconds which
                 # is 70.89% of overall I/O time of the workload.
                 description = (
-                    f"{len(processes)} {accessor_noun}{accessor_name}{accessor_verb} "
-                    f"{len(files)} {accessed_noun}{accessed_name}"
-                    f"within {len(time_intervals)} {time_period_noun}{time_period_name}"
-                    f"and {self.pluralize.plural_verb('has', len(processes))} an I/O time of {value:.2f} seconds which is "
+                    f"{num_processes} {accessor_noun}{accessor_name}{accessor_verb} "
+                    f"{num_files} {accessed_noun}{accessed_name}"
+                    f"within {num_time_periods} {time_period_noun}{time_period_name}"
+                    f"across {num_ops} I/O {self.pluralize.plural_noun('operation', num_ops)} "
+                    f"and {self.pluralize.plural_verb('has', num_processes)} an I/O time of {value:.2f} seconds which is "
                     f"{value/metric_boundary*100:.2f}% of overall I/O time of the workload."
                 )
 
         else:
 
             accessor = HUMANIZED_VIEW_TYPES[view_type].lower()
-            count = len(unioned_dict[view_type])
+
+            count = 1
+            if view_type in [COL_FILE_NAME, COL_FILE_DIR, COL_FILE_PATTERN]:
+                count = num_files
+            elif view_type in [COL_APP_NAME, COL_NODE_NAME, COL_PROC_NAME, COL_RANK]:
+                count = num_processes
+            else:
+                count = num_time_periods
 
             description = (
                 f"{count} {self.pluralize.plural_noun(accessor, count)} ({ix}) "
-                f"{self.pluralize.plural_verb('has', count)} an I/O time of "
-                f"{value:.2f} seconds which is {value/metric_boundary*100:.2f}% of overall I/O time of the workload."
+                f"{self.pluralize.plural_verb('has', count)} an I/O time of {value:.2f} seconds "
+                f"across {num_ops} I/O {self.pluralize.plural_noun('operation', num_ops)} "
+                f"which is {value/metric_boundary*100:.2f}% of overall I/O time of the workload."
             )
 
-        return description, times, processes, files
+        return description
 
     @staticmethod
     def _group_similar_behavior(bottlenecks: pd.DataFrame, metric: str, view_type: str):
@@ -426,8 +452,7 @@ class BottleneckRule(RuleHandler):
     def _union_details(details: pd.DataFrame, behavior: int, indices: list, view_type: str):
         view_types = details.index.names
 
-        filtered_details = details.query(
-            f"{view_type} in @indices", local_dict={'indices': indices})
+        filtered_details = details.query(f"{view_type} in @indices", local_dict={'indices': indices})
 
         if len(view_types) == 1:
             # This means there is only one view type
@@ -463,8 +488,10 @@ class BottleneckRule(RuleHandler):
 
 class CharacteristicRule(RuleHandler):
 
+    deps: List[str] = []
+
     @abc.abstractmethod
-    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
+    def define_tasks(self, main_view: dd.DataFrame, view_results: Dict[Metric, Dict[ViewKey, ViewResult]]) -> Dict[str, Delayed]:
         raise NotImplementedError
 
     @abc.abstractmethod
@@ -482,7 +509,7 @@ class CharacteristicAccessPatternRule(CharacteristicRule):
     def __init__(self) -> None:
         super().__init__(rule_key=KnownCharacteristics.ACCESS_PATTERN.value)
 
-    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
+    def define_tasks(self, main_view: dd.DataFrame, view_results: Dict[Metric, Dict[ViewKey, ViewResult]]) -> Dict[str, Delayed]:
 
         acc_pat_cols = []
         for acc_pat in list(AccessPattern):
@@ -510,6 +537,7 @@ class CharacteristicAccessPatternRule(CharacteristicRule):
             description='Access Pattern',
             detail_list=None,
             extra_data=dict(acc_pat_sum),
+            object_hash=None,
             reasons=None,
             value=None,
             value_fmt=(
@@ -523,8 +551,13 @@ class CharacteristicComplexityRule(CharacteristicRule):
 
     def __init__(self) -> None:
         super().__init__(rule_key=KnownCharacteristics.COMPLEXITY.value)
+        self.deps = [
+            KnownCharacteristics.FILE_COUNT.value,
+            KnownCharacteristics.PROC_COUNT.value,
+            KnownCharacteristics.TIME_PERIOD.value,
+        ]
 
-    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
+    def define_tasks(self, main_view: dd.DataFrame, view_results: Dict[Metric, Dict[ViewKey, ViewResult]]) -> Dict[str, Delayed]:
 
         tasks = {}
 
@@ -537,17 +570,18 @@ class CharacteristicComplexityRule(CharacteristicRule):
         raw_stats: RawStats = None
     ) -> RuleResult:
 
-        process_count = characteristics[KnownCharacteristics.PROC_COUNT.value]['proc_names']
-        time_period_count = characteristics[KnownCharacteristics.TIME_PERIOD.value]['total_count']
-        file_count = characteristics[KnownCharacteristics.FILE_COUNT.value]['total_count']
+        num_files = characteristics[KnownCharacteristics.FILE_COUNT.value].value
+        num_processes = characteristics[KnownCharacteristics.PROC_COUNT.value].value
+        num_time_periods = characteristics[KnownCharacteristics.TIME_PERIOD.value].value
 
-        complexities = np.array([process_count, time_period_count, file_count])
+        complexities = np.array([num_processes, num_time_periods, num_files])
         complexity = np.log10(ft.reduce(np.multiply, complexities[complexities != 0]))
 
         return RuleResult(
             description='Complexity',
             detail_list=None,
             extra_data=None,
+            object_hash=None,
             reasons=None,
             value=complexity,
             value_fmt=f"{complexity:.2f}",
@@ -559,21 +593,27 @@ class CharacteristicFileCountRule(CharacteristicRule):
     def __init__(self) -> None:
         super().__init__(rule_key=KnownCharacteristics.FILE_COUNT.value)
 
-    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
+    def define_tasks(self, main_view: dd.DataFrame, view_results: Dict[Metric, Dict[ViewKey, ViewResult]]) -> Dict[str, Delayed]:
 
         x = main_view.reset_index()
 
         tasks = {}
 
-        if 'file_name' in x.columns:
-            tasks['total_count'] = x['file_name'].nunique()
+        if COL_FILE_NAME in x.columns:
+            tasks['total_count'] = x[COL_FILE_NAME].nunique()
 
-            fpp = x \
-                .groupby(['file_name'])['proc_name'] \
-                .nunique() \
-                .to_frame()
+            if COL_PROC_NAME in x.columns:
 
-            fpp_count = fpp[fpp['proc_name'] == 1]['proc_name'].count()
+                fpp = x \
+                    .groupby([COL_FILE_NAME])[COL_PROC_NAME] \
+                    .nunique() \
+                    .to_frame()
+
+                fpp_count = fpp[fpp[COL_PROC_NAME] == 1][COL_PROC_NAME].count()
+
+            else:
+
+                fpp_count = 0
 
             tasks['fpp_count'] = fpp_count
         else:
@@ -609,6 +649,7 @@ class CharacteristicFileCountRule(CharacteristicRule):
             description='Files',
             detail_list=detail_list,
             extra_data=None,
+            object_hash=None,
             reasons=None,
             value=total_count,
             value_fmt=f"{total_count} files",
@@ -620,7 +661,7 @@ class CharacteristicIOOpsRule(CharacteristicRule):
     def __init__(self) -> None:
         super().__init__(rule_key=KnownCharacteristics.IO_COUNT.value)
 
-    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
+    def define_tasks(self, main_view: dd.DataFrame, view_results: Dict[Metric, Dict[ViewKey, ViewResult]]) -> Dict[str, Delayed]:
         tasks = {}
         tasks['total_count'] = main_view['count'].sum()
         for io_type in IO_TYPES:
@@ -648,6 +689,7 @@ class CharacteristicIOOpsRule(CharacteristicRule):
             description='I/O Ops',
             detail_list=detail_list,
             extra_data=None,
+            object_hash=None,
             reasons=None,
             # rule=rule,
             value=total_count,
@@ -660,7 +702,7 @@ class CharacteristicIOSizeRule(CharacteristicRule):
     def __init__(self) -> None:
         super().__init__(rule_key=KnownCharacteristics.IO_SIZE.value)
 
-    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
+    def define_tasks(self, main_view: dd.DataFrame, view_results: Dict[Metric, Dict[ViewKey, ViewResult]]) -> Dict[str, Delayed]:
         tasks = {}
         tasks['total_size'] = main_view['data_size'].sum()
         for io_type in IO_TYPES:
@@ -692,6 +734,7 @@ class CharacteristicIOSizeRule(CharacteristicRule):
             description='I/O Size',
             detail_list=detail_list,
             extra_data=None,
+            object_hash=None,
             reasons=None,
             value=total_size,
             value_fmt=format_bytes(total_size),
@@ -703,20 +746,32 @@ class CharacteristicIOTimeRule(CharacteristicRule):
     def __init__(self) -> None:
         super().__init__(rule_key=KnownCharacteristics.IO_TIME.value)
 
-    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
+    def define_tasks(self, main_view: dd.DataFrame, view_results: Dict[Metric, Dict[ViewKey, ViewResult]]) -> Dict[str, Delayed]:
+        view_types = main_view.index._meta.names
+
         tasks = {}
 
-        tasks['total_time'] = main_view \
-            .groupby(['proc_name']) \
-            .sum()['time'] \
-            .max()
+        if COL_PROC_NAME in view_types:
 
-        for io_type in IO_TYPES:
-            time_col = f"{io_type}_time"
-            tasks[time_col] = main_view \
+            tasks['total_time'] = main_view \
                 .groupby(['proc_name']) \
-                .sum()[time_col] \
+                .sum()['time'] \
                 .max()
+
+            for io_type in IO_TYPES:
+                time_col = f"{io_type}_time"
+                tasks[time_col] = main_view \
+                    .groupby(['proc_name']) \
+                    .sum()[time_col] \
+                    .max()
+
+        else:
+
+            tasks['total_time'] = main_view['time'].sum()
+
+            for io_type in IO_TYPES:
+                time_col = f"{io_type}_time"
+                tasks[time_col] = main_view[time_col].sum()
 
         return tasks
 
@@ -740,6 +795,7 @@ class CharacteristicIOTimeRule(CharacteristicRule):
             description='I/O Time',
             detail_list=detail_list,
             extra_data=None,
+            object_hash=None,
             reasons=None,
             # rule=rule,
             value=total_time,
@@ -756,14 +812,34 @@ class CharacteristicProcessCount(CharacteristicRule):
         if rule_key is KnownCharacteristics.APP_COUNT.value:
             self.col = 'app_name'
             self.description = 'App(s)'
+            self.deps = [
+                KnownCharacteristics.IO_COUNT.value,
+                KnownCharacteristics.IO_SIZE.value,
+                KnownCharacteristics.IO_TIME.value,
+            ]
         elif rule_key is KnownCharacteristics.NODE_COUNT.value:
             self.col = 'node_name'
             self.description = 'Node(s)'
+            self.deps = [
+                KnownCharacteristics.IO_COUNT.value,
+                KnownCharacteristics.IO_SIZE.value,
+                KnownCharacteristics.IO_TIME.value,
+            ]
 
-    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
+    def define_tasks(self, main_view: dd.DataFrame, view_results: Dict[Metric, Dict[ViewKey, ViewResult]]) -> Dict[str, Delayed]:
+        view_types = main_view.index._meta.names
+
         tasks = {}
 
-        if self.col == 'proc_name':
+        if COL_PROC_NAME not in view_types:
+            if self.col == COL_PROC_NAME:
+                tasks[f"{self.col}s"] = 0
+                return tasks
+            else:
+                tasks[f"{self.col}s"] = pd.DataFrame()
+                return tasks
+
+        if self.col == COL_PROC_NAME:
             tasks[f"{self.col}s"] = main_view \
                 .map_partitions(lambda df: df.index.get_level_values(COL_PROC_NAME)) \
                 .nunique()
@@ -803,14 +879,15 @@ class CharacteristicProcessCount(CharacteristicRule):
                 description=self.description,
                 detail_list=None,
                 extra_data=None,
+                object_hash=None,
                 reasons=None,
                 value=value,
                 value_fmt=f"{value} {self.description.lower()}",
             )
 
-        max_io_time = characteristics[KnownCharacteristics.IO_TIME.value]['total_time']
-        total_ops = characteristics[KnownCharacteristics.IO_COUNT.value]['total_count']
-        total_size = characteristics[KnownCharacteristics.IO_SIZE.value]['total_size']
+        max_io_time = characteristics[KnownCharacteristics.IO_TIME.value].value
+        total_ops = characteristics[KnownCharacteristics.IO_COUNT.value].value
+        total_size = characteristics[KnownCharacteristics.IO_SIZE.value].value
 
         detail_list = []
         for node, row in pd.DataFrame(result[f"{self.col}s"]).iterrows():
@@ -833,6 +910,7 @@ class CharacteristicProcessCount(CharacteristicRule):
             description=self.description,
             detail_list=detail_list,
             extra_data=None,
+            object_hash=None,
             reasons=None,
             value=value,
             value_fmt=f"{value} {self.description.lower()}",
@@ -844,7 +922,7 @@ class CharacteristicTimePeriodCountRule(CharacteristicRule):
     def __init__(self) -> None:
         super().__init__(rule_key=KnownCharacteristics.TIME_PERIOD.value)
 
-    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
+    def define_tasks(self, main_view: dd.DataFrame, view_results: Dict[Metric, Dict[ViewKey, ViewResult]]) -> Dict[str, Delayed]:
 
         x = main_view.reset_index()
 
@@ -870,6 +948,7 @@ class CharacteristicTimePeriodCountRule(CharacteristicRule):
             description='Time Period(s)',
             detail_list=None,
             extra_data=None,
+            object_hash=None,
             reasons=None,
             value=value,
             value_fmt=f"{value} time period(s) (Time granularity: {raw_stats.time_granularity})",
@@ -882,7 +961,7 @@ class CharacteristicXferSizeRule(CharacteristicRule):
         super().__init__(rule_key)
         self.io_op = 'write' if rule_key is KnownCharacteristics.WRITE_XFER_SIZE.value else 'read'
 
-    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
+    def define_tasks(self, main_view: dd.DataFrame, view_results: Dict[Metric, Dict[ViewKey, ViewResult]]) -> Dict[str, Delayed]:
         tasks = {}
 
         count_col, min_col, max_col, per_col, xfer_col = (
@@ -950,9 +1029,10 @@ class CharacteristicXferSizeRule(CharacteristicRule):
                 f"{xfer} - {int(row[count_col]):,} ops ({row['per'] * 100:.2f}%)")
 
         result = RuleResult(
-            extra_data=None,
             description='Write Xfer' if self.io_op == 'write' else 'Read Xfer',
             detail_list=detail_list,
+            extra_data=None,
+            object_hash=None,
             reasons=None,
             value=(min_xfer_size, max_xfer_size),
             value_fmt=value_fmt,

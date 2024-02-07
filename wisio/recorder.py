@@ -4,11 +4,12 @@ import numpy as np
 import pandas as pd
 from dask.distributed import Future, get_client
 from typing import List, Union
-from .analyzer import Analyzer
+
+from .analyzer import CHECKPOINT_MAIN_VIEW, Analyzer
 from .cluster_management import ClusterConfig
-from .constants import IO_CATS
-from .types import AnalysisAccuracy, Metric, OutputType, RawStats, ViewType
-from .utils.logger import ElapsedTimeLogger
+from .constants import EVENT_READ_TRACES, IO_CATS
+from .types import AnalysisAccuracy, Metric, RawStats, ViewType
+from .utils.dask_utils import EventLogger
 
 
 CAT_POSIX = 0
@@ -36,6 +37,7 @@ class RecorderAnalyzer(Analyzer):
     def __init__(
         self,
         working_dir: str,
+        bottleneck_dir: str = '',
         checkpoint: bool = False,
         checkpoint_dir: str = '',
         cluster_config: ClusterConfig = None,
@@ -44,6 +46,7 @@ class RecorderAnalyzer(Analyzer):
     ):
         super().__init__(
             name='Recorder',
+            bottleneck_dir=bottleneck_dir,
             checkpoint=checkpoint,
             checkpoint_dir=checkpoint_dir,
             cluster_config=cluster_config,
@@ -55,23 +58,31 @@ class RecorderAnalyzer(Analyzer):
     def analyze_parquet(
         self,
         trace_path: str,
-        metrics: List[Metric] = ['time'],
+        metrics: List[Metric],
         accuracy: AnalysisAccuracy = 'pessimistic',
-        metric_threshold: float = 0.5,
+        exclude_bottlenecks: List[str] = [],
+        exclude_characteristics: List[str] = [],
+        logical_view_types: bool = False,
         slope_threshold: int = 45,
         time_granularity: int = 1e7,
         view_types: List[ViewType] = ['file_name', 'proc_name', 'time_range'],
     ):
-        # Read traces
-        with ElapsedTimeLogger(message='Read traces'):
-            traces, job_time, total_count = self.read_parquet_files(
-                trace_path=trace_path,
-                time_granularity=time_granularity,
-            )
+        # Init traces
+        traces = pd.DataFrame()
+
+        # Check checkpoint status
+        main_view_name = self.get_checkpoint_name(CHECKPOINT_MAIN_VIEW, *sorted(view_types))
+        if not self.checkpoint or not self.has_checkpoint(name=main_view_name):
+            # Read traces
+            with EventLogger(key=EVENT_READ_TRACES, message='Read traces'):
+                traces, job_time, total_count = self.read_parquet_files(
+                    trace_path=trace_path,
+                    time_granularity=time_granularity,
+                )
 
         # Prepare raw stats
         raw_stats = self.restore_extra_data(
-            data_name=CHECKPOINT_RAW_STATS,
+            name=CHECKPOINT_RAW_STATS,
             fallback=lambda: dict(
                 job_time=job_time.persist(),
                 time_granularity=time_granularity,
@@ -82,7 +93,9 @@ class RecorderAnalyzer(Analyzer):
         # Analyze traces
         return self.analyze_traces(
             accuracy=accuracy,
-            metric_threshold=metric_threshold,
+            exclude_bottlenecks=exclude_bottlenecks,
+            exclude_characteristics=exclude_characteristics,
+            logical_view_types=logical_view_types,
             metrics=metrics,
             raw_stats=RawStats(**raw_stats),
             slope_threshold=slope_threshold,

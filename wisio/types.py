@@ -1,7 +1,19 @@
 import dask.dataframe as dd
 from dataclasses import dataclass
+from enum import Enum
 from typing import Dict, List, Literal, Optional, Union, Tuple
 from .constants import HUMANIZED_VIEW_TYPES
+
+
+class Score(Enum):
+    NONE = 'none'
+    TRIVIAL = 'trivial'
+    VERY_LOW = 'very low'
+    LOW = 'low'
+    MEDIUM = 'medium'
+    HIGH = 'high'
+    VERY_HIGH = 'very high'
+    CRITICAL = 'critical'
 
 
 AnalysisAccuracy = Literal['accurate', 'optimistic', 'pessimistic']
@@ -29,7 +41,6 @@ class AnalysisRuntimeConfig:
     cluster_type: str
     debug: bool
     memory: int
-    metric_threshold: float
     num_threads_per_worker: int
     num_workers: int
     processes: bool
@@ -78,16 +89,40 @@ class RuleResult:
     description: str
     detail_list: Optional[List[str]]
     extra_data: Optional[dict]
+    object_hash: Optional[int]
     reasons: Optional[List[RuleResultReason]]
     value: Optional[Union[float, int, tuple]]
     value_fmt: Optional[str]
 
 
 @dataclass
-class ViewResult:
-    group_view: dd.DataFrame
+class Bottleneck(RuleResult):
     metric: str
-    slope_view: dd.DataFrame
+    rule: str
+    view_name: str
+
+
+@dataclass
+class BottleneckOutput:
+    description: str
+    id: int
+    metric: str
+    num_files: int
+    num_ops: int
+    num_processes: int
+    num_time_periods: int
+    object_hash: int
+    reasons: List[RuleResultReason]
+    rule: str
+    score: str
+    view_name: str
+
+
+@dataclass
+class ViewResult:
+    critical_view: dd.DataFrame
+    metric: str
+    records: dd.DataFrame
     view: dd.DataFrame
     view_type: ViewType
 
@@ -96,10 +131,6 @@ MainView = dd.DataFrame
 
 
 Characteristics = Dict[str, RuleResult]
-
-RuleResultsPerView = Dict[ViewKey, List[RuleResult]]
-RuleResultsPerViewPerMetric = Dict[Metric, RuleResultsPerView]
-RuleResultsPerViewPerMetricPerRule = Dict[str, RuleResultsPerViewPerMetric]
 
 ScoringPerView = Dict[ViewKey, ScoringResult]
 ScoringPerViewPerMetric = Dict[Metric, ScoringPerView]

@@ -13,7 +13,7 @@ from .types import Metric, OutputType, ViewType
 
 @dataclass
 class OutputConfig:
-    max_bottlenecks_per_view_type: int = 3
+    max_bottlenecks: int = 3
     name: str = None
     run_db_path: str = None
     show_debug: bool = False
@@ -23,16 +23,19 @@ class OutputConfig:
 @dataclass
 class Config:
     trace_path: str
+    bottleneck_dir: str = None
     checkpoint: bool = True
     checkpoint_dir: str = None
     cluster: ClusterConfig = None
     debug: bool = False
-    metric_threshold: float = 0.5
+    exclude_bottlenecks: List[str] = field(default_factory=list)
+    exclude_characteristics: List[str] = field(default_factory=list)
+    logical_view_types: bool = False
     metrics: List[Metric] = field(default_factory=list)
     output: OutputConfig = None
     slope_threshold: int = 45
-    view_types: List[ViewType] = field(default_factory=list)
     verbose: bool = False
+    view_types: List[ViewType] = field(default_factory=list)
     working_dir: str = '.wisio'
 
     def __post_init__(self):
@@ -46,16 +49,12 @@ def _handle_output(result: AnalysisResult, config: Config):
     output_config = config.output
     if output_config.type == 'console':
         result.output.console(
-            max_bottlenecks_per_view_type=output_config.max_bottlenecks_per_view_type,
+            max_bottlenecks=output_config.max_bottlenecks,
             show_debug=output_config.show_debug,
         )
     elif output_config.type == 'csv':
-        file_path = output_config.file_path
-        if file_path is None:
-            file_path = f"{config.working_dir}/{int(time())}.csv"
         result.output.csv(
-            file_path=file_path,
-            max_bottlenecks_per_view_type=output_config.max_bottlenecks_per_view_type,
+            max_bottlenecks=output_config.max_bottlenecks,
             name=output_config.name,
             show_debug=output_config.show_debug,
         )
@@ -88,6 +87,7 @@ def handle_darshan(darshan_parser, args):
         config = _load_config(args.config)
 
         analyzer = DarshanAnalyzer(
+            bottleneck_dir=config.bottleneck_dir,
             checkpoint=config.checkpoint,
             checkpoint_dir=config.checkpoint_dir,
             cluster_config=config.cluster,
@@ -97,7 +97,9 @@ def handle_darshan(darshan_parser, args):
         )
 
         result = analyzer.analyze_dxt(
-            metric_threshold=config.metric_threshold,
+            exclude_bottlenecks=config.exclude_bottlenecks,
+            exclude_characteristics=config.exclude_characteristics,
+            logical_view_types=config.logical_view_types,
             metrics=config.metrics,
             slope_threshold=config.slope_threshold,
             trace_path_pattern=config.trace_path,
@@ -116,6 +118,7 @@ def handle_recorder(recorder_parser, args):
         config = _load_config(args.config)
 
         analyzer = RecorderAnalyzer(
+            bottleneck_dir=config.bottleneck_dir,
             checkpoint=config.checkpoint,
             checkpoint_dir=config.checkpoint_dir,
             cluster_config=config.cluster,
@@ -125,7 +128,9 @@ def handle_recorder(recorder_parser, args):
         )
 
         result = analyzer.analyze_parquet(
-            metric_threshold=config.metric_threshold,
+            exclude_bottlenecks=config.exclude_bottlenecks,
+            exclude_characteristics=config.exclude_characteristics,
+            logical_view_types=config.logical_view_types,
             metrics=config.metrics,
             slope_threshold=config.slope_threshold,
             trace_path=config.trace_path,

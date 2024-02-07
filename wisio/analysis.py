@@ -1,9 +1,8 @@
 import dask.dataframe as dd
 import numpy as np
 import pandas as pd
-from typing import Union
-from .constants import COL_PROC_NAME
-from .types import ViewType
+from typing import Callable, Dict, List, Union
+from .types import Metric, Score, ViewType
 
 
 BW_BINS = [  # bw_ranges = [0, 1, 128, 1024, 1024*64]
@@ -26,27 +25,51 @@ BW_BINS_PER_PROC = [
     1024 ** 3,  # 1GB 'trivial' --- single thread bw for memory
     1024 ** 3 * 64,  # 64GB -- 'none', -- agg bw for memory
 ]
-DELTA_BINS = [
-    0,
-    0.001,
-    0.01,
-    0.1,
-    0.25,
-    0.5,
-    0.75,
-    0.9
-]
-DELTA_BIN_NAMES = [
-    'none',
-    'trivial',
-    'very low',
-    'low',
-    'medium',
-    'high',
-    'very high',
-    'critical',
-]
-DELTA_BIN_INITIALS = {
+IS_NORMALIZED: Dict[Metric, bool] = dict(
+    att_perf=True,
+    bw=True,
+    intensity=True,
+    iops=True,
+    time=False,
+)
+IS_REVERSED: Dict[Metric, bool] = dict(
+    att_perf=True,
+    bw=True,
+    intensity=False,
+    iops=True,
+    time=False,
+)
+SCORE_BINS: Dict[Metric, List[float]] = dict(
+    iops=[
+        # 0.17632698,
+        # 0.36397023,
+        # 0.57735027,
+        # 0.83909963,
+        # 1.19175359,
+        # 1.73205081,
+        # 2.74747742,
+        # 5.67128182,
+        np.tan(np.deg2rad(10)),  # 0.17632698
+        np.tan(np.deg2rad(20)),  # 0.36397023
+        np.tan(np.deg2rad(30)),  # 0.57735027
+        np.tan(np.deg2rad(40)),  # 0.83909963
+        np.tan(np.deg2rad(50)),  # 1.19175359
+        np.tan(np.deg2rad(60)),  # 1.73205081
+        np.tan(np.deg2rad(70)),  # 2.74747742
+        np.tan(np.deg2rad(80)),  # 5.67128182
+    ],
+    time=[
+        0,
+        0.001,
+        0.01,
+        0.1,
+        0.25,
+        0.5,
+        0.75,
+        0.9
+    ]
+)
+SCORE_INITIALS = {
     'none': 'NA',
     'trivial': 'TR',
     'very low': 'VL',
@@ -56,19 +79,19 @@ DELTA_BIN_INITIALS = {
     'very high': 'VH',
     'critical': 'CR',
 }
-IS_NORMALIZED = dict(
-    att_perf=True,
-    bw=True,
-    intensity=True,
-    iops=True,
-    time=False,
-)
-IS_REVERSED = dict(
-    att_perf=True,
-    bw=True,
-    intensity=False,
-    iops=True,
-    time=False,
+SCORE_NAMES = [
+    Score.NONE.value,
+    Score.TRIVIAL.value,
+    Score.VERY_LOW.value,
+    Score.LOW.value,
+    Score.MEDIUM.value,
+    Score.HIGH.value,
+    Score.VERY_HIGH.value,
+    Score.CRITICAL.value,
+]
+THRESHOLD_FUNCTIONS: Dict[Metric, Callable[[int], Union[float, int]]] = dict(
+    iops=lambda x: np.tan(np.deg2rad(x)),
+    time=lambda x: x,
 )
 
 
@@ -94,102 +117,54 @@ def set_bound_columns(ddf: Union[dd.DataFrame, pd.DataFrame], is_initial=False):
     return ddf
 
 
-def set_metric_deltas(df: pd.DataFrame, metric: str, metric_boundary: dd.core.Scalar):
-    csp_col, delta_col, norm_col = (
-        f"{metric}_csp",
-        f"{metric}_delta",
-        f"{metric}_norm",
-    )
-
-    # print('set_metric_deltas', metric, type(norm_data), norm_data.metric_max if norm_data is not None else -1)
-
-    # fix: The columns in the computed data do not match the columns in the provided metadata
-    df[csp_col] = 0.0
-    df[delta_col] = 0.0
-
-    if IS_NORMALIZED[metric]:
-        if IS_REVERSED[metric]:
-            df[norm_col] = 1 - df[metric] / metric_boundary
-            return df
-        else:
-            df[norm_col] = df[metric] / metric_boundary
-            return df
-
-    df[csp_col] = df[metric].cumsum() / metric_boundary
-    df[delta_col] = df[csp_col].diff().fillna(df[csp_col])
-
-    return df
-
-
-def set_metric_percentages(df: pd.DataFrame, metric: str, metric_boundary: float):
-    pero_col, perr_col, norm_col = (
-        f"{metric}_pero",
-        f"{metric}_perr",
-        f"{metric}_norm"
-    )
-
-    df[norm_col] = df[metric] / metric_boundary
-    df[pero_col] = df[metric] / metric_boundary
-    df[perr_col] = df[metric] / df[metric].sum()
-
-    if IS_REVERSED[metric]:
-        df[norm_col] = 1 - df[metric] / metric_boundary
-
-    return df
-
-
-def set_metric_scores(df: pd.DataFrame, view_type: ViewType, metric: str, value_col: str, metric_boundary=None):
-    bin_col, score_col, th_col = (
+def set_metric_scores(df: pd.DataFrame, view_type: ViewType, metric: Metric, metric_boundary=None):
+    bin_col, score_col, slope_col = (
         f"{metric}_bin",
         f"{metric}_score",
-        f"{metric}_threshold",
-    )
-
-    bin_names = DELTA_BIN_NAMES
-    bins = DELTA_BINS
-    bins_th = DELTA_BINS
-
-    if IS_NORMALIZED[metric]:
-        bins = np.multiply(DELTA_BINS, metric_boundary)
-
-    if IS_REVERSED[metric]:
-        bin_names = np.flip(DELTA_BIN_NAMES)
-        bins_th = np.flip(DELTA_BINS)
-
-    if metric == 'bw':
-        bins = BW_BINS_PER_PROC if view_type == COL_PROC_NAME else BW_BINS
-
-    if metric in ['bw', 'iops']:
-        df = df.query(f"{metric} > 0")
-
-    df[bin_col] = np.digitize(df[value_col], bins=bins, right=True)
-    df[score_col] = np.choose(df[bin_col] - 1, choices=bin_names, mode='clip')
-    df[th_col] = np.choose(df[bin_col] - 1, choices=bins_th, mode='clip')
-
-    return df.drop(columns=[bin_col])
-
-
-def set_metric_slope(df: pd.DataFrame, metric: str):
-    per_col, per_rev_cs_col, per_rev_cs_diff_col, slope_col, sum_col = (
-        f"{metric}_per",
-        f"{metric}_per_rev_cs",
-        f"{metric}_per_rev_cs_diff",
         f"{metric}_slope",
-        f"{metric}_sum"
     )
 
-    df['count_sum'] = df['count'].sum()
-    df['count_cs'] = df['count'].cumsum()
-    df['count_cs_per'] = 1 - df['count_cs'] / df['count_sum']
-    df['count_cs_per_rev'] = 1 - df['count_cs_per']
-    df['count_cs_per_rev_diff'] = df['count_cs_per_rev'].diff().fillna(0)
+    bins = SCORE_BINS[metric]
+    names = SCORE_NAMES
 
-    df[sum_col] = df[metric].sum()
-    df[per_col] = 1 - df[metric] / df[sum_col]
-    df[per_rev_cs_col] = (1 - df[per_col]).cumsum()
-    df[per_rev_cs_diff_col] = df[per_rev_cs_col].diff().fillna(0)
+    # if IS_NORMALIZED[metric]:
+    #     bins = np.multiply(bins, metric_boundary)
 
-    df[slope_col] = np.rad2deg(np.arctan2(df['count_cs_per_rev_diff'], df[per_rev_cs_diff_col]))
-    df[slope_col] = df[slope_col].fillna(0)
+    # if IS_REVERSED[metric]:
+    #     names = np.flip(names)
+    #     thresholds = np.flip(thresholds)
+
+    # if metric == 'bw':
+    #     bins = BW_BINS_PER_PROC if view_type == COL_PROC_NAME else BW_BINS
+
+    # if metric in ['bw', 'iops']:
+    #     df = df.query(f"{metric} > 0")
+
+    df[bin_col] = np.digitize(df[slope_col], bins=bins, right=True)
+    df[score_col] = np.choose(df[bin_col] - 1, choices=names, mode='clip')
+
+    return df
+
+
+def set_metric_slope(df: pd.DataFrame, metric: Metric):
+    slope_col = f"{metric}_slope"
+
+    if metric == 'iops':
+        df['time_per'] = df['time'] / df['time'].sum()
+        df['count_per'] = df['count'] / df['count'].sum()
+        df[slope_col] = df['time_per'] / df['count_per']
+    elif metric == 'time':
+        df[slope_col] = df[metric] / df[metric].sum()
+
+    # 1. io_time == too trivial -- >50% threshold
+    # 2. iops == slope analysis -- <45 degree roc (iops) as the main metric
+
+    # automated bottleneck detection based on optimization function
+    # one case is io_time (bin with old bins)
+    # second case is iops (bin with roc bins)
+
+    # iops = main metric
+    # for the capability of automated bottleneck detection
+    # absolute value of io time doesn't give us the rate of change depending on io_time/count
 
     return df

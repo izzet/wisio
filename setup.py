@@ -25,12 +25,14 @@ setup(
         ]
     },
     install_requires=[
+        'bokeh==2.4.3',
         'click==8.0.4',
         'darshan>=3.4.0',
         'dask>=2023.9.0',
+        'dask-awkward>=2023.9.0',
         'dask_jobqueue==0.8.2',
         'distributed>=2023.9.0',
-        'fastparquet>=2023.10.0',
+        # 'fastparquet>=2023.10.0',
         'inflect==7.0.0',
         'jinja2>=3.0',
         'numpy==1.24.3',

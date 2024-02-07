@@ -13,14 +13,21 @@ class IOCategory(Enum):
     METADATA = 3
 
 
+COL_ACC_PAT = 'acc_pat'
 COL_APP_NAME = 'app_name'
+COL_CAT = 'cat'
+COL_COUNT = 'count'
 COL_FILE_DIR = 'file_dir'
 COL_FILE_NAME = 'file_name'
 COL_FILE_PATTERN = 'file_pattern'
+COL_FUNC_ID = 'func_id'
 COL_HOST_NAME = 'host_name'
+COL_IO_CAT = 'io_cat'
 COL_NODE_NAME = 'node_name'
 COL_PROC_NAME = 'proc_name'
 COL_RANK = 'rank'
+COL_SIZE = 'size'
+COL_TIME = 'time'
 COL_TIME_RANGE = 'time_range'
 
 VIEW_TYPES = ['time_range', 'file_name', 'proc_name']  # Order matters!
@@ -87,5 +94,7 @@ EVENT_COMP_HLM = 'compute_hlm'
 EVENT_COMP_MAIN_VIEW = 'compute_main_view'
 EVENT_COMP_METBD = 'compute_metric_boundaries'
 EVENT_COMP_PERS = 'compute_perspectives'
-EVENT_DET_BOTT = 'detect_bottlenecks'
+EVENT_DET_BOT = 'detect_bottlenecks'
+EVENT_DET_CHAR = 'detect_characteristics'
 EVENT_READ_TRACES = 'read_traces'
+EVENT_SAVE_BOT = 'save_bottlenecks'
