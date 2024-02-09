@@ -262,6 +262,14 @@ class BottleneckRule(RuleHandler):
         num_processes = {}
         num_time_periods = {}
 
+        # Logical view type fix
+        if view_type == COL_FILE_DIR:
+            details = set_file_dir(df=details.set_index(COL_FILE_NAME))
+        elif view_type == COL_FILE_PATTERN:
+            details = set_file_pattern(df=details.set_index(COL_FILE_NAME))
+        elif view_type in [COL_APP_NAME, COL_NODE_NAME, COL_RANK]:
+            details = set_proc_name_parts(df=details.set_index(COL_PROC_NAME))
+
         for col in details.columns:
             if col in [COL_FILE_NAME, COL_FILE_DIR, COL_FILE_PATTERN]:
                 num_files = details.groupby(view_type)[col].nunique().to_dict()
