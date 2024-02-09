@@ -12,7 +12,7 @@ from jinja2 import Environment
 from scipy.cluster.hierarchy import linkage, fcluster
 from typing import Dict, List, NamedTuple, Union
 
-from .analysis_utils import set_proc_name_parts
+from .analysis_utils import set_file_dir, set_file_pattern, set_proc_name_parts
 from .constants import (
     ACC_PAT_SUFFIXES,
     COL_APP_NAME,
@@ -390,7 +390,7 @@ class BottleneckRule(RuleHandler):
             accessor_noun = self.pluralize.plural_noun(accessor, num_processes)
             accessor_verb = self.pluralize.plural_verb('accesses', num_processes)
             accessed_noun = self.pluralize.plural_noun(accessed, num_files)
-            time_period_name = ' '  # f" ({time_intervals[0]}) " if num_time_periods == 1 else ' '
+            time_period_name = f" ({ix}) " if view_type == COL_TIME_RANGE else ' '
             time_period_noun = self.pluralize.plural_noun('time period', num_time_periods)
 
             if self.verbose:
