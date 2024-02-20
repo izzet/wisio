@@ -9,7 +9,7 @@ from ._darshan.analysis import create_dxt_dataframe
 from .cluster_management import ClusterConfig
 from .constants import EVENT_READ_TRACES
 from .analyzer import CHECKPOINT_MAIN_VIEW, Analyzer
-from .types import AnalysisAccuracy, RawStats, ViewType
+from .types import AnalysisAccuracy, Metric, RawStats, ViewType
 from .utils.dask_utils import EventLogger
 
 
@@ -55,17 +55,18 @@ class DarshanAnalyzer(Analyzer):
     def analyze_dxt(
         self,
         trace_path_pattern: str,
+        metrics: List[Metric],
         accuracy: AnalysisAccuracy = 'pessimistic',
         exclude_bottlenecks: List[str] = [],
         exclude_characteristics: List[str] = [],
         logical_view_types: bool = False,
-        metrics=['time'],
         slope_threshold: int = 45,
         time_granularity: int = 1e3,
         view_types: List[ViewType] = ['file_name', 'proc_name', 'time_range'],
     ):
-        # Init traces
-        traces = pd.DataFrame()
+        # Init empty
+        job_time = 0
+        traces = dd.from_pandas(data=pd.DataFrame(), npartitions=1)
 
         # Check checkpoint status
         main_view_name = self.get_checkpoint_name(CHECKPOINT_MAIN_VIEW, *sorted(view_types))
