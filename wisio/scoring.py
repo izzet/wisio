@@ -60,7 +60,7 @@ class ViewEvaluator(object):
 
         evaluated_groups = view_result.critical_view \
             .map_partitions(set_metric_scores, view_type=view_type, metric=metric, metric_boundary=metric_boundary) \
-            .sort_values(f"{metric}_slope", ascending=False) \
+            .sort_values(f"{metric}_slope", ascending=True) \
             .persist()
 
         return ScoringResult(

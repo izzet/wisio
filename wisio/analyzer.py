@@ -436,7 +436,7 @@ class Analyzer(abc.ABC):
         if slope_threshold > 0:
             corrected_threshold = THRESHOLD_FUNCTIONS[metric](slope_threshold)
             critical_view = view \
-                .query(f"{metric}_slope > @threshold", local_dict={'threshold': corrected_threshold}) \
+                .query(f"{metric}_slope <= @threshold", local_dict={'threshold': corrected_threshold}) \
                 .persist()
 
         indices = critical_view.index.unique()

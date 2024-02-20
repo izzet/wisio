@@ -41,22 +41,14 @@ IS_REVERSED: Dict[Metric, bool] = dict(
 )
 SCORE_BINS: Dict[Metric, List[float]] = dict(
     iops=[
-        # 0.17632698,
-        # 0.36397023,
-        # 0.57735027,
-        # 0.83909963,
-        # 1.19175359,
-        # 1.73205081,
-        # 2.74747742,
-        # 5.67128182,
-        np.tan(np.deg2rad(10)),  # 0.17632698
-        np.tan(np.deg2rad(20)),  # 0.36397023
-        np.tan(np.deg2rad(30)),  # 0.57735027
-        np.tan(np.deg2rad(40)),  # 0.83909963
-        np.tan(np.deg2rad(50)),  # 1.19175359
-        np.tan(np.deg2rad(60)),  # 1.73205081
-        np.tan(np.deg2rad(70)),  # 2.74747742
         np.tan(np.deg2rad(80)),  # 5.67128182
+        np.tan(np.deg2rad(70)),  # 2.74747742
+        np.tan(np.deg2rad(60)),  # 1.73205081
+        np.tan(np.deg2rad(50)),  # 1.19175359
+        np.tan(np.deg2rad(40)),  # 0.83909963
+        np.tan(np.deg2rad(30)),  # 0.57735027
+        np.tan(np.deg2rad(20)),  # 0.36397023
+        np.tan(np.deg2rad(10)),  # 0.17632698
     ],
     time=[
         0,
@@ -152,7 +144,7 @@ def set_metric_slope(df: pd.DataFrame, metric: Metric):
     if metric == 'iops':
         df['time_per'] = df['time'] / df['time'].sum()
         df['count_per'] = df['count'] / df['count'].sum()
-        df[slope_col] = df['time_per'] / df['count_per']
+        df[slope_col] = df['count_per'] / df['time_per']
     elif metric == 'time':
         df[slope_col] = df[metric] / df[metric].sum()
 
