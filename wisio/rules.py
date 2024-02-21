@@ -158,7 +158,7 @@ Issued high number of random operations, specifically {{ "%.2f" | format((random
     ),
     KnownRules.SMALL_READS.value: Rule(
         name='Small reads',
-        condition='(read_time / time) > 0.5 & (read_size / count) < 262144',
+        condition='(read_time / time) > 0.5 & (read_size / count) < 1048576',
         reasons=[
             RuleReason(
                 condition='(read_time / time) > 0.5',
@@ -167,16 +167,16 @@ Issued high number of random operations, specifically {{ "%.2f" | format((random
                 '''
             ),
             RuleReason(
-                condition='(read_size / count) < 262144',
+                condition='(read_size / count) < 1048576',
                 message='''
-Average 'read's are {{ (read_size / count) | format_bytes }}, which is smaller than {{ 262144 | format_bytes }}.
+Average 'read's are {{ (read_size / count) | format_bytes }}, which is smaller than {{ 1048576 | format_bytes }}.
                 '''
             )
         ]
     ),
     KnownRules.SMALL_WRITES.value: Rule(
         name='Small writes',
-        condition='(write_time / time) > 0.5 & (write_size / count) < 262144',
+        condition='(write_time / time) > 0.5 & (write_size / count) < 1048576',
         reasons=[
             RuleReason(
                 condition='(write_time / time) > 0.5',
@@ -185,9 +185,9 @@ Average 'read's are {{ (read_size / count) | format_bytes }}, which is smaller t
                 '''
             ),
             RuleReason(
-                condition='(write_size / count) < 262144',
+                condition='(write_size / count) < 1048576',
                 message='''
-Average 'write's are {{ (write_size / count) | format_bytes }}, which is smaller than {{ 262144 | format_bytes }}.
+Average 'write's are {{ (write_size / count) | format_bytes }}, which is smaller than {{ 1048576 | format_bytes }}.
                 '''
             )
         ]
