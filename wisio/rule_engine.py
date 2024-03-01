@@ -3,11 +3,13 @@ import dask.dataframe as dd
 import dataclasses
 import itertools as it
 import numpy as np
+import pandas as pd
 from dask import compute, delayed, persist
 from typing import Dict, List, Tuple
 
 from .rules import (
     KNOWN_RULES,
+    MAX_REASONS,
     BottleneckRule,
     CharacteristicAccessPatternRule,
     CharacteristicComplexityRule,
@@ -21,7 +23,6 @@ from .rules import (
     KnownCharacteristics as kc,
 )
 from .types import (
-    Bottleneck,
     Characteristics,
     Metric,
     RawStats,
@@ -91,13 +92,12 @@ class RuleEngine(object):
         evaluated_views: ScoringPerViewPerMetric,
         metric_boundaries: Dict[Metric, dd.core.Scalar],
         exclude_bottlenecks: List[str] = [],
-    ) -> List[Bottleneck]:
+    ) -> Tuple[List[dict], Dict[str, BottleneckRule]]:
 
-        rule_dict = {rule: BottleneckRule(rule_key=rule, rule=KNOWN_RULES[rule], verbose=self.verbose)
-                     for rule in KNOWN_RULES}
-
-        for exclude_bottleneck in exclude_bottlenecks:
-            rule_dict.pop(exclude_bottleneck)
+        rule_dict = {
+            rule: BottleneckRule(rule_key=rule, rule=KNOWN_RULES[rule], verbose=self.verbose)
+            for rule in KNOWN_RULES if rule not in exclude_bottlenecks
+        }
 
         metrics = list(evaluated_views.keys())
 
@@ -115,15 +115,51 @@ class RuleEngine(object):
         evaluated_views_bag = db.from_sequence(
             list(it.chain.from_iterable(it.repeat(evaluated_views_per_metric, len(rule_dict)))))
 
-        bottlenecks = db.zip(rules_bag, metrics_bag, view_keys_bag, evaluated_views_bag) \
-            .map(self._define_bottleneck_tasks, rules=rule_dict, metric_boundaries=metric_boundaries) \
-            .map(compute) \
-            .flatten() \
-            .map(self._handle_bottleneck_task_results, rules=rule_dict) \
-            .flatten() \
+        bottlenecks = (
+            db.zip(rules_bag, metrics_bag, view_keys_bag, evaluated_views_bag)
+            .map(self._define_bottleneck_tasks, rules=rule_dict, metric_boundaries=metric_boundaries)
+            .map_partitions(compute)
+            .flatten()
+            .map(self._consolidate_bottlenecks)
+            .flatten()
             .persist()
+        )
 
-        return bottlenecks
+        return bottlenecks, rule_dict
+
+    @staticmethod
+    def _consolidate_bottlenecks(zipped: Tuple[str, str, ViewKey, tuple]):
+        rule, metric, view_key, result = zipped
+
+        bottlenecks = result['bottlenecks']
+        details = result['details']
+
+        groupped_details = details.groupby(bottlenecks.index.names).nunique()
+        groupped_details.columns = groupped_details.columns.map(lambda col: f"num_{col}")
+
+        consolidated = bottlenecks.join(groupped_details)
+
+        for col in bottlenecks.index.names:
+            consolidated[f"num_{col}"] = 1  # current view type
+
+        consolidated['metric'] = metric
+        consolidated['view_depth'] = len(view_key) if isinstance(view_key, tuple) else 1
+        consolidated['view_name'] = view_name(view_key, '.')
+        consolidated['rule'] = rule
+
+        for i in range(MAX_REASONS):
+            reasoning = result.get(f"reason{i}", pd.Series())
+            reasoning.name = f"reason_{i}"
+            consolidated = consolidated.join(reasoning)
+            consolidated[f"reason_{i}"] = consolidated[f"reason_{i}"].fillna(False)
+
+        if len(bottlenecks.index.names) == 1:
+            consolidated.index.rename('subject', inplace=True)  # change index name as subject
+
+        consolidated = consolidated.reset_index()
+        consolidated['subject'] = consolidated['subject'].astype(str)  # change int type subject to str
+
+        return consolidated.to_dict(orient='records')
 
     @staticmethod
     def _define_bottleneck_tasks(

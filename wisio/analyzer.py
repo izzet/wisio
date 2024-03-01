@@ -217,7 +217,7 @@ class Analyzer(abc.ABC):
                 main_view=main_view,
                 view_results=view_results,
             )
-            bottlenecks = rule_engine.process_bottlenecks(
+            bottlenecks, bottleneck_rules = rule_engine.process_bottlenecks(
                 evaluated_views=evaluated_views,
                 exclude_bottlenecks=exclude_bottlenecks,
                 metric_boundaries=metric_boundaries,
@@ -230,6 +230,7 @@ class Analyzer(abc.ABC):
         # Return result
         return AnalysisResult(
             bottleneck_dir=bottleneck_dir,
+            bottleneck_rules=bottleneck_rules,
             characteristics=characteristics,
             evaluated_views=evaluated_views,
             main_view=main_view,

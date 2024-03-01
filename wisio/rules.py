@@ -4,13 +4,12 @@ import functools as ft
 import inflect
 import numpy as np
 import pandas as pd
-import time
 from dask.delayed import Delayed
 from dask.utils import format_bytes
 from enum import Enum
 from jinja2 import Environment
 from scipy.cluster.hierarchy import linkage, fcluster
-from typing import Dict, List, NamedTuple, Union
+from typing import Dict, List, Union
 
 from .analysis_utils import set_file_dir, set_file_pattern, set_proc_name_parts
 from .constants import (
@@ -23,7 +22,6 @@ from .constants import (
     COL_NODE_NAME,
     COL_PROC_NAME,
     COL_RANK,
-    COL_TIME,
     COL_TIME_RANGE,
     HUMANIZED_VIEW_TYPES,
     IO_TYPES,
@@ -34,6 +32,7 @@ from .constants import (
 )
 from .scoring import SCORING_ORDER
 from .types import (
+    BottleneckResult,
     Metric,
     RawStats,
     Rule,
@@ -47,6 +46,7 @@ from .types import (
 from .utils.collection_utils import get_intervals, join_with_and
 
 
+MAX_REASONS = 5
 METADATA_ACCESS_RATIO_THRESHOLD = 0.5
 
 
@@ -222,16 +222,17 @@ class BottleneckRule(RuleHandler):
 
         view_type = view_key[-1]
 
-        bottlenecks = scoring_result.potential_bottlenecks \
-            .query(self.rule.condition)
+        bottlenecks = scoring_result.scored_view.query(self.rule.condition)
+        bottlenecks['time_overall'] = bottlenecks['time'] / metric_boundary
 
-        details = scoring_result.attached_records \
+        details = scoring_result.records_index \
+            .to_frame() \
+            .reset_index(drop=True) \
             .query(f"{view_type} in @indices", local_dict={'indices': bottlenecks.index})
 
         tasks = {}
         tasks['bottlenecks'] = bottlenecks
-        tasks['details'] = details.index
-        tasks['metric_boundary'] = metric_boundary
+        tasks['details'] = details
 
         for i, reason in enumerate(self.rule.reasons):
             tasks[f"reason{i}"] = bottlenecks.eval(reason.condition)
@@ -252,15 +253,21 @@ class BottleneckRule(RuleHandler):
         bottlenecks = result['bottlenecks']
 
         if len(bottlenecks) == 0:
-            return {}
+            return []
 
         details = result['details'].to_frame(index=False)
         metric_boundary = result['metric_boundary']
+
+        files = {}
+        processes = {}
+        time_periods = {}
 
         num_files = {}
         num_ops = bottlenecks[COL_COUNT].to_dict()
         num_processes = {}
         num_time_periods = {}
+
+        # print('handle_task_results t0', time.perf_counter() - t0)
 
         # Logical view type fix
         if view_type == COL_FILE_DIR:
@@ -270,13 +277,25 @@ class BottleneckRule(RuleHandler):
         elif view_type in [COL_APP_NAME, COL_NODE_NAME, COL_RANK]:
             details = set_proc_name_parts(df=details.set_index(COL_PROC_NAME))
 
-        for col in details.columns:
-            if col in [COL_FILE_NAME, COL_FILE_DIR, COL_FILE_PATTERN]:
-                num_files = details.groupby(view_type)[col].nunique().to_dict()
-            if col in [COL_APP_NAME, COL_NODE_NAME, COL_PROC_NAME, COL_RANK]:
-                num_processes = details.groupby(view_type)[col].nunique().to_dict()
-            if col == COL_TIME_RANGE:
-                num_time_periods = details.groupby(view_type)[col].nunique().to_dict()
+        if self.verbose:
+            for col in details.columns:
+                if col in [COL_FILE_NAME, COL_FILE_DIR, COL_FILE_PATTERN]:
+                    files = details.groupby(view_type)[col].unique().to_dict()
+                    num_files = {f: len(files[f]) for f in files}
+                if col in [COL_APP_NAME, COL_NODE_NAME, COL_PROC_NAME, COL_RANK]:
+                    processes = details.groupby(view_type)[col].unique().to_dict()
+                    num_processes = {p: len(processes[p]) for p in processes}
+                if col == COL_TIME_RANGE:
+                    time_periods = details.groupby(view_type)[col].unique().to_dict()
+                    num_time_periods = {t: len(time_periods[t]) for t in time_periods}
+        else:
+            for col in details.columns:
+                if col in [COL_FILE_NAME, COL_FILE_DIR, COL_FILE_PATTERN]:
+                    num_files = details.groupby(view_type)[col].nunique().to_dict()
+                if col in [COL_APP_NAME, COL_NODE_NAME, COL_PROC_NAME, COL_RANK]:
+                    num_processes = details.groupby(view_type)[col].nunique().to_dict()
+                if col == COL_TIME_RANGE:
+                    num_time_periods = details.groupby(view_type)[col].nunique().to_dict()
 
         # print('handle_task_results t1', time.perf_counter() - t0)
 
@@ -286,34 +305,46 @@ class BottleneckRule(RuleHandler):
             reasoning[i] = result[f"reason{i}"].to_dict()
             reasoning_templates[i] = jinja_env.from_string(reason.message)
 
-        # print('handle_task_results t2', time.perf_counter() - t0)
-
         results = []
 
         for row in bottlenecks.itertuples():
 
-            row_num_files = num_files.get(row.Index, 0)
-            row_num_ops = num_ops.get(row.Index, 0)
-            row_num_processes = num_processes.get(row.Index, 0)
-            row_num_time_periods = num_time_periods.get(row.Index, 0)
+            bot_files = list(files.get(row.Index, []))
+            bot_processes = list(processes.get(row.Index, []))
+            bot_time_periods = list(time_periods.get(row.Index, []))
 
-            description = self._describe_bottleneck(
-                ix=row.Index,
+            bot_num_files = num_files.get(row.Index, 0)
+            bot_num_ops = num_ops.get(row.Index, 0)
+            bot_num_processes = num_processes.get(row.Index, 0)
+            bot_num_time_periods = num_time_periods.get(row.Index, 0)
+
+            description = self.describe_bottleneck(
+                files=bot_files,
+                subject=row.Index,
                 metric=metric,
                 metric_boundary=metric_boundary,
-                num_files=row_num_files,
-                num_ops=row_num_ops,
-                num_processes=row_num_processes,
-                num_time_periods=row_num_time_periods,
+                num_files=bot_num_files,
+                num_ops=bot_num_ops,
+                num_processes=bot_num_processes,
+                num_time_periods=bot_num_time_periods,
+                processes=bot_processes,
                 row=row,
+                time_periods=bot_time_periods,
                 view_type=view_type,
             )
 
             row_dict = row._asdict()
-            row_dict['num_files'] = row_num_files
-            row_dict['num_ops'] = row_num_ops
-            row_dict['num_processes'] = row_num_processes
-            row_dict['num_time_periods'] = row_num_time_periods
+
+            if self.verbose:
+                row_dict['files'] = bot_files
+                row_dict['processes'] = bot_processes
+                row_dict['time_periods'] = list(map(int, bot_time_periods))
+                # print(row_dict)
+
+            row_dict['num_files'] = bot_num_files
+            row_dict['num_ops'] = bot_num_ops
+            row_dict['num_processes'] = bot_num_processes
+            row_dict['num_time_periods'] = bot_num_time_periods
 
             # Fix index
             row_dict[view_type] = row_dict['Index']
@@ -352,27 +383,23 @@ class BottleneckRule(RuleHandler):
 
         return results
 
-    def _describe_bottleneck(
+    def describe_bottleneck(
         self,
-        ix: Union[str, int],
         metric: Metric,
-        metric_boundary: Union[int, float],
         num_files: int,
         num_ops: int,
         num_processes: int,
         num_time_periods: int,
-        row: NamedTuple,
+        subject: Union[str, int],
+        time: float,
+        time_overall: float,
         view_type: str,
         files=[],
         processes=[],
         time_periods=[],
     ) -> str:
 
-        value = getattr(row, COL_TIME)
-
         if num_files > 0 and num_processes > 0 and num_time_periods > 0:
-
-            time_intervals = get_intervals(values=time_periods)
 
             accessor = HUMANIZED_VIEW_TYPES[COL_PROC_NAME].lower()
             accessor_name = ' '
@@ -381,25 +408,27 @@ class BottleneckRule(RuleHandler):
             if view_type in [COL_FILE_NAME, COL_FILE_DIR, COL_FILE_PATTERN]:
                 accessed = HUMANIZED_VIEW_TYPES[view_type].lower()
                 if num_files == 1:
-                    accessed_name = f" ({ix}) "
+                    accessed_name = f" ({subject}) "
             if view_type in [COL_APP_NAME, COL_NODE_NAME, COL_PROC_NAME, COL_RANK]:
                 accessor = HUMANIZED_VIEW_TYPES[view_type].lower()
                 if num_processes == 1:
-                    accessor_name = f" ({ix}) "
+                    accessor_name = f" ({subject}) "
 
             accessor_noun = self.pluralize.plural_noun(accessor, num_processes)
             accessor_verb = self.pluralize.plural_verb('accesses', num_processes)
             accessed_noun = self.pluralize.plural_noun(accessed, num_files)
-            time_period_name = f" ({ix}) " if view_type == COL_TIME_RANGE else ' '
+            time_period_name = f" ({subject}) " if view_type == COL_TIME_RANGE else ' '
             time_period_noun = self.pluralize.plural_noun('time period', num_time_periods)
 
             if self.verbose:
+                time_intervals = get_intervals(values=time_periods)
+
                 description = (
                     f"{self.pluralize.join(processes)} {accessor_noun} {accessor_verb} "
                     f"{accessed_noun} {self.pluralize.join(files)} "
                     f"during the {join_with_and(values=time_intervals)}th {time_period_noun} "
-                    f"and {self.pluralize.plural_verb('has', num_processes)} an I/O time of {value:.2f} seconds which is "
-                    f"{value/metric_boundary*100:.2f}% of overall I/O time of the workload."
+                    f"and {self.pluralize.plural_verb('has', num_processes)} an I/O time of {time:.2f} seconds which is "
+                    f"{time_overall*100:.2f}% of overall I/O time of the workload."
                 )
             else:
                 # 32 processes access 1 file pattern within 6 time periods and have an I/O time of 2.92 seconds which
@@ -409,8 +438,8 @@ class BottleneckRule(RuleHandler):
                     f"{num_files} {accessed_noun}{accessed_name}"
                     f"within {num_time_periods} {time_period_noun}{time_period_name}"
                     f"across {num_ops} I/O {self.pluralize.plural_noun('operation', num_ops)} "
-                    f"and {self.pluralize.plural_verb('has', num_processes)} an I/O time of {value:.2f} seconds which is "
-                    f"{value/metric_boundary*100:.2f}% of overall I/O time of the workload."
+                    f"and {self.pluralize.plural_verb('has', num_processes)} an I/O time of {time:.2f} seconds which is "
+                    f"{time_overall*100:.2f}% of overall I/O time of the workload."
                 )
 
         else:
@@ -426,13 +455,17 @@ class BottleneckRule(RuleHandler):
                 count = num_time_periods
 
             description = (
-                f"{count} {self.pluralize.plural_noun(accessor, count)} ({ix}) "
-                f"{self.pluralize.plural_verb('has', count)} an I/O time of {value:.2f} seconds "
+                f"{count} {self.pluralize.plural_noun(accessor, count)} ({subject}) "
+                f"{self.pluralize.plural_verb('has', count)} an I/O time of {time:.2f} seconds "
                 f"across {num_ops} I/O {self.pluralize.plural_noun('operation', num_ops)} "
-                f"which is {value/metric_boundary*100:.2f}% of overall I/O time of the workload."
+                f"which is {time_overall*100:.2f}% of overall I/O time of the workload."
             )
 
         return description
+
+    def describe_reason(self, bottleneck: dict, reason_index: int):
+        reason_template = self.rule.reasons[reason_index].message
+        return jinja_env.from_string(reason_template).render(bottleneck).strip()
 
     @staticmethod
     def _group_similar_behavior(bottlenecks: pd.DataFrame, metric: str, view_type: str):

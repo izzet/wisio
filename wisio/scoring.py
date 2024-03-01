@@ -58,14 +58,15 @@ class ViewEvaluator(object):
         # Get view type
         view_type = view_key[-1]
 
-        evaluated_groups = view_result.critical_view \
+        records_index = view_result.records.index.persist()
+
+        scored_view = view_result.critical_view \
             .map_partitions(set_metric_scores, view_type=view_type, metric=metric, metric_boundary=metric_boundary) \
             .sort_values(f"{metric}_slope", ascending=True) \
             .persist()
 
         return ScoringResult(
-            attached_records=view_result.records,
-            evaluated_groups=view_result.critical_view,
-            potential_bottlenecks=evaluated_groups,
-            # potential_bottlenecks=potential_bottlenecks,
+            critical_view=view_result.critical_view,
+            records_index=records_index,
+            scored_view=scored_view,
         )

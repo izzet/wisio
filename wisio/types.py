@@ -52,9 +52,9 @@ class AnalysisRuntimeConfig:
 
 @dataclass
 class ScoringResult:
-    attached_records: dd.DataFrame
-    evaluated_groups: dd.DataFrame
-    potential_bottlenecks: dd.DataFrame
+    critical_view: dd.DataFrame
+    records_index: dd.Index
+    scored_view: dd.DataFrame
 
 
 @dataclass
@@ -96,19 +96,11 @@ class RuleResult:
 
 
 @dataclass
-class Bottleneck(RuleResult):
-    metric: str
-    rule: str
-    view_name: str
-
-
-@dataclass
 class BottleneckOutput:
     description: str
     id: int
     metric: str
     num_files: int
-    num_ops: int
     num_processes: int
     num_time_periods: int
     object_hash: int
@@ -116,6 +108,12 @@ class BottleneckOutput:
     rule: str
     score: str
     view_name: str
+
+
+@dataclass
+class BottleneckResult:
+    results: List[RuleResult]
+    severities: Dict[str, int]
 
 
 @dataclass

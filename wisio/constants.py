@@ -28,6 +28,7 @@ COL_PROC_NAME = 'proc_name'
 COL_RANK = 'rank'
 COL_SIZE = 'size'
 COL_TIME = 'time'
+COL_TIME_OVERALL = 'time_overall'
 COL_TIME_RANGE = 'time_range'
 
 VIEW_TYPES = ['time_range', 'file_name', 'proc_name']  # Order matters!
