@@ -34,6 +34,7 @@ class Config:
     metrics: List[Metric] = field(default_factory=list)
     output: OutputConfig = None
     slope_threshold: int = 45
+    time_granularity: int = 1e7  # Recorder's time granularity
     verbose: bool = False
     view_types: List[ViewType] = field(default_factory=list)
     working_dir: str = '.wisio'
@@ -102,6 +103,7 @@ def handle_darshan(darshan_parser, args):
             logical_view_types=config.logical_view_types,
             metrics=config.metrics,
             slope_threshold=config.slope_threshold,
+            time_granularity=config.time_granularity,
             trace_path_pattern=config.trace_path,
             view_types=config.view_types,
         )
@@ -133,6 +135,7 @@ def handle_recorder(recorder_parser, args):
             logical_view_types=config.logical_view_types,
             metrics=config.metrics,
             slope_threshold=config.slope_threshold,
+            time_granularity=config.time_granularity,
             trace_path=config.trace_path,
             view_types=config.view_types,
         )
