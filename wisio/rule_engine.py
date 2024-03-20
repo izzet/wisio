@@ -67,7 +67,7 @@ class RuleEngine(object):
             CharacteristicFileCountRule(),
             CharacteristicTimePeriodCountRule(),
             CharacteristicAccessPatternRule(),
-            CharacteristicComplexityRule(),
+            # CharacteristicComplexityRule(),
         ]
 
         rule_dict = {rule.rule_key: rule for rule in rules}
