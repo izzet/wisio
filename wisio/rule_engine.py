@@ -5,7 +5,7 @@ import itertools as it
 import numpy as np
 import pandas as pd
 from dask import compute, delayed, persist
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Union
 
 from .rules import (
     KNOWN_RULES,
@@ -71,8 +71,9 @@ class RuleEngine(object):
         ]
 
         rule_dict = {rule.rule_key: rule for rule in rules}
-        for exclude_characteristic in np.array(exclude_characteristics).flat:
-            rule_dict.pop(exclude_characteristic)
+        for excluded_char in exclude_characteristics:
+            if excluded_char in rule_dict:
+                rule_dict.pop(excluded_char)
 
         tasks = {}
         for rule, impl in rule_dict.items():
@@ -99,33 +100,72 @@ class RuleEngine(object):
             for rule in KNOWN_RULES if rule not in exclude_bottlenecks
         }
 
-        metrics = list(evaluated_views.keys())
+        bottlenecks = []
 
-        view_keys_per_metric = list(it.chain.from_iterable(
-            evaluated_views[metric].keys() for metric in metrics))
-        evaluated_views_per_metric = list(it.chain.from_iterable(
-            evaluated_views[metric].values() for metric in metrics))
+        for metric in evaluated_views:
+            for view_key in evaluated_views[metric]:
+                scored_view = evaluated_views[metric][view_key].scored_view
+                records_index = evaluated_views[metric][view_key].records_index
+                bottlenecks.append(
+                    scored_view.map_partitions(
+                        self._assign_bottlenecks,
+                        metric=metric,
+                        metric_boundary=metric_boundaries[metric],
+                        records_index=records_index,
+                        rule_dict=rule_dict,
+                        view_key=view_key,
+                    )
+                )
 
-        rules_bag = db.from_sequence(
-            np.repeat(list(rule_dict.keys()), len(view_keys_per_metric)))
-        metrics_bag = db.from_sequence(
-            np.repeat(metrics, len(rule_dict) * len(view_keys_per_metric)))
-        view_keys_bag = db.from_sequence(
-            list(it.chain.from_iterable(it.repeat(view_keys_per_metric, len(rule_dict)))))
-        evaluated_views_bag = db.from_sequence(
-            list(it.chain.from_iterable(it.repeat(evaluated_views_per_metric, len(rule_dict)))))
+        concatenated = dd.concat(bottlenecks).persist()
 
-        bottlenecks = (
-            db.zip(rules_bag, metrics_bag, view_keys_bag, evaluated_views_bag)
-            .map(self._define_bottleneck_tasks, rules=rule_dict, metric_boundaries=metric_boundaries)
-            .map_partitions(compute)
-            .flatten()
-            .map(self._consolidate_bottlenecks)
-            .flatten()
-            .persist()
-        )
+        return concatenated, rule_dict
 
-        return bottlenecks, rule_dict
+    @staticmethod
+    def _assign_bottlenecks(
+        scored_view: pd.DataFrame,
+        metric: Metric,
+        metric_boundary: Union[int, float],
+        records_index: pd.Index,
+        rule_dict: Dict[str, BottleneckRule],
+        view_key: ViewKey,
+    ):
+        # TODO make generic
+        scored_view['time_overall'] = scored_view['time'] / metric_boundary
+
+        view_types = scored_view.index.names
+
+        # TODO unique instead of nunique
+        details = records_index.to_frame(index=False).groupby(view_types).nunique()
+        details.columns = details.columns.map(lambda col: f"num_{col}")
+
+        # Create bottlenecks
+        bottlenecks = scored_view.join(details)
+
+        for view_type in view_types:
+            bottlenecks[f"num_{view_type}"] = 1  # current view type
+
+        bottlenecks['metric'] = metric
+        bottlenecks['view_depth'] = len(view_key) if isinstance(view_key, tuple) else 1
+        bottlenecks['view_name'] = view_name(view_key, '.')
+
+        for rule, impl in rule_dict.items():
+            rule_result = bottlenecks.eval(impl.rule.condition)
+            rule_result.name = rule
+            bottlenecks = bottlenecks.join(rule_result)
+
+            for i, reason in enumerate(impl.rule.reasons):
+                reason_result = bottlenecks.eval(reason.condition)
+                reason_result.name = f"{rule}.reason.{i}"
+                bottlenecks = bottlenecks.join(reason_result)
+
+        if len(view_types) == 1:
+            bottlenecks.index.rename('subject', inplace=True)  # change index name as subject
+
+        bottlenecks = bottlenecks.reset_index()
+        bottlenecks['subject'] = bottlenecks['subject'].astype(str)  # change int type subject to str
+
+        return bottlenecks
 
     @staticmethod
     def _consolidate_bottlenecks(zipped: Tuple[str, str, ViewKey, tuple]):

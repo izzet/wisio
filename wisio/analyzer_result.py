@@ -1,4 +1,5 @@
-import dask_awkward as dak
+import dask.dataframe as dd
+import inflect
 import math
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,7 +14,9 @@ from matplotlib.axes import Axes
 from matplotlib.lines import Line2D
 from rich.console import Console
 from rich.panel import Panel
+from rich.padding import Padding
 from rich.table import Table
+from rich.terminal_theme import DEFAULT_TERMINAL_THEME
 from rich.tree import Tree
 from scipy.stats import skew
 from typing import Dict, List, Set, Tuple
@@ -165,11 +168,12 @@ class AnalyzerResultOutput(object):
         self.characteristics = characteristics
         self.evaluated_views = evaluated_views
         self.main_view = main_view
+        self.pluralize = inflect.engine()
         self.raw_stats = raw_stats
         self.runtime_config = runtime_config
         self.view_results = view_results
 
-    def console(self, max_bottlenecks=3, show_debug=True):
+    def console(self, compact=False, max_bottlenecks=3, name='', root_only=False, show_debug=False):
 
         # TODO metric
         metric = 'iops'
@@ -180,6 +184,9 @@ class AnalyzerResultOutput(object):
         characteristics = output._characteristics
         raw_stats = output._raw_stats
 
+        if root_only:
+            bottlenecks = bottlenecks[bottlenecks['view_depth'] == 1]
+
         char_table = Table(box=None, show_header=False)
         char_table.add_column(style="cyan")
         char_table.add_column()
@@ -188,69 +195,116 @@ class AnalyzerResultOutput(object):
 
         # Add each key-value pair to the table as a row
         for char in characteristics.values():
-            if char.detail_list is None:
-                char_table.add_row(char.description, char.value_fmt)
+            if compact or char.detail_list is None or len(char.detail_list) == 0:
+                if compact:
+                    char_table.add_row(char.description, char.compact_desc)
+                else:
+                    char_table.add_row(char.description, char.value_fmt)
             else:
                 detail_tree = Tree(char.value_fmt)
                 for detail in char.detail_list:
                     detail_tree.add(detail)
                 char_table.add_row(char.description, detail_tree)
 
-        char_panel = Panel(char_table, title='I/O Characteristics')
+        char_panel = Panel(
+            renderable=char_table,
+            title=' '.join([name, 'I/O Characteristics']).strip(),
+            subtitle=(
+                '[bold]R[/bold]: Read - '
+                '[bold]W[/bold]: Write - '
+                '[bold]M[/bold]: Metadata '
+            ),
+            subtitle_align='left',
+            padding=1,
+        )
 
-        rules = list(np.unique(bottlenecks['rule']))
-        view_names = list(np.unique(bottlenecks['view_name']))
+        view_names = list(bottlenecks['view_name'].unique())
 
         bot_table = Table(box=None, show_header=False)
+
+        total_bot_count = 0
+        total_reason_count = 0
+
         for view_name in view_names:
-            bot_count = len(bottlenecks[bottlenecks['view_name'] == view_name])
+            view_bottlenecks = bottlenecks[bottlenecks['view_name'] == view_name]
+            bot_count = len(view_bottlenecks)
+            total_bot_count = total_bot_count + bot_count
             if bot_count == 0:
                 continue
+            reason_cols = view_bottlenecks.columns[view_bottlenecks.columns.str.contains('reason')]
+            reason_rules = [(reason.split('.')[0], reason) for reason in reason_cols]
+            reason_count = sum(
+                len(view_bottlenecks[(view_bottlenecks[rule] & view_bottlenecks[reason])])
+                for rule, reason in reason_rules
+            )
+            total_reason_count = total_reason_count + reason_count
             view_key = tuple(view_name.split('.'))
-            view_tree = Tree(f"{humanized_view_name(view_key, '>')} view ({bot_count} bottlenecks)")
-            for rule in rules:
-                results = bottlenecks[(bottlenecks['rule'] == rule) &
-                                      (bottlenecks['view_name'] == view_name)]
-                result_count = len(results)
-                result_tree = Tree(f"{HUMANIZED_KNOWN_RULES[rule]} ({result_count} bottlenecks)")
-                if result_count == 0:
-                    continue
-                bot_rule = self.bottleneck_rules[rule]
-                for result in results[:max_bottlenecks].to_list():
-                    bot_score = result[f"{metric}_score"]
-                    bot_desc = bot_rule.describe_bottleneck(
-                        metric=result['metric'],
-                        num_files=result['num_file_name'],
-                        num_ops=result['count'],
-                        num_processes=result['num_proc_name'],
-                        num_time_periods=result['num_time_range'],
-                        subject=result['subject'],
-                        time=result['time'],
-                        time_overall=result['time_overall'],
-                        view_type=view_key[-1],
-                    )
-                    nice_bot_desc = f"[{SCORE_INITIALS[bot_score]}{result['id']}] {bot_desc}"
-                    if any(result[f"reason_{i}"] for i in range(MAX_REASONS)):
-                        reason_tree = Tree(self._colored_description(nice_bot_desc, bot_score))
-                        for i in range(MAX_REASONS):
-                            if result[f"reason_{i}"]:
-                                reason = bot_rule.describe_reason(
-                                    bottleneck=result,
-                                    reason_index=i,
-                                )
-                                reason_tree.add(self._colored_description(reason, bot_score))
-                        result_tree.add(reason_tree)
-                    else:
-                        reason_tree = Tree(self._colored_description(nice_bot_desc, bot_score))
-                        reason_tree.add('No reason found, further investigation needed.')
-                        result_tree.add(reason_tree)
-                if max_bottlenecks > 0 and result_count > max_bottlenecks:
-                    remaining_count = result_count - max_bottlenecks
-                    result_tree.add(f"({remaining_count} more)")
-                view_tree.add(result_tree)
+            view_tree = Tree((
+                f"{humanized_view_name(view_key, '>')} View "
+                f"({bot_count} {self.pluralize.plural_noun('bottleneck', bot_count)} "
+                f"with {reason_count} {self.pluralize.plural_noun('reason', reason_count)})"
+            ))
+            for _, bottleneck in view_bottlenecks[:max_bottlenecks].iterrows():
+                bot_id = getattr(bottleneck, 'id')
+                bot_desc = None
+                bot_score = getattr(bottleneck, f"{metric}_score")
+                reasons = []
+                for rule, rule_impl in self.bottleneck_rules.items():
+
+                    # TODO move to upper level
+                    if bot_desc is None:
+                        bot_desc = rule_impl.describe_bottleneck(
+                            compact=compact,
+                            metric=getattr(bottleneck, 'metric'),
+                            num_files=int(getattr(bottleneck, 'num_file_name', 0)),
+                            num_ops=int(bottleneck['count']),
+                            num_processes=int(getattr(bottleneck, 'num_proc_name', 0)),
+                            num_time_periods=int(getattr(bottleneck, 'num_time_range', 0)),
+                            subject=getattr(bottleneck, 'subject'),
+                            time=float(getattr(bottleneck, 'time')),
+                            time_overall=float(getattr(bottleneck, 'time_overall')),
+                            view_type=view_key[-1],
+                        )
+
+                    humanized_rule = HUMANIZED_KNOWN_RULES[rule]
+
+                    # Check if rule applies
+                    if getattr(bottleneck, rule, False):
+                        num_reasons = len(rule_impl.rule.reasons)
+
+                        # Check if any reason is found
+                        if any(getattr(bottleneck, f"{rule}.reason.{i}", False) for i in range(num_reasons)):
+                            for i in range(num_reasons):
+                                # Check if reason applies
+                                if getattr(bottleneck, f"{rule}.reason.{i}", False):
+                                    reason = rule_impl.describe_reason(
+                                        bottleneck=dict(bottleneck),
+                                        reason_index=i,
+                                    )
+                                    reasons.append(f"[{humanized_rule}] {reason}")
+                        else:
+                            # TODO give details
+                            reasons.append(f"[{humanized_rule}] No reason found, investigation needed!")
+
+                nice_bot_desc = f"[{SCORE_INITIALS[bot_score]}{bot_id}] {bot_desc}"
+                bot_tree = Tree(self._colored_description(nice_bot_desc, bot_score))
+                for reason in reasons:
+                    bot_tree.add(self._colored_description(reason, bot_score))
+                view_tree.add(bot_tree)
+
+            if max_bottlenecks > 0 and bot_count > max_bottlenecks:
+                remaining_count = bot_count - max_bottlenecks
+                view_tree.add(f"({remaining_count} more)")
+
             bot_table.add_row(view_tree)
 
-        bot_panel = Panel(bot_table, title='I/O Bottlenecks')
+        bot_panel = Panel(
+            bot_table,
+            title=f"{total_bot_count} I/O Bottlenecks with {total_reason_count} Reasons",
+            padding=1
+        )
+
+        console = Console(record=True)
 
         if show_debug:
             main_view_count = output.counts.main_view_count
@@ -412,11 +466,17 @@ class AnalyzerResultOutput(object):
             setup_table.add_row('Slope threshold', f"{output.runtime_config.slope_threshold:.2f}")
             debug_table.add_row('Runtime Config', setup_table)
 
-            debug_panel = Panel(debug_table, title='Debug')
+            debug_panel = Panel(debug_table, title='Debug', padding=1)
 
-            Console().print(char_panel, bot_panel, debug_panel)
+            console.print(char_panel, Padding(''), bot_panel, Padding(''), debug_panel)
         else:
-            Console().print(char_panel, bot_panel)
+            console.print(char_panel, Padding(''), bot_panel)
+
+        run_dir = f"{self.runtime_config.working_dir}/{self.runtime_config.run_id}"
+
+        console.save_html(f"{run_dir}/output.html", clear=False)
+        console.save_text(f"{run_dir}/output.txt", clear=False)
+        console.save_svg(f"{run_dir}/output.svg", theme=DEFAULT_TERMINAL_THEME, title="WisIO", clear=True)
 
     def csv(self, name: str, max_bottlenecks_per_view_type=3, show_debug=True):
 
@@ -552,7 +612,7 @@ class AnalyzerResultOutput(object):
         # todo
         metric = 'iops'
 
-        bottlenecks = dak.from_json(f"{self.bottleneck_dir}/*", compression='gzip').compute()
+        bottlenecks = dd.read_parquet(self.bottleneck_dir).compute()
         bottlenecks['id'] = np.arange(len(bottlenecks)) + 1
 
         characteristics, = compute(self.characteristics)
@@ -615,9 +675,9 @@ class AnalyzerResultOutput(object):
             num_metrics = num_metrics + 1
             for view_key, view_result in self.view_results[metric].items():
                 count_key = view_name(view_key, '>')
-                bot_important_count = view_result.view.reduction(len, np.sum)
-                view_critical_count = view_result.critical_view.reduction(len, np.sum)
-                view_record_count = view_result.records.reduction(len, np.sum)
+                bot_important_count = view_result.view.reduction(len, sum)
+                view_critical_count = view_result.critical_view.reduction(len, sum)
+                view_record_count = view_result.records.reduction(len, sum)
                 perspective_count_tree[metric][count_key] = bot_important_count
                 perspective_critical_count_tree[metric][count_key] = view_critical_count
                 perspective_record_count_tree[metric][count_key] = view_record_count
@@ -668,9 +728,8 @@ class AnalyzerResultOutput(object):
             perspective_skewness[metric] = abs(skew(perspective_counts))
             root_perspective_skewness[metric] = abs(skew(root_view_type_counts[metric]))
 
-        rules = list(np.unique(bottlenecks['rule']))
-        view_names = list(np.unique(bottlenecks['view_name']))
-        num_rules = len(rules)
+        num_rules = len(self.bottleneck_rules)
+        view_names = list(bottlenecks['view_name'].unique())
 
         bot_total_count = {}
         bot_critical_count = {}
@@ -790,8 +849,8 @@ class AnalyzerResultOutput(object):
             slope_filtered_record_dict[metric] = {}
             for view_key in self.evaluated_views[metric]:
                 scoring = self.evaluated_views[metric][view_key]
-                evaluated_record_dict[metric][view_key] = scoring.critical_view.reduction(len, np.sum)
-                slope_filtered_record_dict[metric][view_key] = scoring.records_index.reduction(len, np.sum)
+                evaluated_record_dict[metric][view_key] = scoring.critical_view.reduction(len, sum)
+                slope_filtered_record_dict[metric][view_key] = scoring.records_index.reduction(len, sum)
         evaluated_record_dict, slope_filtered_record_dict, = compute(
             evaluated_record_dict,
             slope_filtered_record_dict,

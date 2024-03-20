@@ -86,6 +86,7 @@ class RuleResultReason:
 
 @dataclass
 class RuleResult:
+    compact_desc: Optional[str]
     description: str
     detail_list: Optional[List[str]]
     extra_data: Optional[dict]

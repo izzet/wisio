@@ -13,8 +13,10 @@ from .types import Metric, OutputType, ViewType
 
 @dataclass
 class OutputConfig:
+    compact: bool = False
     max_bottlenecks: int = 3
-    name: str = None
+    name: str = ''
+    root_only: bool = False
     run_db_path: str = None
     show_debug: bool = False
     type: OutputType = 'console'
@@ -50,7 +52,10 @@ def _handle_output(result: AnalysisResult, config: Config):
     output_config = config.output
     if output_config.type == 'console':
         result.output.console(
+            compact=output_config.compact,
             max_bottlenecks=output_config.max_bottlenecks,
+            name=output_config.name,
+            root_only=output_config.root_only,
             show_debug=output_config.show_debug,
         )
     elif output_config.type == 'csv':

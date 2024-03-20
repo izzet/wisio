@@ -8,6 +8,7 @@ from dask.delayed import Delayed
 from dask.utils import format_bytes
 from enum import Enum
 from jinja2 import Environment
+from pathlib import Path
 from scipy.cluster.hierarchy import linkage, fcluster
 from typing import Dict, List, Union
 
@@ -23,6 +24,7 @@ from .constants import (
     COL_PROC_NAME,
     COL_RANK,
     COL_TIME_RANGE,
+    COMPACT_IO_TYPES,
     HUMANIZED_VIEW_TYPES,
     IO_TYPES,
     XFER_SIZE_BINS,
@@ -44,6 +46,7 @@ from .types import (
     ViewResult,
 )
 from .utils.collection_utils import get_intervals, join_with_and
+from .utils.common_utils import numerize
 
 
 MAX_REASONS = 5
@@ -71,7 +74,6 @@ class KnownCharacteristics(Enum):
 
 class KnownRules(Enum):
     EXCESSIVE_METADATA_ACCESS = 'excessive_metadata_access'
-    LOW_BANDWIDTH = 'low_bandwidth'
     OPERATION_IMBALANCE = 'operation_imbalance'
     RANDOM_OPERATIONS = 'random_operations'
     SIZE_IMBALANCE = 'size_imbalance'
@@ -201,6 +203,7 @@ class RuleHandler(abc.ABC):
 
     def __init__(self, rule_key: str) -> None:
         super().__init__()
+        self.pluralize = inflect.engine()
         self.rule_key = rule_key
 
 
@@ -209,7 +212,6 @@ class BottleneckRule(RuleHandler):
     def __init__(self, rule_key: str, rule: Rule, verbose: bool = False) -> None:
         super().__init__(rule_key=rule_key)
         self.rule = rule
-        self.pluralize = inflect.engine()
         self.verbose = verbose
 
     def define_tasks(
@@ -363,6 +365,7 @@ class BottleneckRule(RuleHandler):
                 ))
 
             result = RuleResult(
+                compact_desc=None,
                 description=description,
                 detail_list=None,
                 extra_data=row_dict,
@@ -397,24 +400,28 @@ class BottleneckRule(RuleHandler):
         files=[],
         processes=[],
         time_periods=[],
+        compact=False,
     ) -> str:
 
         if num_files > 0 and num_processes > 0 and num_time_periods > 0:
 
-            accessor = HUMANIZED_VIEW_TYPES[COL_PROC_NAME].lower()
+            nice_view_type = HUMANIZED_VIEW_TYPES[COL_PROC_NAME].lower()
             accessor_name = ' '
             accessed = HUMANIZED_VIEW_TYPES[COL_FILE_NAME].lower()
             accessed_name = ' '
             if view_type in [COL_FILE_NAME, COL_FILE_DIR, COL_FILE_PATTERN]:
                 accessed = HUMANIZED_VIEW_TYPES[view_type].lower()
                 if num_files == 1:
-                    accessed_name = f" ({subject}) "
+                    if compact:
+                        accessed_name = f" ({Path(subject).name}) "
+                    else:
+                        accessed_name = f" ({subject}) "
             if view_type in [COL_APP_NAME, COL_NODE_NAME, COL_PROC_NAME, COL_RANK]:
-                accessor = HUMANIZED_VIEW_TYPES[view_type].lower()
+                nice_view_type = HUMANIZED_VIEW_TYPES[view_type].lower()
                 if num_processes == 1:
                     accessor_name = f" ({subject}) "
 
-            accessor_noun = self.pluralize.plural_noun(accessor, num_processes)
+            accessor_noun = self.pluralize.plural_noun(nice_view_type, num_processes)
             accessor_verb = self.pluralize.plural_verb('accesses', num_processes)
             accessed_noun = self.pluralize.plural_noun(accessed, num_files)
             time_period_name = f" ({subject}) " if view_type == COL_TIME_RANGE else ' '
@@ -444,18 +451,21 @@ class BottleneckRule(RuleHandler):
 
         else:
 
-            accessor = HUMANIZED_VIEW_TYPES[view_type].lower()
+            nice_subject = subject
+            nice_view_type = HUMANIZED_VIEW_TYPES[view_type].lower()
 
             count = 1
             if view_type in [COL_FILE_NAME, COL_FILE_DIR, COL_FILE_PATTERN]:
                 count = num_files
+                if compact:
+                    nice_subject = Path(subject).name
             elif view_type in [COL_APP_NAME, COL_NODE_NAME, COL_PROC_NAME, COL_RANK]:
                 count = num_processes
             else:
                 count = num_time_periods
 
             description = (
-                f"{count} {self.pluralize.plural_noun(accessor, count)} ({subject}) "
+                f"{count} {self.pluralize.plural_noun(nice_view_type, count)} ({nice_subject}) "
                 f"{self.pluralize.plural_verb('has', count)} an I/O time of {time:.2f} seconds "
                 f"across {num_ops} I/O {self.pluralize.plural_noun('operation', num_ops)} "
                 f"which is {time_overall*100:.2f}% of overall I/O time of the workload."
@@ -571,20 +581,34 @@ class CharacteristicAccessPatternRule(CharacteristicRule):
         acc_pat_sum = result['acc_pat_sum']
 
         sequential_count = int(acc_pat_sum['sequential_count'])
-        random_count = int(acc_pat_sum['random_count'])
+        random_count = int(acc_pat_sum['random_count']) if 'random_count' in acc_pat_sum else 0
         total_count = sequential_count + random_count
 
+        sequential_title = '[bold]Sequential[/bold]'
+        random_title = '[bold]Random[/bold]'
+
+        sequential_per_fmt = f"{sequential_count/total_count*100:.2f}"
+        random_per_fmt = f"{random_count/total_count*100:.2f}"
+
+        compact_desc = (
+            f"{sequential_title}: {numerize(sequential_count, 1)} ops ({sequential_per_fmt}%) - "
+            f"{random_title}: {numerize(random_count, 1)} ops ({random_per_fmt}%) "
+        )
+
+        value_fmt = (
+            f"{sequential_title}: {sequential_count:,} ops ({sequential_per_fmt}%) - "
+            f"{random_title}: {random_count:,} ops ({random_per_fmt}%) "
+        )
+
         return RuleResult(
+            compact_desc=compact_desc,
             description='Access Pattern',
             detail_list=None,
             extra_data=dict(acc_pat_sum),
             object_hash=None,
             reasons=None,
             value=None,
-            value_fmt=(
-                f"{sequential_count/total_count*100:.2f}% Sequential - "
-                f"{random_count/total_count*100:.2f}% Random"
-            )
+            value_fmt=value_fmt,
         )
 
 
@@ -619,6 +643,7 @@ class CharacteristicComplexityRule(CharacteristicRule):
         complexity = np.log10(ft.reduce(np.multiply, complexities[complexities != 0]))
 
         return RuleResult(
+            compact_desc=f"{complexity:.2f}",
             description='Complexity',
             detail_list=None,
             extra_data=None,
@@ -672,28 +697,41 @@ class CharacteristicFileCountRule(CharacteristicRule):
         total_count = int(result['total_count'])
         fpp_count = int(result['fpp_count'])
 
+        value_fmt = f"{total_count:,} {self.pluralize.plural_noun('file', total_count)}"
+
+        compact_desc = [value_fmt]
         detail_list = []
 
+        shared_title = 'Shared'
+        fpp_title = 'FPP'
+
         if total_count == 0 or fpp_count == 0:
-            detail_list.append(f"Shared: N/A")
-            detail_list.append(f"FPP: N/A")
+            detail_list.append(f"{shared_title}: N/A")
+            detail_list.append(f"{fpp_title}: N/A")
         else:
             fpp_per = f"{fpp_count/total_count*100:.2f}%"
 
             shared_count = total_count - fpp_count
             shared_per = f"{shared_count/total_count*100:.2f}%"
 
-            detail_list.append(f"Shared: {shared_count} files ({shared_per})")
-            detail_list.append(f"FPP: {fpp_count} files ({fpp_per})")
+            shared_fmt = f"{shared_count:,} {self.pluralize.plural_noun('file', shared_count)}"
+            fpp_fmt = f"{fpp_count:,} {self.pluralize.plural_noun('file', fpp_count)}"
+
+            compact_desc.append(f"[bold]{shared_title}[/bold]: {shared_fmt} ({shared_per})")
+            compact_desc.append(f"[bold]{fpp_title}[/bold]: {fpp_fmt} ({fpp_per})")
+
+            detail_list.append(f"{shared_title}: {shared_fmt} ({shared_per})")
+            detail_list.append(f"{fpp_title}: {fpp_fmt} ({fpp_per})")
 
         return RuleResult(
+            compact_desc=' - '.join(compact_desc),
             description='Files',
             detail_list=detail_list,
             extra_data=None,
             object_hash=None,
             reasons=None,
             value=total_count,
-            value_fmt=f"{total_count} files",
+            value_fmt=value_fmt,
         )
 
 
@@ -718,21 +756,23 @@ class CharacteristicIOOpsRule(CharacteristicRule):
     ) -> RuleResult:
         total_count = int(result['total_count'])
 
+        compact_desc = [f"{numerize(total_count, 1)} ops"]
         detail_list = []
-        for io_type in IO_TYPES:
+
+        for i, io_type in enumerate(IO_TYPES):
             count_col = f"{io_type}_count"
             count = int(result[count_col])
             percent = f"{count/total_count*100:.2f}%"
-            detail_list.append(
-                f"{io_type.capitalize()} - {count:,} ops ({percent})")
+            compact_desc.append(f"[bold]{COMPACT_IO_TYPES[i]}[/bold]: {numerize(count, 1)} ops ({percent})")
+            detail_list.append(f"{io_type.capitalize()} - {count:,} ops ({percent})")
 
         return RuleResult(
-            description='I/O Ops',
+            compact_desc=' - '.join(compact_desc),
+            description='I/O Operations',
             detail_list=detail_list,
             extra_data=None,
             object_hash=None,
             reasons=None,
-            # rule=rule,
             value=total_count,
             value_fmt=f"{total_count:,} ops",
         )
@@ -760,11 +800,20 @@ class CharacteristicIOSizeRule(CharacteristicRule):
     ) -> RuleResult:
         total_size = int(result['total_size'])
 
+        value_fmt = format_bytes(total_size)
+
+        compact_desc = [value_fmt]
         detail_list = []
-        for io_type in IO_TYPES:
+
+        for i, io_type in enumerate(IO_TYPES):
             if io_type != 'metadata':
                 size_col = f"{io_type}_size"
                 size = int(result[size_col])
+                compact_desc.append((
+                    f"[bold]{COMPACT_IO_TYPES[i]}[/bold]: "
+                    f"{format_bytes(size)} "
+                    f"({size/total_size*100:.2f}%)"
+                ))
                 detail_list.append((
                     f"{io_type.capitalize()} - "
                     f"{format_bytes(size)} "
@@ -772,13 +821,14 @@ class CharacteristicIOSizeRule(CharacteristicRule):
                 ))
 
         return RuleResult(
+            compact_desc=' - '.join(compact_desc),
             description='I/O Size',
             detail_list=detail_list,
             extra_data=None,
             object_hash=None,
             reasons=None,
             value=total_size,
-            value_fmt=format_bytes(total_size),
+            value_fmt=value_fmt,
         )
 
 
@@ -824,15 +874,18 @@ class CharacteristicIOTimeRule(CharacteristicRule):
     ) -> RuleResult:
         total_time = result['total_time']
 
+        compact_desc = [f"{total_time:.2f} s"]
         detail_list = []
-        for io_type in IO_TYPES:
+
+        for i, io_type in enumerate(IO_TYPES):
             time_col = f"{io_type}_time"
             time = result[time_col]
             time_per = f"{time/total_time*100:.2f}%"
-            detail_list.append(
-                f"{io_type.capitalize()} - {time:.2f} seconds ({time_per})")
+            compact_desc.append(f"[bold]{COMPACT_IO_TYPES[i]}[/bold]: {time:.2f} s ({time_per})")
+            detail_list.append(f"{io_type.capitalize()} - {time:.2f} seconds ({time_per})")
 
         return RuleResult(
+            compact_desc=' - '.join(compact_desc),
             description='I/O Time',
             detail_list=detail_list,
             extra_data=None,
@@ -848,19 +901,19 @@ class CharacteristicProcessCount(CharacteristicRule):
 
     def __init__(self, rule_key: str) -> None:
         super().__init__(rule_key=rule_key)
-        self.col = 'proc_name'
-        self.description = 'Process(es)/Rank(s)'
+        self.col = COL_PROC_NAME
+        self.description = 'Processes/Ranks'
         if rule_key is KnownCharacteristics.APP_COUNT.value:
-            self.col = 'app_name'
-            self.description = 'App(s)'
+            self.col = COL_APP_NAME
+            self.description = 'Apps'
             self.deps = [
                 KnownCharacteristics.IO_COUNT.value,
                 KnownCharacteristics.IO_SIZE.value,
                 KnownCharacteristics.IO_TIME.value,
             ]
         elif rule_key is KnownCharacteristics.NODE_COUNT.value:
-            self.col = 'node_name'
-            self.description = 'Node(s)'
+            self.col = COL_NODE_NAME
+            self.description = 'Nodes'
             self.deps = [
                 KnownCharacteristics.IO_COUNT.value,
                 KnownCharacteristics.IO_SIZE.value,
@@ -913,48 +966,60 @@ class CharacteristicProcessCount(CharacteristicRule):
         raw_stats: RawStats = None,
     ) -> RuleResult:
 
-        if self.col == 'proc_name':
-            value = int(result[f"{self.col}s"])
+        if self.col == COL_PROC_NAME:
+            num_processes = int(result[f"{self.col}s"])
+
+            value_fmt = f"{num_processes:,} {self.pluralize.plural_noun('process', num_processes)}"
 
             return RuleResult(
+                compact_desc=value_fmt,
                 description=self.description,
                 detail_list=None,
                 extra_data=None,
                 object_hash=None,
                 reasons=None,
-                value=value,
-                value_fmt=f"{value} {self.description.lower()}",
+                value=num_processes,
+                value_fmt=value_fmt,
             )
 
         max_io_time = characteristics[KnownCharacteristics.IO_TIME.value].value
         total_ops = characteristics[KnownCharacteristics.IO_COUNT.value].value
         total_size = characteristics[KnownCharacteristics.IO_SIZE.value].value
 
-        detail_list = []
-        for node, row in pd.DataFrame(result[f"{self.col}s"]).iterrows():
-            read_size = row['read_size']
-            write_size = row['write_size']
-            read_size_fmt = format_bytes(read_size)
-            write_size_fmt = format_bytes(write_size)
-            read_size_per = read_size / total_size * 100
-            write_size_per = write_size / total_size * 100
-            detail_list.append(' - '.join([
-                node,
-                f"{row['time']:.2f} s ({row['time'] / max_io_time * 100:.2f}%)",
-                f"{read_size_fmt}/{write_size_fmt} R/W ({read_size_per:.2f}/{write_size_per:.2f}%)",
-                f"{int(row['count']):,} ops ({row['count'] / total_ops * 100:.2f}%)"
-            ]))
+        nodes_apps = pd.DataFrame(result[f"{self.col}s"])
 
-        value = len(result[f"{self.col}s"])
+        detail_list = []
+        if len(nodes_apps) > 1:
+            for node, row in nodes_apps.iterrows():
+                read_size = row['read_size']
+                write_size = row['write_size']
+                read_size_fmt = format_bytes(read_size)
+                write_size_fmt = format_bytes(write_size)
+                read_size_per = read_size / total_size * 100
+                write_size_per = write_size / total_size * 100
+                detail_list.append(' - '.join([
+                    node,
+                    f"{row['time']:.2f} s ({row['time'] / max_io_time * 100:.2f}%)",
+                    f"{read_size_fmt}/{write_size_fmt} R/W ({read_size_per:.2f}/{write_size_per:.2f}%)",
+                    f"{int(row['count']):,} ops ({row['count'] / total_ops * 100:.2f}%)"
+                ]))
+
+        num_nodes_apps = len(nodes_apps)
+
+        if self.col == COL_NODE_NAME:
+            value_fmt = f"{num_nodes_apps} {self.pluralize.plural_noun('node', num_nodes_apps)}"
+        else:
+            value_fmt = f"{num_nodes_apps} {self.pluralize.plural_noun('app', num_nodes_apps)}"
 
         return RuleResult(
+            compact_desc=value_fmt,
             description=self.description,
             detail_list=detail_list,
             extra_data=None,
             object_hash=None,
             reasons=None,
-            value=value,
-            value_fmt=f"{value} {self.description.lower()}",
+            value=num_nodes_apps,
+            value_fmt=value_fmt,
         )
 
 
@@ -983,16 +1048,20 @@ class CharacteristicTimePeriodCountRule(CharacteristicRule):
         raw_stats: RawStats = None,
     ) -> RuleResult:
 
-        value = int(result[f"total_count"])
+        num_time_periods = int(result[f"total_count"])
+
+        time_periods_fmt = f"{num_time_periods:,} {self.pluralize.plural_noun('time period', num_time_periods)}"
+        value_fmt = f"{time_periods_fmt} (Time Granularity: {raw_stats.time_granularity})"
 
         return RuleResult(
-            description='Time Period(s)',
+            compact_desc=value_fmt,
+            description='Time Periods',
             detail_list=None,
             extra_data=None,
             object_hash=None,
             reasons=None,
-            value=value,
-            value_fmt=f"{value} time period(s) (Time granularity: {raw_stats.time_granularity})",
+            value=num_time_periods,
+            value_fmt=value_fmt,
         )
 
 
@@ -1006,7 +1075,7 @@ class CharacteristicXferSizeRule(CharacteristicRule):
         tasks = {}
 
         count_col, min_col, max_col, per_col, xfer_col = (
-            'count',
+            f"{self.io_op}_count",
             f"{self.io_op}_min",
             f"{self.io_op}_max",
             'per',
@@ -1019,7 +1088,7 @@ class CharacteristicXferSizeRule(CharacteristicRule):
         tasks['min_xfer_size'] = min_view[min_col].min()
         tasks['max_xfer_size'] = max_view[max_col].max()
 
-        tasks['xfer_sizes'] = max_view[max_col].value_counts()
+        tasks['xfer_sizes'] = max_view.groupby(max_col)[count_col].sum()
 
         return tasks
 
@@ -1031,7 +1100,7 @@ class CharacteristicXferSizeRule(CharacteristicRule):
     ) -> RuleResult:
 
         count_col, min_col, max_col, per_col, xfer_col = (
-            'count',
+            f"{self.io_op}_count",
             f"{self.io_op}_min",
             f"{self.io_op}_max",
             'per',
@@ -1045,8 +1114,7 @@ class CharacteristicXferSizeRule(CharacteristicRule):
         if not np.isnan(result['max_xfer_size']):
             max_xfer_size = int(result['max_xfer_size'])
 
-        xfer_sizes = pd.DataFrame(result['xfer_sizes']) \
-            .rename(columns={max_col: count_col})
+        xfer_sizes = pd.DataFrame(result['xfer_sizes'])
         xfer_sizes[xfer_col] = pd.cut(
             xfer_sizes.index, bins=XFER_SIZE_BINS, labels=XFER_SIZE_BIN_LABELS, right=True)
         xfer_bins = xfer_sizes \
@@ -1060,9 +1128,15 @@ class CharacteristicXferSizeRule(CharacteristicRule):
         total_ops = int(xfer_bins[count_col].sum())
 
         value_fmt = self._get_xfer_size(max_xfer_size)
-        if min_xfer_size > 0 and max_xfer_size > 0 and min_xfer_size != max_xfer_size:
-            value_fmt = f"{self._get_xfer_size(min_xfer_size)}-{self._get_xfer_size(max_xfer_size)}"
-        value_fmt = f"{value_fmt} - {total_ops:,} ops"
+
+        if min_xfer_size > 0 and max_xfer_size > 0:
+            if min_xfer_size == max_xfer_size:
+                value_fmt = (
+                    f"{self._get_xfer_size(min_xfer_size, True)}-"
+                    f"{self._get_xfer_size(max_xfer_size)}"
+                )
+            else:
+                value_fmt = f"{self._get_xfer_size(min_xfer_size)}-{self._get_xfer_size(max_xfer_size)}"
 
         detail_list = []
         for xfer, row in xfer_bins.iterrows():
@@ -1070,20 +1144,22 @@ class CharacteristicXferSizeRule(CharacteristicRule):
                 f"{xfer} - {int(row[count_col]):,} ops ({row['per'] * 100:.2f}%)")
 
         result = RuleResult(
-            description='Write Xfer' if self.io_op == 'write' else 'Read Xfer',
+            compact_desc=f"{value_fmt} - {numerize(total_ops, 1)} ops",
+            description='Write Requests' if self.io_op == 'write' else 'Read Requests',
             detail_list=detail_list,
             extra_data=None,
             object_hash=None,
             reasons=None,
             value=(min_xfer_size, max_xfer_size),
-            value_fmt=value_fmt,
+            value_fmt=f"{value_fmt} - {total_ops:,} ops",
         )
 
         return result
 
     @staticmethod
-    def _get_xfer_size(size: float):
+    def _get_xfer_size(size: float, previous=False):
         size_bin = np.digitize(size, bins=XFER_SIZE_BINS, right=True)
-        size_label = np.choose(
-            size_bin, choices=XFER_SIZE_BIN_NAMES, mode='clip')
+        if previous:
+            size_bin = size_bin - 1
+        size_label = np.choose(size_bin, choices=XFER_SIZE_BIN_NAMES, mode='clip')
         return size_label

@@ -498,14 +498,13 @@ class Analyzer(abc.ABC):
             return dd.read_parquet(f"{view_path}")
         return fallback()
 
-    def save_bottlenecks(self, bottlenecks: db.Bag, partition_size='16MB'):
+    def save_bottlenecks(self, bottlenecks: dd.DataFrame, partition_size='64MB'):
         bottleneck_dir = self.bottleneck_dir
         if not bottleneck_dir:
             bottleneck_dir = f"{self.working_dir}/{self.run_id}/bottlenecks"
         bottlenecks \
             .repartition(partition_size=partition_size) \
-            .map(json.dumps) \
-            .to_textfiles(f"{bottleneck_dir}/*.json")
+            .to_parquet(bottleneck_dir, compute=True, write_metadata_file=True)
         return bottleneck_dir
 
     @staticmethod

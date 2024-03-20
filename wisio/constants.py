@@ -39,6 +39,7 @@ ACC_PAT_SUFFIXES = ['time', 'size', 'count']
 DERIVED_MD_OPS = ['close', 'open', 'seek', 'stat']
 IO_CATS = [io_cat.value for io_cat in list(IOCategory)]
 IO_TYPES = ['read', 'write', 'metadata']
+COMPACT_IO_TYPES = ['R', 'W', 'M']
 
 FILE_PATTERN_PLACEHOLDER = '[0-9]'
 PROC_NAME_SEPARATOR = '#'
