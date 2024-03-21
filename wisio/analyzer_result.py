@@ -23,7 +23,13 @@ from typing import Dict, List, Set, Tuple
 
 from .analysis import SCORE_BINS, SCORE_INITIALS, SCORE_NAMES
 from .constants import (
+    COL_APP_NAME,
+    COL_FILE_DIR,
+    COL_FILE_NAME,
+    COL_FILE_PATTERN,
+    COL_NODE_NAME,
     COL_PROC_NAME,
+    COL_RANK,
     COL_TIME_RANGE,
     EVENT_ATT_REASONS,
     EVENT_COMP_HLM,
@@ -173,7 +179,17 @@ class AnalyzerResultOutput(object):
         self.runtime_config = runtime_config
         self.view_results = view_results
 
-    def console(self, compact=False, max_bottlenecks=3, name='', root_only=False, show_debug=False):
+    def console(
+        self,
+        compact=False,
+        max_bottlenecks=3,
+        name='',
+        root_only=False,
+        show_debug=False,
+        show_characteristics=True,
+        show_header=True,
+        view_names: List[str] = [],
+    ):
 
         # TODO metric
         metric = 'iops'
@@ -184,7 +200,9 @@ class AnalyzerResultOutput(object):
         characteristics = output._characteristics
         raw_stats = output._raw_stats
 
-        if root_only:
+        if len(view_names) > 0:
+            bottlenecks = bottlenecks.query('view_name in @view_names', local_dict={'view_names': view_names})
+        elif root_only:
             bottlenecks = bottlenecks[bottlenecks['view_depth'] == 1]
 
         char_table = Table(box=None, show_header=False)
@@ -208,7 +226,7 @@ class AnalyzerResultOutput(object):
 
         char_panel = Panel(
             renderable=char_table,
-            title=' '.join([name, 'I/O Characteristics']).strip(),
+            title=' '.join([name, 'I/O Characteristics']).strip() if show_header else None,
             subtitle=(
                 '[bold]R[/bold]: Read - '
                 '[bold]W[/bold]: Write - '
@@ -251,15 +269,26 @@ class AnalyzerResultOutput(object):
                 reasons = []
                 for rule, rule_impl in self.bottleneck_rules.items():
 
+                    view_type = view_key[-1]
+
+                    num_files = int(getattr(bottleneck, 'num_file_name', 0))
+                    num_processes = int(getattr(bottleneck, 'num_proc_name', 0))
+                    num_time_periods = int(getattr(bottleneck, 'num_time_range', 0))
+
+                    if view_type in [COL_FILE_NAME, COL_FILE_DIR, COL_FILE_PATTERN]:
+                        num_files = int(getattr(bottleneck, f"num_{view_type}", 0))
+                    if view_type in [COL_APP_NAME, COL_NODE_NAME, COL_PROC_NAME, COL_RANK]:
+                        num_processes = int(getattr(bottleneck, f"num_{view_type}", 0))
+
                     # TODO move to upper level
                     if bot_desc is None:
                         bot_desc = rule_impl.describe_bottleneck(
                             compact=compact,
                             metric=getattr(bottleneck, 'metric'),
-                            num_files=int(getattr(bottleneck, 'num_file_name', 0)),
+                            num_files=num_files,
                             num_ops=int(bottleneck['count']),
-                            num_processes=int(getattr(bottleneck, 'num_proc_name', 0)),
-                            num_time_periods=int(getattr(bottleneck, 'num_time_range', 0)),
+                            num_processes=num_processes,
+                            num_time_periods=num_time_periods,
                             subject=getattr(bottleneck, 'subject'),
                             time=float(getattr(bottleneck, 'time')),
                             time_overall=float(getattr(bottleneck, 'time_overall')),
@@ -300,7 +329,10 @@ class AnalyzerResultOutput(object):
 
         bot_panel = Panel(
             bot_table,
-            title=f"{total_bot_count} I/O Bottlenecks with {total_reason_count} Reasons",
+            title=(
+                f"{total_bot_count} I/O {self.pluralize.plural_noun('Bottleneck', total_bot_count)} with "
+                f"{total_reason_count} {self.pluralize.plural_noun('Reason', total_reason_count)}"
+            ) if show_header else None,
             padding=1
         )
 
@@ -468,9 +500,15 @@ class AnalyzerResultOutput(object):
 
             debug_panel = Panel(debug_table, title='Debug', padding=1)
 
-            console.print(char_panel, Padding(''), bot_panel, Padding(''), debug_panel)
+            if show_characteristics:
+                console.print(char_panel, Padding(''), bot_panel, Padding(''), debug_panel)
+            else:
+                console.print(bot_panel, Padding(''), debug_panel)
         else:
-            console.print(char_panel, Padding(''), bot_panel)
+            if show_characteristics:
+                console.print(char_panel, Padding(''), bot_panel)
+            else:
+                console.print(bot_panel)
 
         run_dir = f"{self.runtime_config.working_dir}/{self.runtime_config.run_id}"
 

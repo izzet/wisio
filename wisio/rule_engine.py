@@ -1,18 +1,24 @@
-import dask.bag as db
 import dask.dataframe as dd
 import dataclasses
-import itertools as it
-import numpy as np
 import pandas as pd
-from dask import compute, delayed, persist
+from dask import delayed, persist
 from typing import Dict, List, Tuple, Union
 
+from .analysis_utils import set_file_dir, set_file_pattern, set_proc_name_parts
+from .constants import (
+    COL_APP_NAME,
+    COL_FILE_DIR,
+    COL_FILE_NAME,
+    COL_FILE_PATTERN,
+    COL_NODE_NAME,
+    COL_PROC_NAME,
+    COL_RANK,
+)
 from .rules import (
     KNOWN_RULES,
     MAX_REASONS,
     BottleneckRule,
     CharacteristicAccessPatternRule,
-    CharacteristicComplexityRule,
     CharacteristicFileCountRule,
     CharacteristicIOOpsRule,
     CharacteristicIOSizeRule,
@@ -67,7 +73,6 @@ class RuleEngine(object):
             CharacteristicFileCountRule(),
             CharacteristicTimePeriodCountRule(),
             CharacteristicAccessPatternRule(),
-            # CharacteristicComplexityRule(),
         ]
 
         rule_dict = {rule.rule_key: rule for rule in rules}
@@ -135,15 +140,25 @@ class RuleEngine(object):
 
         view_types = scored_view.index.names
 
+        details = records_index.to_frame(index=False)
+
+        # Logical view type fix
+        if COL_FILE_DIR in view_types:
+            details = set_file_dir(df=details.set_index(COL_FILE_NAME)).reset_index()
+        elif COL_FILE_PATTERN in view_types:
+            details = set_file_pattern(df=details.set_index(COL_FILE_NAME)).reset_index()
+        elif any(view_type in view_types for view_type in [COL_APP_NAME, COL_NODE_NAME, COL_RANK]):
+            details = set_proc_name_parts(df=details.set_index(COL_PROC_NAME)).reset_index()
+
         # TODO unique instead of nunique
-        details = records_index.to_frame(index=False).groupby(view_types).nunique()
+        details = details.groupby(view_types).nunique()
         details.columns = details.columns.map(lambda col: f"num_{col}")
 
         # Create bottlenecks
         bottlenecks = scored_view.join(details)
 
         for view_type in view_types:
-            bottlenecks[f"num_{view_type}"] = 1  # current view type
+            bottlenecks[f"num_{view_type}"] = 1  # current view type fix
 
         bottlenecks['metric'] = metric
         bottlenecks['view_depth'] = len(view_key) if isinstance(view_key, tuple) else 1

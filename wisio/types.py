@@ -25,11 +25,7 @@ Metric = Literal[
     'time',
 ]
 OutputType = Literal['console', 'csv', 'html', 'json', 'sqlite']
-ViewType = Literal[
-    'file_name',
-    'proc_name',
-    'time_range',
-]
+ViewType = Literal['file_name', 'proc_name', 'time_range']
 ViewKey = Union[Tuple[ViewType], Tuple[ViewType, ViewType],
                 Tuple[ViewType, ViewType, ViewType]]
 
