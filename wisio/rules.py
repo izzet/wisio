@@ -591,8 +591,8 @@ class CharacteristicAccessPatternRule(CharacteristicRule):
         random_per_fmt = f"{random_count/total_count*100:.2f}"
 
         compact_desc = (
-            f"{sequential_title}: {numerize(sequential_count, 1)} ops ({sequential_per_fmt}%) - "
-            f"{random_title}: {numerize(random_count, 1)} ops ({random_per_fmt}%) "
+            f"{sequential_title}: {sequential_per_fmt}% - "
+            f"{random_title}: {random_per_fmt}% "
         )
 
         value_fmt = (
@@ -717,8 +717,8 @@ class CharacteristicFileCountRule(CharacteristicRule):
             shared_fmt = f"{shared_count:,} {self.pluralize.plural_noun('file', shared_count)}"
             fpp_fmt = f"{fpp_count:,} {self.pluralize.plural_noun('file', fpp_count)}"
 
-            compact_desc.append(f"[bold]{shared_title}[/bold]: {shared_fmt} ({shared_per})")
-            compact_desc.append(f"[bold]{fpp_title}[/bold]: {fpp_fmt} ({fpp_per})")
+            compact_desc.append(f"[bold]{shared_title}[/bold]: {shared_per}")
+            compact_desc.append(f"[bold]{fpp_title}[/bold]: {fpp_per}")
 
             detail_list.append(f"{shared_title}: {shared_fmt} ({shared_per})")
             detail_list.append(f"{fpp_title}: {fpp_fmt} ({fpp_per})")
@@ -763,7 +763,7 @@ class CharacteristicIOOpsRule(CharacteristicRule):
             count_col = f"{io_type}_count"
             count = int(result[count_col])
             percent = f"{count/total_count*100:.2f}%"
-            compact_desc.append(f"[bold]{COMPACT_IO_TYPES[i]}[/bold]: {numerize(count, 1)} ops ({percent})")
+            compact_desc.append(f"[bold]{COMPACT_IO_TYPES[i]}[/bold]: {percent}")
             detail_list.append(f"{io_type.capitalize()} - {count:,} ops ({percent})")
 
         return RuleResult(
@@ -811,8 +811,7 @@ class CharacteristicIOSizeRule(CharacteristicRule):
                 size = int(result[size_col])
                 compact_desc.append((
                     f"[bold]{COMPACT_IO_TYPES[i]}[/bold]: "
-                    f"{format_bytes(size)} "
-                    f"({size/total_size*100:.2f}%)"
+                    f"{size/total_size*100:.2f}%"
                 ))
                 detail_list.append((
                     f"{io_type.capitalize()} - "
@@ -881,7 +880,7 @@ class CharacteristicIOTimeRule(CharacteristicRule):
             time_col = f"{io_type}_time"
             time = result[time_col]
             time_per = f"{time/total_time*100:.2f}%"
-            compact_desc.append(f"[bold]{COMPACT_IO_TYPES[i]}[/bold]: {time:.2f} s ({time_per})")
+            compact_desc.append(f"[bold]{COMPACT_IO_TYPES[i]}[/bold]: {time_per}")
             detail_list.append(f"{io_type.capitalize()} - {time:.2f} seconds ({time_per})")
 
         return RuleResult(
@@ -1050,18 +1049,17 @@ class CharacteristicTimePeriodCountRule(CharacteristicRule):
 
         num_time_periods = int(result[f"total_count"])
 
-        time_periods_fmt = f"{num_time_periods:,} {self.pluralize.plural_noun('time period', num_time_periods)}"
-        value_fmt = f"{time_periods_fmt} (Time Granularity: {raw_stats.time_granularity})"
+        compact_desc = f"{num_time_periods:,} {self.pluralize.plural_noun('time period', num_time_periods)}"
 
         return RuleResult(
-            compact_desc=value_fmt,
+            compact_desc=compact_desc,
             description='Time Periods',
             detail_list=None,
             extra_data=None,
             object_hash=None,
             reasons=None,
             value=num_time_periods,
-            value_fmt=value_fmt,
+            value_fmt=f"{compact_desc} (Time Granularity: {raw_stats.time_granularity:,})",
         )
 
 
@@ -1127,16 +1125,16 @@ class CharacteristicXferSizeRule(CharacteristicRule):
 
         total_ops = int(xfer_bins[count_col].sum())
 
-        value_fmt = self._get_xfer_size(max_xfer_size)
+        compact_desc = self._get_xfer_size(max_xfer_size)
 
         if min_xfer_size > 0 and max_xfer_size > 0:
             if min_xfer_size == max_xfer_size:
-                value_fmt = (
+                compact_desc = (
                     f"{self._get_xfer_size(min_xfer_size, True)}-"
                     f"{self._get_xfer_size(max_xfer_size)}"
                 )
             else:
-                value_fmt = f"{self._get_xfer_size(min_xfer_size)}-{self._get_xfer_size(max_xfer_size)}"
+                compact_desc = f"{self._get_xfer_size(min_xfer_size)}-{self._get_xfer_size(max_xfer_size)}"
 
         detail_list = []
         for xfer, row in xfer_bins.iterrows():
@@ -1144,14 +1142,14 @@ class CharacteristicXferSizeRule(CharacteristicRule):
                 f"{xfer} - {int(row[count_col]):,} ops ({row['per'] * 100:.2f}%)")
 
         result = RuleResult(
-            compact_desc=f"{value_fmt} - {numerize(total_ops, 1)} ops",
+            compact_desc=compact_desc,
             description='Write Requests' if self.io_op == 'write' else 'Read Requests',
             detail_list=detail_list,
             extra_data=None,
             object_hash=None,
             reasons=None,
             value=(min_xfer_size, max_xfer_size),
-            value_fmt=f"{value_fmt} - {total_ops:,} ops",
+            value_fmt=f"{compact_desc} - {total_ops:,} ops",
         )
 
         return result

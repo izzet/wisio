@@ -209,7 +209,10 @@ class AnalyzerResultOutput(object):
         char_table.add_column(style="cyan")
         char_table.add_column()
 
-        char_table.add_row('Job Time', f"{output.characteristics.job_time:.2f} seconds")
+        if compact:
+            char_table.add_row('Runtime', f"{output.characteristics.job_time:.2f} s")
+        else:
+            char_table.add_row('Runtime', f"{output.characteristics.job_time:.2f} seconds")
 
         # Add each key-value pair to the table as a row
         for char in characteristics.values():
