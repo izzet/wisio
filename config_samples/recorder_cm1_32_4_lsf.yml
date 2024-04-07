@@ -1,5 +1,5 @@
 checkpoint: false
-checkpoint_dir: /p/gpfs1/iopp/wisio_logs/_checkpoints/recorder_cm1_32_4
+checkpoint_dir: /p/gpfs1/iopp/wisio_logs/_checkpoints/recorder_cm1_32_4_2
 cluster:
   cluster_type: lsf
   debug: false
@@ -23,11 +23,14 @@ cluster:
   use_stdin: true
 debug: false
 metrics:
-- time
+- iops
 output:
   name: CM1
-  type: csv
+  show_debug: true
+  type: console
+# slope_threshold: 90
 trace_path: /p/gpfs1/iopp/wisio_logs/recorder_cm1_32_4/_parquet
+verbose: false
 view_types:
 - time_range
 - proc_name

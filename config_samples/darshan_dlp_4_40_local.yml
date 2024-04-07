@@ -1,5 +1,5 @@
 checkpoint: false
-cluster_config:
+cluster:
   cluster_type: "local"
   debug: false
   local_dir: "/var/tmp/wisio/darshan_dlp_4_40_local"

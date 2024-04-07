@@ -3,13 +3,13 @@ debug: false
 n_workers: 8
 n_threads_per_worker: 16
 memory: 1600
-header_skip:
+job_directives_skip:
   - "-n"
   - "-R"
   - "-M"
   - "-P"
   - "-W 00:30"
-job_extra:
+job_extra_directives:
   - "-nnodes 1"
   - "-G asccasc"
   - "-q pdebug"

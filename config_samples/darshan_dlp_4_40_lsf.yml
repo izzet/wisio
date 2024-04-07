@@ -1,5 +1,5 @@
 checkpoint: false
-cluster_config:
+cluster:
   cluster_type: "lsf"
   debug: false
   job_directives_skip:

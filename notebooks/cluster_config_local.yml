@@ -1,5 +1,7 @@
 cluster_type: "local"
 debug: false
+host: 127.0.0.1
 n_workers: 8
 memory: 0
 local_dir: "/var/tmp/cluster"
+processes: true
