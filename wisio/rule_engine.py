@@ -1,12 +1,16 @@
 import dask.dataframe as dd
 import dataclasses
+import itertools as it
 import pandas as pd
 from dask import delayed, persist
+from scipy.cluster.hierarchy import linkage, fcluster
+from sklearn.preprocessing import StandardScaler
 from typing import Dict, List, Tuple, Union
 
 from .analysis_utils import set_file_dir, set_file_pattern, set_proc_name_parts
 from .constants import (
     COL_APP_NAME,
+    COL_BEHAVIOR,
     COL_FILE_DIR,
     COL_FILE_NAME,
     COL_FILE_PATTERN,
@@ -40,6 +44,49 @@ from .types import (
     ViewType,
     view_name,
 )
+
+
+def _assign_behavior(bottlenecks: pd.DataFrame, metric: str):
+
+    view_name_col, score_col = 'view_name', f"{metric}_score"
+
+    view_names = list(bottlenecks[view_name_col].unique())
+    scores = list(bottlenecks[score_col].unique())
+
+    bottlenecks = (
+        bottlenecks
+        .set_index([view_name_col, score_col])
+        .sort_index()
+    )
+
+    for view_name, score in it.product(view_names, scores):
+
+        behavior_key = (view_name, score)
+
+        if not behavior_key in bottlenecks.index:
+            continue
+
+        behaviors = bottlenecks.loc[[behavior_key]]
+
+        bottlenecks.loc[behavior_key, COL_BEHAVIOR] = 1  # default behavior
+
+        if len(behaviors) > 1:
+            cols = bottlenecks.columns
+
+            include_cond = '_min|_max|_count|_size|_time|excessive_|small_|_imbalance|_bin'
+            exclude_cond = 'num_'
+
+            behavior_cols = cols[cols.str.contains(include_cond) & ~cols.str.contains(exclude_cond)]
+
+            scaler = StandardScaler()
+            scaled_behavior = scaler.fit_transform(behaviors[behavior_cols])
+
+            link_mat = linkage(scaled_behavior, method='weighted')
+            clusters = fcluster(link_mat, t=1, criterion='distance')
+
+            bottlenecks.loc[behavior_key, COL_BEHAVIOR] = clusters
+
+    return bottlenecks.reset_index()
 
 
 class RuleEngine(object):
@@ -122,7 +169,13 @@ class RuleEngine(object):
                     )
                 )
 
-        concatenated = dd.concat(bottlenecks).persist()
+        concatenated = (
+            dd.concat(bottlenecks)
+            .map_partitions(_assign_behavior, metric=metric)
+            .persist()
+        )
+
+        # concatenated = dd.concat(bottlenecks).persist()
 
         return concatenated, rule_dict
 

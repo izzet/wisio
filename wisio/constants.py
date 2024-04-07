@@ -15,6 +15,7 @@ class IOCategory(Enum):
 
 COL_ACC_PAT = 'acc_pat'
 COL_APP_NAME = 'app_name'
+COL_BEHAVIOR = 'behavior'
 COL_CAT = 'cat'
 COL_COUNT = 'count'
 COL_FILE_DIR = 'file_dir'

@@ -17,6 +17,7 @@ AnalyzerType = Literal['darshan', 'dlp', 'recorder']
 @dataclass
 class OutputConfig:
     compact: bool = False
+    group_behavior: bool = True
     max_bottlenecks: int = 3
     name: str = ''
     root_only: bool = False
@@ -60,6 +61,7 @@ def _handle_output(result: AnalysisResult, config: Config):
     if output_config.type == 'console':
         result.output.console(
             compact=output_config.compact,
+            group_behavior=output_config.group_behavior,
             max_bottlenecks=output_config.max_bottlenecks,
             name=output_config.name,
             root_only=output_config.root_only,

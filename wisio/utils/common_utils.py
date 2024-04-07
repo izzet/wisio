@@ -6,6 +6,10 @@ def _round_num(n, decimal=2):
     return n.to_integral() if n == n.to_integral() else round(n.normalize(), decimal)
 
 
+def format_number(value):
+    return format(int(value), ',d')
+
+
 def numerize(n, decimal=2):
     if n == 0:
         return n

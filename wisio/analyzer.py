@@ -468,6 +468,7 @@ class Analyzer(abc.ABC):
 
     def reset_run_id(self):
         self.run_id = f"{int(time())}"
+        ensure_dir(f"{self.working_dir}/{self.run_id}")
 
     def restore_extra_data(self, name: str, fallback: Callable[[], dict], force=False, persist=False):
         if self.checkpoint:

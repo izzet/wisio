@@ -3,8 +3,10 @@
 .ipynb_checkpoints
 .vscode
 .wisio
+/build
 /venv*
 __pycache__
 dask-worker-space
 .idea
 *.egg-info
+/tmp

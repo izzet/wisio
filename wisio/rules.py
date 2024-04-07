@@ -46,7 +46,7 @@ from .types import (
     ViewResult,
 )
 from .utils.collection_utils import get_intervals, join_with_and
-from .utils.common_utils import numerize
+from .utils.common_utils import format_number, numerize
 
 
 MAX_REASONS = 5
@@ -55,6 +55,7 @@ METADATA_ACCESS_RATIO_THRESHOLD = 0.5
 
 jinja_env = Environment()
 jinja_env.filters['format_bytes'] = format_bytes
+jinja_env.filters['format_number'] = format_number
 
 
 class KnownCharacteristics(Enum):
@@ -116,13 +117,13 @@ specifically {{ "%.2f" | format((open_time / time) * 100) }}% ({{ "%.2f" | forma
             RuleReason(
                 condition='read_count > write_count',
                 message='''
-'read' operations are {{ "%.2f" | format((read_count / count) * 100) }}% ({{read_count}} operations) of total I/O operations.
+'read' operations are {{ "%.2f" | format((read_count / count) * 100) }}% ({{ read_count | format_number }} operations) of total I/O operations.
                 '''
             ),
             RuleReason(
                 condition='write_count > read_count',
                 message='''
-'write' operations are {{ "%.2f" | format((write_count / count) * 100) }}% ({{write_count}} operations) of total I/O operations.
+'write' operations are {{ "%.2f" | format((write_count / count) * 100) }}% ({{ write_count | format_number }} operations) of total I/O operations.
                 '''
             ),
         ]
@@ -135,7 +136,7 @@ specifically {{ "%.2f" | format((open_time / time) * 100) }}% ({{ "%.2f" | forma
                 condition='random_count / count > 0.5',
                 message='''
 Issued high number of random operations, specifically {{ "%.2f" | format((random_count / count) * 100) }}% \
-({{ random_count }} operations) of total I/O operations.
+({{ random_count | format_number }} operations) of total I/O operations.
                 '''
             ),
         ]
@@ -441,10 +442,10 @@ class BottleneckRule(RuleHandler):
                 # 32 processes access 1 file pattern within 6 time periods and have an I/O time of 2.92 seconds which
                 # is 70.89% of overall I/O time of the workload.
                 description = (
-                    f"{num_processes} {accessor_noun}{accessor_name}{accessor_verb} "
-                    f"{num_files} {accessed_noun}{accessed_name}"
-                    f"within {num_time_periods} {time_period_noun}{time_period_name}"
-                    f"across {num_ops} I/O {self.pluralize.plural_noun('operation', num_ops)} "
+                    f"{num_processes:,} {accessor_noun}{accessor_name}{accessor_verb} "
+                    f"{num_files:,} {accessed_noun}{accessed_name}"
+                    f"within {num_time_periods:,} {time_period_noun}{time_period_name}"
+                    f"across {num_ops:,} I/O {self.pluralize.plural_noun('operation', num_ops)} "
                     f"and {self.pluralize.plural_verb('has', num_processes)} an I/O time of {time:.2f} seconds which is "
                     f"{time_overall*100:.2f}% of overall I/O time of the workload."
                 )
@@ -465,9 +466,9 @@ class BottleneckRule(RuleHandler):
                 count = num_time_periods
 
             description = (
-                f"{count} {self.pluralize.plural_noun(nice_view_type, count)} ({nice_subject}) "
+                f"{count:,} {self.pluralize.plural_noun(nice_view_type, count)} ({nice_subject}) "
                 f"{self.pluralize.plural_verb('has', count)} an I/O time of {time:.2f} seconds "
-                f"across {num_ops} I/O {self.pluralize.plural_noun('operation', num_ops)} "
+                f"across {num_ops:,} I/O {self.pluralize.plural_noun('operation', num_ops)} "
                 f"which is {time_overall*100:.2f}% of overall I/O time of the workload."
             )
 
