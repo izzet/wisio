@@ -1,5 +1,0 @@
-build
-dependency/.spack-env
-dependency/spack.lock
-CMakeFiles
-CMakeCache.txt
