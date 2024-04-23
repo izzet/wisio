@@ -1,20 +1,10 @@
 cmake_minimum_required(VERSION 3.0)
 project(wisio)
-set(WISIO_VERSION_MAJOR "0")
-set(WISIO_VERSION_MINOR "0")
-set(WISIO_VERSION_PATCH "1")
-set(WISIO_PACKAGE ${PROJECT_NAME})
-set(WISIO_PACKAGE_NAME ${PROJECT_NAME})
-set(WISIO_PACKAGE_VERSION "${WISIO_VERSION_MAJOR}.${WISIO_VERSION_MINOR}.${WISIO_VERSION_PATCH}")
-set(WISIO_PACKAGE_VERSION_MAJOR "${WISIO_VERSION_MAJOR}.${WISIO_VERSION_MINOR}")
-set(WISIO_PACKAGE_VERSION_MINOR "${WISIO_VERSION_PATCH}")
-set(WISIO_PACKAGE_STRING "${WISIO_PACKAGE_NAME} ${WISIO_PACKAGE_VERSION}")
-set(WISIO_PACKAGE_TARNAME "${WISIO_PACKAGE}")
 
 #message(${CMAKE_PREFIX_PATH})
 set(CMAKE_CXX_STANDARD 17)
-set(WISIO_CMAKE_DIR ${CMAKE_SOURCE_DIR}/CMake)
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${WISIO_CMAKE_DIR})
+set(WISIO_CMAKE_DIR ${CMAKE_SOURCE_DIR}/cmake)
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${WISIO_CMAKE_DIR} ${WISIO_CMAKE_DIR}/modules)
 set(DEPENDENCY_LIB -lstdc++fs)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -rdynamic")
 
@@ -35,8 +25,7 @@ if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     message(STATUS "Setting build type to 'RelWithDebInfo' as none was specified.")
     set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Choose the type of build." FORCE)
     # Set the possible values of build type for cmake-gui
-    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release"
-            "MinSizeRel" "RelWithDebInfo")
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
 endif ()
 
 if (NOT "${CMAKE_CXX_STANDARD}")
@@ -51,6 +40,7 @@ add_subdirectory(lib/recorder/tools)
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/lib/recorder/include)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/lib/recorder/tools)
+include_directories(${RECORDER_INCLUDE_DIR})
 
 find_package(MPI COMPONENTS CXX REQUIRED)
 if (MPI_FOUND)
@@ -59,32 +49,35 @@ if (MPI_FOUND)
     set(DEPENDENCY_LIB ${DEPENDENCY_LIB} ${MPI_CXX_LIBRARIES})
 endif ()
 
-find_package(nlohmann_json 3.11.2 REQUIRED)
 find_package(Arrow REQUIRED)
 if(${Arrow_FOUND})
-    message("-- " "Found Arrow: TRUE")
-    include_directories(${ARROW_INCLUDE_DIR})
+message("-- " "Found Arrow: TRUE")
+include_directories(${ARROW_INCLUDE_DIR})
 else()
-    message("-- " "Found Arrow: FALSE")
+message("-- " "Found Arrow: FALSE")
 endif()
 find_package(Parquet REQUIRED)
 if(${Parquet_FOUND})
-    message("-- " "Found Parquet: TRUE")
-    include_directories(${PARQUET_INCLUDE_DIR})
+message("-- " "Found Parquet: TRUE")
+include_directories(${PARQUET_INCLUDE_DIR})
 else()
-    message("-- " "Found Parquet: FALSE")
+message("-- " "Found Parquet: FALSE")
 endif()
-include_directories(${RECORDER_INCLUDE_DIR})
+
+find_package(nlohmann_json 3.11.2 REQUIRED)
+find_package(PythonExtensions REQUIRED)
 
 add_executable(wisio_recorder2parquet recorder2parquet.cpp)
 target_link_libraries(wisio_recorder2parquet
-        PUBLIC ${MPI_CXX_LIBRARIES}
-        reader
-        arrow_shared
-        parquet_shared
-        -lstdc++fs
-        cpp-logger
-        nlohmann_json::nlohmann_json
-        Backward::Interface
-        )
+    ${MPI_CXX_LIBRARIES}
+    reader
+    arrow_shared
+    parquet_shared
+    -lstdc++fs
+    cpp-logger
+    nlohmann_json::nlohmann_json
+    Backward::Interface
+)
 add_dependencies(wisio_recorder2parquet reader)
+install(TARGETS wisio_recorder2parquet RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
+python_standalone_executable(wisio_recorder2parquet)

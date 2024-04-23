@@ -10,3 +10,5 @@ dask-worker-space
 .idea
 *.egg-info
 /tmp
+_skbuild
+dist

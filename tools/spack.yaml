@@ -1,8 +1,10 @@
 spack:
   specs:
-    - cmake
-    - nlohmann-json@3.10.5
-    - arrow-cpp@master
-    - pkg-config@0.27.1
-    - python@3.10.6
+    - arrow@10.0.1
+    - autoconf@2.69
+    - darshan-runtime@3.4.4
+    - darshan-util@3.4.4
+    - mpich~fortran@4.1.2
+    - nlohmann-json@3.11.2
+    - pkg-config@0.29.2
   view: true
