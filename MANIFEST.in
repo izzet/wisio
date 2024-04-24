@@ -1,0 +1,6 @@
+graft tools
+graft wisio
+include .gitmodules
+prune tools/build
+global-exclude */__pycache__/*
+global-exclude *.pyc

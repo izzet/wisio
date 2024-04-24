@@ -1,5 +1,37 @@
+import subprocess
+from os import path
+from pathlib import Path
 from setuptools import find_packages
 from skbuild import setup
+from skbuild.command.build import build
+from skbuild.command.install import install
+from skbuild.command.egg_info import egg_info
+
+
+def update_submodules():
+    print("Updating submodules...")
+    if path.exists('.gitmodules'):
+        subprocess.check_call(['git', 'submodule', 'init'])
+        subprocess.check_call(['git', 'submodule', 'update'])
+
+
+class build_with_submodules(build):
+    def run(self):
+        update_submodules()
+        build.run(self)
+
+
+class egg_info_with_submodules(egg_info):
+    def run(self):
+        update_submodules()
+        egg_info.run(self)
+
+
+class install_with_submodules(install):
+    def run(self):
+        update_submodules()
+        install.run(self)
+
 
 setup(
     name="wisio",
@@ -17,8 +49,15 @@ setup(
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
     ],
+    long_description=(Path(__file__).parent / "README.md").read_text(),
+    long_description_content_type="text/markdown",
     python_requires=">=3.8, <4",
     cmake_source_dir="tools",
+    cmdclass={
+        "build": build_with_submodules,
+        "egg_info": egg_info_with_submodules,
+        "install": install_with_submodules,
+    },
     entry_points={
         "console_scripts": [
             "wisio=wisio.__main__:main",

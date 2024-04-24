@@ -1,18 +1,31 @@
-![WisIO](./assets/logo.png)
+<p align="center">
+    <img src="./assets/logo.png">
+</p>
 
-# WisIO: Automated I/O Analysis
+# WisIO: Automated I/O Analysis for HPC Workflows
 
-**"Extract wisdom from large-scale rich I/O traces of HPC workloads."**
+## Overview
 
-Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
+**"Extract wisdom from large-scale rich I/O traces of HPC workflows."**
+
+## Installation
+
+To install WisIO through `pip`, you will need to use the following command.
 
 ```bash
-pip install wisio
+spack -e tools install
+pip install wisio[darshan]
 ```
 
 To install WisIO from source, you will need to first install the dependencies:
 
 ```bash
-pip install -r requirements.txt
-pip install .
+spack -e tools install
+pip install .[darshan]
+```
+
+## Usage
+
+```bash
+wisio analyze -c /path/to/config
 ```
