@@ -1,14 +1,15 @@
 import logging
+import socket
 import yaml
 from dask.distributed import Client, LocalCluster
-from dask_jobqueue import LSFCluster
+from dask_jobqueue import LSFCluster, PBSCluster
 from dataclasses import dataclass
 from time import sleep
 from typing import List, Literal
 from .utils.file_utils import ensure_dir
 
 
-ClusterType = Literal['local', 'lsf']
+ClusterType = Literal['local', 'lsf', 'pbs']
 
 
 @dataclass
@@ -29,7 +30,6 @@ class ClusterConfig:
 
 
 class ClusterManager(object):
-
     def __init__(self, working_dir: str, config: ClusterConfig):
         self.config = config
         self.working_dir = working_dir
@@ -50,13 +50,17 @@ class ClusterManager(object):
 
     def _initialize_cluster(self):
         dashboard_address = None
+        host_name = None
+        if self.config.host is not None:
+            host_name = f"{self.config.host}"
+        elif self.config.cluster_type != 'local':
+            host_name = socket.gethostname()
         if self.config.dashboard_port is not None:
-            assert self.config.host is not None, 'Host address must be specified'
-            dashboard_address = f"{self.config.host}:{self.config.dashboard_port}"
+            assert host_name is not None, 'Host address must be specified'
+            dashboard_address = f"{host_name}:{self.config.dashboard_port}"
         if self.config.cluster_type == 'local':
             return LocalCluster(
-                # dashboard_address=dashboard_address,
-                host=self.config.host,
+                host=host_name,
                 local_directory=self.config.local_dir,
                 memory_limit=self.config.memory,
                 n_workers=self.config.n_workers,
@@ -74,17 +78,35 @@ class ClusterManager(object):
                 processes=self.config.n_workers,
                 scheduler_options=dict(
                     dashboard_address=dashboard_address,
-                    host=self.config.host,
+                    host=host_name,
                 ),
                 use_stdin=self.config.use_stdin,
             )
+        elif self.config.cluster_type == 'pbs':
+            return PBSCluster(
+                cores=self.config.n_workers * self.config.n_threads_per_worker,
+                death_timeout=self.config.death_timeout,
+                job_directives_skip=self.config.job_directives_skip,
+                job_extra_directives=self.config.job_extra_directives,
+                local_directory=self.config.local_dir,
+                log_directory=f"{self.working_dir}/worker_logs",
+                memory=f"{self.config.memory}GB",
+                processes=self.config.n_workers,
+                scheduler_options=dict(
+                    dashboard_address=dashboard_address,
+                    host=host_name,
+                ),
+            )
 
     def _wait_until_workers_alive(self, sleep_seconds=2):
-        current_n_workers = len(self.client.scheduler_info()['workers'])
-        while self.client.status == 'running' and current_n_workers < self.config.n_workers:
-            current_n_workers = len(self.client.scheduler_info()['workers'])
+        active_workers = len(self.client.scheduler_info()['workers'])
+        while (
+            self.client.status == 'running' and active_workers < self.config.n_workers
+        ):
+            active_workers = len(self.client.scheduler_info()['workers'])
             logging.debug(
-                f"Waiting for workers ({current_n_workers}/{self.config.n_workers})")
+                f"Waiting for workers ({active_workers}/{self.config.n_workers})"
+            )
             # Try to force cluster to boot workers
             self.cluster._correct_state()
             # Wait
