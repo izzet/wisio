@@ -5,11 +5,22 @@ from dataclasses import dataclass, field
 from time import time
 from typing import List, Literal
 
+from .analyzer import Analyzer
 from .analyzer_result import AnalysisResult
 from .cluster_management import ClusterConfig
-from .darshan import DarshanAnalyzer
 from .recorder import RecorderAnalyzer
 from .types import Metric, OutputType, ViewType
+
+try:
+    from .darshan import DarshanAnalyzer
+except ModuleNotFoundError:
+    from unittest.mock import Mock
+
+    def raise_error(*args, **kwargs):
+        raise RuntimeError("'darshan' module is not found")
+
+    DarshanAnalyzer = Mock(spec=Analyzer, side_effect=raise_error)
+
 
 AnalyzerType = Literal['darshan', 'dlp', 'recorder']
 
@@ -156,15 +167,21 @@ def main():
     base_parser = argparse.ArgumentParser(add_help=False)
     base_parser.add_argument('-c', '--config', required=True, help='Config path')
 
-    analyze_parser = subparsers.add_parser('analyze', help='Analyze trace data', parents=[base_parser])
+    analyze_parser = subparsers.add_parser(
+        'analyze', help='Analyze trace data', parents=[base_parser]
+    )
 
     bot_parser = subparsers.add_parser('bottleneck', help='Bottleneck inspection')
     bot_parsers = bot_parser.add_subparsers(title='commands', dest='bot_command')
-    bot_inspect_parser = bot_parsers.add_parser('inspect', help='Inspect a bottleneck', parents=[base_parser])
+    bot_inspect_parser = bot_parsers.add_parser(
+        'inspect', help='Inspect a bottleneck', parents=[base_parser]
+    )
     bot_inspect_parser.add_argument('id', help='Bottleneck ID')
 
     config_parser = subparsers.add_parser('config', help='Config helper')
-    config_parsers = config_parser.add_subparsers(title='commands', dest='config_command')
+    config_parsers = config_parser.add_subparsers(
+        title='commands', dest='config_command'
+    )
     config_parsers.add_parser('create', help='Create a config file')
 
     args = parser.parse_args()
