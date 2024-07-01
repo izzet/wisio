@@ -2,12 +2,12 @@ import argparse
 import yaml
 from argparse import ArgumentParser, Namespace
 from dataclasses import dataclass, field
-from time import time
 from typing import List, Literal
 
 from .analyzer import Analyzer
 from .analyzer_result import AnalysisResult
 from .cluster_management import ClusterConfig
+from .dftracer import DFTracerAnalyzer
 from .recorder import RecorderAnalyzer
 from .types import Metric, OutputType, ViewType
 
@@ -22,7 +22,7 @@ except ModuleNotFoundError:
     DarshanAnalyzer = Mock(spec=Analyzer, side_effect=raise_error)
 
 
-AnalyzerType = Literal['darshan', 'dlp', 'recorder']
+AnalyzerType = Literal['darshan', 'dftracer', 'recorder']
 
 
 @dataclass
@@ -137,6 +137,29 @@ def handle_darshan(analyze_parser: ArgumentParser, config: Config):
     _handle_output(config=config, result=result)
 
 
+def handle_dftracer(analyze_parser: ArgumentParser, config: Config):
+    analyzer = DFTracerAnalyzer(
+        bottleneck_dir=config.bottleneck_dir,
+        checkpoint=config.checkpoint,
+        checkpoint_dir=config.checkpoint_dir,
+        cluster_config=config.cluster,
+        debug=config.debug,
+        verbose=config.verbose,
+        working_dir=config.working_dir,
+    )
+    result = analyzer.analyze_pfw(
+        exclude_bottlenecks=config.exclude_bottlenecks,
+        exclude_characteristics=config.exclude_characteristics,
+        logical_view_types=config.logical_view_types,
+        metrics=config.metrics,
+        slope_threshold=config.slope_threshold,
+        time_granularity=config.time_granularity,
+        trace_path_pattern=config.trace_path,
+        view_types=config.view_types,
+    )
+    _handle_output(config=config, result=result)
+
+
 def handle_recorder(analyze_parser: ArgumentParser, config: Config):
     analyzer = RecorderAnalyzer(
         bottleneck_dir=config.bottleneck_dir,
@@ -192,6 +215,8 @@ def main():
         config = _load_config(args.config)
         if config.type == 'darshan':
             handle_darshan(analyze_parser, config)
+        elif config.type == 'dftracer':
+            handle_dftracer(analyze_parser, config)
         elif config.type == 'recorder':
             handle_recorder(analyze_parser, config)
         else:
