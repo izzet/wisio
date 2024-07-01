@@ -24,19 +24,26 @@ from .types import AnalysisAccuracy, RawStats, ViewType
 from .utils.dask_utils import EventLogger
 
 
+CAT_POSIX = 'POSIX'
 CHECKPOINT_RAW_STATS = '_raw_stats'
+DFTRACER_TIME_RESOLUTION = 1e6
 PFW_COL_MAPPING = {
     'name': COL_FUNC_ID,
     'dur': COL_TIME,
     'hostname': COL_HOST_NAME,
-    'trange': COL_TIME_RANGE,
     'filename': COL_FILE_NAME,
 }
 
 
 def _load_objects(line, time_granularity, time_approximate, condition_fn):
     d = {}
-    if line is not None and line != "" and len(line) > 0 and "[" != line[0] and line != "\n":
+    if (
+        line is not None
+        and line != ""
+        and len(line) > 0
+        and "[" != line[0]
+        and line != "\n"
+    ):
         val = {}
         try:
             val = json.loads(line)
@@ -48,14 +55,12 @@ def _load_objects(line, time_granularity, time_approximate, condition_fn):
                     d["cat"] = val["cat"]
                     d["pid"] = int(val["pid"])
                     d["tid"] = int(val["tid"])
-                    val["dur"] = float(val["dur"]) / 1e6
-                    val["ts"] = float(val["ts"]) / 1e6
-                    d["ts"] = val["ts"]
-                    d["dur"] = val["dur"]
+                    d["ts"] = float(val["ts"])
+                    d["dur"] = float(val["dur"])
                     d["te"] = d["ts"] + d["dur"]
                     # if not time_approximate:
                     #     d["tinterval"] = I.to_string(I.closed(val["ts"] , val["ts"] + val["dur"]))
-                    d["trange"] = int(((val["ts"] + val["dur"])/2.0) / time_granularity)
+                    # d["trange"] = int(((d["ts"] + d["dur"]) / 2.0))
                     d.update(_io_function(val, d, time_approximate, condition_fn))
                     logging.debug(f"built an dictionary for line {d}")
         except ValueError as error:
@@ -77,7 +82,7 @@ def _io_columns(time_approximate=True):
         'total_time': "string" if not time_approximate else np.float64,
         'filename': "string",
         'phase': np.int16,
-        'size': np.int64
+        'size': np.int64,
     }
 
 
@@ -140,19 +145,20 @@ def _io_function(json_object, current_dict, time_approximate, condition_fn):
     return d
 
 
-class DLPAnalyzer(Analyzer):
-
+class DFTracerAnalyzer(Analyzer):
     def __init__(
         self,
         working_dir: str,
+        bottleneck_dir: str = '',
         checkpoint: bool = False,
         checkpoint_dir: str = '',
         cluster_config: ClusterConfig = None,
         debug=False,
-        verbose=False
+        verbose=False,
     ):
         super().__init__(
-            name='DLP',
+            name='DFTracer',
+            bottleneck_dir=bottleneck_dir,
             checkpoint=checkpoint,
             checkpoint_dir=checkpoint_dir,
             cluster_config=cluster_config,
@@ -173,7 +179,6 @@ class DLPAnalyzer(Analyzer):
         time_granularity: int = 1e6,
         view_types: List[ViewType] = ['file_name', 'proc_name', 'time_range'],
     ):
-
         # Read traces
         with EventLogger(key=EVENT_READ_TRACES, message='Read traces'):
             traces = self.read_pfw(
@@ -190,7 +195,7 @@ class DLPAnalyzer(Analyzer):
                 job_time=delayed(job_time),
                 time_granularity=time_granularity,
                 total_count=traces.index.count().persist(),
-            )
+            ),
         )
 
         # Analyze traces
@@ -206,7 +211,9 @@ class DLPAnalyzer(Analyzer):
             view_types=view_types,
         )
 
-    def read_pfw(self, trace_path_pattern: str, time_granularity: int, time_approximate=True):
+    def read_pfw(
+        self, trace_path_pattern: str, time_granularity: int, time_approximate=True
+    ):
         trace_paths = glob(trace_path_pattern)
         all_files = []
         pfw_pattern = []
@@ -223,14 +230,16 @@ class DLPAnalyzer(Analyzer):
 
         main_bag = None
         if len(pfw_pattern) > 0:
-            pfw_bag = read_text(pfw_pattern) \
-                .map(_load_objects,
-                     time_granularity=time_granularity,
-                     time_approximate=time_approximate,
-                     condition_fn=None,
-                     ) \
+            main_bag = (
+                read_text(pfw_pattern)
+                .map(
+                    _load_objects,
+                    time_granularity=time_granularity,
+                    time_approximate=time_approximate,
+                    condition_fn=None,
+                )
                 .filter(lambda x: "name" in x)
-        main_bag = pfw_bag
+            )
 
         if main_bag:
             columns = {
@@ -242,24 +251,37 @@ class DLPAnalyzer(Analyzer):
                 'te': np.float64,  # 'Int64',
                 'dur': np.float64,  # 'Int64',
                 # 'tinterval': "string" if not time_approximate else np.int64, # 'Int64',
-                'trange': np.float64,  # 'Int64'
+                # 'trange': np.float64,  # 'Int64'
             }
             columns.update(_io_columns())
             # columns.update(load_cols)
-            events = main_bag.to_dataframe(meta=columns).query('ts > 0')
-            events = events[~events['name'].isin(['mod_main'])]
+            events = main_bag.to_dataframe(meta=columns)
+            events = events[(events['cat'] == CAT_POSIX) & (events['ts'] > 0)]
             # self.n_partition = math.ceil(total_size.compute() / (128 * 1024 ** 2))
             # logging.debug(f"Number of partitions used are {self.n_partition}")
             # self.events = events.repartition('256MB').persist()
             # _ = wait(self.events)
-            events['ts'] = events['ts'] - events['ts'].min()
+            events['dur'] = events['dur'] / DFTRACER_TIME_RESOLUTION
+            events['ts'] = (
+                events['ts'] - events['ts'].min()
+            ) / DFTRACER_TIME_RESOLUTION
             events['te'] = events['ts'] + events['dur']
-            events['trange'] = events['ts'] // time_granularity
+            events[COL_TIME_RANGE] = (
+                ((events['te'] / time_granularity) * DFTRACER_TIME_RESOLUTION)
+                .round()
+                .astype(int)
+            )
             # self.events = self.events.persist()
             # _ = wait(self.events)
 
-        events[COL_PROC_NAME] = 'app#' + events['hostname'] + '#' + \
-            events['pid'].astype(str) + '#' + events['tid'].astype(str)
+        events[COL_PROC_NAME] = (
+            'app#'
+            + events['hostname']
+            + '#'
+            + events['pid'].astype(str)
+            + '#'
+            + events['tid'].astype(str)
+        )
 
         # ddf[col_name] = ddf[col_name].mask(ddf['func_id'].str.contains(
         # md_op) & ~ddf['func_id'].str.contains('dir'), ddf[col])
@@ -272,16 +294,22 @@ class DLPAnalyzer(Analyzer):
         events[COL_COUNT] = 1
         events[COL_IO_CAT] = 0
         events[COL_IO_CAT] = events[COL_IO_CAT].mask(
-            (events['cat'] == 'POSIX') &
-            ~events['name'].str.contains(read_cond) &
-            ~events['name'].str.contains(write_cond), IOCategory.METADATA.value)
+            (events['cat'] == 'POSIX')
+            & ~events['name'].str.contains(read_cond)
+            & ~events['name'].str.contains(write_cond),
+            IOCategory.METADATA.value,
+        )
         events[COL_IO_CAT] = events[COL_IO_CAT].mask(
-            (events['cat'] == 'POSIX') &
-            events['name'].str.contains(read_cond) &
-            ~events['name'].str.contains(metadata_cond), IOCategory.READ.value)
+            (events['cat'] == 'POSIX')
+            & events['name'].str.contains(read_cond)
+            & ~events['name'].str.contains(metadata_cond),
+            IOCategory.READ.value,
+        )
         events[COL_IO_CAT] = events[COL_IO_CAT].mask(
-            (events['cat'] == 'POSIX') &
-            events['name'].str.contains(write_cond) &
-            ~events['name'].str.contains(metadata_cond), IOCategory.WRITE.value)
+            (events['cat'] == 'POSIX')
+            & events['name'].str.contains(write_cond)
+            & ~events['name'].str.contains(metadata_cond),
+            IOCategory.WRITE.value,
+        )
 
         return events.rename(columns=PFW_COL_MAPPING)
