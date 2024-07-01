@@ -92,23 +92,23 @@ KNOWN_RULES = {
                 message='''
 Overall {{ "%.2f" | format((metadata_time / time) * 100) }}% ({{ "%.2f" | format(metadata_time) }} seconds) of I/O time is spent on metadata access, \
 specifically {{ "%.2f" | format((open_time / time) * 100) }}% ({{ "%.2f" | format(open_time) }} seconds) on the 'open' operation.
-                '''
+                ''',
             ),
             RuleReason(
                 condition='(close_time > open_time) & (close_time > seek_time)',
                 message='''
 Overall {{ "%.2f" | format((metadata_time / time) * 100) }}% ({{ "%.2f" | format(metadata_time) }} seconds) of I/O time is spent on metadata access, \
 specifically {{ "%.2f" | format((open_time / time) * 100) }}% ({{ "%.2f" | format(open_time) }} seconds) on the 'close' operation.
-                '''
+                ''',
             ),
             RuleReason(
                 condition='(seek_time > open_time) & (seek_time > close_time)',
                 message='''
 Overall {{ "%.2f" | format((metadata_time / time) * 100) }}% ({{ "%.2f" | format(metadata_time) }} seconds) of I/O time is spent on metadata access, \
 specifically {{ "%.2f" | format((open_time / time) * 100) }}% ({{ "%.2f" | format(open_time) }} seconds) on the 'seek' operation.
-                '''
+                ''',
             ),
-        ]
+        ],
     ),
     KnownRules.OPERATION_IMBALANCE.value: Rule(
         name='Operation imbalance',
@@ -118,15 +118,15 @@ specifically {{ "%.2f" | format((open_time / time) * 100) }}% ({{ "%.2f" | forma
                 condition='read_count > write_count',
                 message='''
 'read' operations are {{ "%.2f" | format((read_count / count) * 100) }}% ({{ read_count | format_number }} operations) of total I/O operations.
-                '''
+                ''',
             ),
             RuleReason(
                 condition='write_count > read_count',
                 message='''
 'write' operations are {{ "%.2f" | format((write_count / count) * 100) }}% ({{ write_count | format_number }} operations) of total I/O operations.
-                '''
+                ''',
             ),
-        ]
+        ],
     ),
     KnownRules.RANDOM_OPERATIONS.value: Rule(
         name='Random operations',
@@ -137,9 +137,9 @@ specifically {{ "%.2f" | format((open_time / time) * 100) }}% ({{ "%.2f" | forma
                 message='''
 Issued high number of random operations, specifically {{ "%.2f" | format((random_count / count) * 100) }}% \
 ({{ random_count | format_number }} operations) of total I/O operations.
-                '''
+                ''',
             ),
-        ]
+        ],
     ),
     KnownRules.SIZE_IMBALANCE.value: Rule(
         name='Size imbalance',
@@ -149,15 +149,15 @@ Issued high number of random operations, specifically {{ "%.2f" | format((random
                 condition='read_size > write_size',
                 message='''
 'read' size is {{ "%.2f" | format((read_size / size) * 100) }}% ({{ read_size | format_bytes }}) of total I/O size.
-                '''
+                ''',
             ),
             RuleReason(
                 condition='write_size > read_size',
                 message='''
 'write' size is {{ "%.2f" | format((write_size / size) * 100) }}% ({{ write_size | format_bytes }}) of total I/O size.
-                '''
+                ''',
             ),
-        ]
+        ],
     ),
     KnownRules.SMALL_READS.value: Rule(
         name='Small reads',
@@ -167,15 +167,15 @@ Issued high number of random operations, specifically {{ "%.2f" | format((random
                 condition='(read_time / time) > 0.5',
                 message='''
 'read' time is {{ "%.2f" | format((read_time / time) * 100) }}% ({{ "%.2f" | format(read_time) }} seconds) of I/O time.
-                '''
+                ''',
             ),
             RuleReason(
                 condition='(read_size / count) < 1048576',
                 message='''
 Average 'read's are {{ (read_size / count) | format_bytes }}, which is smaller than {{ 1048576 | format_bytes }}.
-                '''
-            )
-        ]
+                ''',
+            ),
+        ],
     ),
     KnownRules.SMALL_WRITES.value: Rule(
         name='Small writes',
@@ -185,15 +185,15 @@ Average 'read's are {{ (read_size / count) | format_bytes }}, which is smaller t
                 condition='(write_time / time) > 0.5',
                 message='''
 'write' time is {{ "%.2f" | format((write_time / time) * 100) }}% ({{ "%.2f" | format(write_time) }} seconds) of I/O time.
-                '''
+                ''',
             ),
             RuleReason(
                 condition='(write_size / count) < 1048576',
                 message='''
 Average 'write's are {{ (write_size / count) | format_bytes }}, which is smaller than {{ 1048576 | format_bytes }}.
-                '''
-            )
-        ]
+                ''',
+            ),
+        ],
     ),
 }
 
@@ -201,7 +201,6 @@ HUMANIZED_KNOWN_RULES = {rule: KNOWN_RULES[rule].name for rule in KNOWN_RULES}
 
 
 class RuleHandler(abc.ABC):
-
     def __init__(self, rule_key: str) -> None:
         super().__init__()
         self.pluralize = inflect.engine()
@@ -209,7 +208,6 @@ class RuleHandler(abc.ABC):
 
 
 class BottleneckRule(RuleHandler):
-
     def __init__(self, rule_key: str, rule: Rule, verbose: bool = False) -> None:
         super().__init__(rule_key=rule_key)
         self.rule = rule
@@ -222,16 +220,18 @@ class BottleneckRule(RuleHandler):
         scoring_result: ScoringResult,
         view_key: ViewKey,
     ) -> Dict[str, Delayed]:
-
         view_type = view_key[-1]
 
         bottlenecks = scoring_result.scored_view.query(self.rule.condition)
         bottlenecks['time_overall'] = bottlenecks['time'] / metric_boundary
 
-        details = scoring_result.records_index \
-            .to_frame() \
-            .reset_index(drop=True) \
-            .query(f"{view_type} in @indices", local_dict={'indices': bottlenecks.index})
+        details = (
+            scoring_result.records_index.to_frame()
+            .reset_index(drop=True)
+            .query(
+                f"{view_type} in @indices", local_dict={'indices': bottlenecks.index}
+            )
+        )
 
         tasks = {}
         tasks['bottlenecks'] = bottlenecks
@@ -248,7 +248,6 @@ class BottleneckRule(RuleHandler):
         view_key: ViewKey,
         result: Dict[str, Union[str, int, pd.DataFrame, pd.Series, pd.Index]],
     ) -> List[RuleResult]:
-
         # t0 = time.perf_counter()
 
         view_type = view_key[-1]
@@ -298,7 +297,9 @@ class BottleneckRule(RuleHandler):
                 if col in [COL_APP_NAME, COL_NODE_NAME, COL_PROC_NAME, COL_RANK]:
                     num_processes = details.groupby(view_type)[col].nunique().to_dict()
                 if col == COL_TIME_RANGE:
-                    num_time_periods = details.groupby(view_type)[col].nunique().to_dict()
+                    num_time_periods = (
+                        details.groupby(view_type)[col].nunique().to_dict()
+                    )
 
         # print('handle_task_results t1', time.perf_counter() - t0)
 
@@ -311,7 +312,6 @@ class BottleneckRule(RuleHandler):
         results = []
 
         for row in bottlenecks.itertuples():
-
             bot_files = list(files.get(row.Index, []))
             bot_processes = list(processes.get(row.Index, []))
             bot_time_periods = list(time_periods.get(row.Index, []))
@@ -356,26 +356,34 @@ class BottleneckRule(RuleHandler):
             reasons = []
             for i, reason in enumerate(self.rule.reasons):
                 if reasoning[i][row.Index]:
-                    reasons.append(RuleResultReason(
-                        description=reasoning_templates[i].render(row_dict).strip()
-                    ))
+                    reasons.append(
+                        RuleResultReason(
+                            description=reasoning_templates[i].render(row_dict).strip()
+                        )
+                    )
 
             if len(reasons) == 0:
-                reasons.append(RuleResultReason(
-                    description='No reason found, further investigation needed.'
-                ))
+                reasons.append(
+                    RuleResultReason(
+                        description='No reason found, further investigation needed.'
+                    )
+                )
 
             result = RuleResult(
                 compact_desc=None,
                 description=description,
                 detail_list=None,
                 extra_data=row_dict,
-                object_hash=hash('_'.join([
-                    '{:,.6f}'.format(row_dict['time']),
-                    f"{row_dict['num_files']}",
-                    f"{row_dict['num_processes']}",
-                    f"{row_dict['num_time_periods']}",
-                ])),
+                object_hash=hash(
+                    '_'.join(
+                        [
+                            '{:,.6f}'.format(row_dict['time']),
+                            f"{row_dict['num_files']}",
+                            f"{row_dict['num_processes']}",
+                            f"{row_dict['num_time_periods']}",
+                        ]
+                    )
+                ),
                 reasons=reasons,
                 value=row_dict['time'],
                 value_fmt='{:,.6f}'.format(row_dict['time']),
@@ -403,9 +411,7 @@ class BottleneckRule(RuleHandler):
         time_periods=[],
         compact=False,
     ) -> str:
-
         if num_files > 0 and num_processes > 0 and num_time_periods > 0:
-
             nice_view_type = HUMANIZED_VIEW_TYPES[COL_PROC_NAME].lower()
             accessor_name = ' '
             accessed = HUMANIZED_VIEW_TYPES[COL_FILE_NAME].lower()
@@ -426,7 +432,9 @@ class BottleneckRule(RuleHandler):
             accessor_verb = self.pluralize.plural_verb('accesses', num_processes)
             accessed_noun = self.pluralize.plural_noun(accessed, num_files)
             time_period_name = f" ({subject}) " if view_type == COL_TIME_RANGE else ' '
-            time_period_noun = self.pluralize.plural_noun('time period', num_time_periods)
+            time_period_noun = self.pluralize.plural_noun(
+                'time period', num_time_periods
+            )
 
             if self.verbose:
                 time_intervals = get_intervals(values=time_periods)
@@ -451,7 +459,6 @@ class BottleneckRule(RuleHandler):
                 )
 
         else:
-
             nice_subject = subject
             nice_view_type = HUMANIZED_VIEW_TYPES[view_type].lower()
 
@@ -480,7 +487,6 @@ class BottleneckRule(RuleHandler):
 
     @staticmethod
     def _group_similar_behavior(bottlenecks: pd.DataFrame, metric: str, view_type: str):
-
         behavior_col = 'behavior'
         cols = bottlenecks.columns
 
@@ -501,10 +507,14 @@ class BottleneckRule(RuleHandler):
         return bottlenecks.reset_index().groupby(behavior_col).agg(agg_dict)
 
     @staticmethod
-    def _union_details(details: pd.DataFrame, behavior: int, indices: list, view_type: str):
+    def _union_details(
+        details: pd.DataFrame, behavior: int, indices: list, view_type: str
+    ):
         view_types = details.index.names
 
-        filtered_details = details.query(f"{view_type} in @indices", local_dict={'indices': indices})
+        filtered_details = details.query(
+            f"{view_type} in @indices", local_dict={'indices': indices}
+        )
 
         if len(view_types) == 1:
             # This means there is only one view type
@@ -521,29 +531,32 @@ class BottleneckRule(RuleHandler):
                 if agg_key not in view_types:
                     agg_dict.pop(agg_key)
 
-            detail_groups = filtered_details \
-                .reset_index() \
-                .groupby(view_type) \
-                .agg(agg_dict)
+            detail_groups = (
+                filtered_details.reset_index().groupby(view_type).agg(agg_dict)
+            )
 
             # Then create unions for other view types
             agg_dict = {col: lambda x: set.union(*x) for col in agg_dict}
             agg_dict[view_type] = set
 
-        return detail_groups \
-            .reset_index() \
-            .assign(behavior=behavior) \
-            .groupby(['behavior']) \
-            .agg(agg_dict) \
+        return (
+            detail_groups.reset_index()
+            .assign(behavior=behavior)
+            .groupby(['behavior'])
+            .agg(agg_dict)
             .reset_index(drop=True)
+        )
 
 
 class CharacteristicRule(RuleHandler):
-
     deps: List[str] = []
 
     @abc.abstractmethod
-    def define_tasks(self, main_view: dd.DataFrame, view_results: Dict[Metric, Dict[ViewKey, ViewResult]]) -> Dict[str, Delayed]:
+    def define_tasks(
+        self,
+        main_view: dd.DataFrame,
+        view_results: Dict[Metric, Dict[ViewKey, ViewResult]],
+    ) -> Dict[str, Delayed]:
         raise NotImplementedError
 
     @abc.abstractmethod
@@ -557,21 +570,21 @@ class CharacteristicRule(RuleHandler):
 
 
 class CharacteristicAccessPatternRule(CharacteristicRule):
-
     def __init__(self) -> None:
         super().__init__(rule_key=KnownCharacteristics.ACCESS_PATTERN.value)
 
-    def define_tasks(self, main_view: dd.DataFrame, view_results: Dict[Metric, Dict[ViewKey, ViewResult]]) -> Dict[str, Delayed]:
-
+    def define_tasks(
+        self,
+        main_view: dd.DataFrame,
+        view_results: Dict[Metric, Dict[ViewKey, ViewResult]],
+    ) -> Dict[str, Delayed]:
         acc_pat_cols = []
         for acc_pat in list(AccessPattern):
             for col_suffix in ACC_PAT_SUFFIXES:
                 col_name = f"{acc_pat.name.lower()}_{col_suffix}"
                 acc_pat_cols.append(col_name)
 
-        return {
-            'acc_pat_sum': main_view[acc_pat_cols].sum()
-        }
+        return {'acc_pat_sum': main_view[acc_pat_cols].sum()}
 
     def handle_task_results(
         self,
@@ -582,24 +595,31 @@ class CharacteristicAccessPatternRule(CharacteristicRule):
         acc_pat_sum = result['acc_pat_sum']
 
         sequential_count = int(acc_pat_sum['sequential_count'])
-        random_count = int(acc_pat_sum['random_count']) if 'random_count' in acc_pat_sum else 0
+        random_count = (
+            int(acc_pat_sum['random_count']) if 'random_count' in acc_pat_sum else 0
+        )
         total_count = sequential_count + random_count
 
         sequential_title = '[bold]Sequential[/bold]'
         random_title = '[bold]Random[/bold]'
 
-        sequential_per_fmt = f"{sequential_count/total_count*100:.2f}"
-        random_per_fmt = f"{random_count/total_count*100:.2f}"
+        if total_count > 0:
+            sequential_per_fmt = f"{sequential_count/total_count*100:.2f}"
+            random_per_fmt = f"{random_count/total_count*100:.2f}"
 
-        compact_desc = (
-            f"{sequential_title}: {sequential_per_fmt}% - "
-            f"{random_title}: {random_per_fmt}% "
-        )
+            compact_desc = (
+                f"{sequential_title}: {sequential_per_fmt}% - "
+                f"{random_title}: {random_per_fmt}% "
+            )
 
-        value_fmt = (
-            f"{sequential_title}: {sequential_count:,} ops ({sequential_per_fmt}%) - "
-            f"{random_title}: {random_count:,} ops ({random_per_fmt}%) "
-        )
+            value_fmt = (
+                f"{sequential_title}: {sequential_count:,} ops ({sequential_per_fmt}%) - "
+                f"{random_title}: {random_count:,} ops ({random_per_fmt}%) "
+            )
+        else:
+            compact_desc = f"{sequential_title}: N/A - " f"{random_title}: N/A "
+
+            value_fmt = f"{sequential_title}: N/A - " f"{random_title}: N/A "
 
         return RuleResult(
             compact_desc=compact_desc,
@@ -614,7 +634,6 @@ class CharacteristicAccessPatternRule(CharacteristicRule):
 
 
 class CharacteristicComplexityRule(CharacteristicRule):
-
     def __init__(self) -> None:
         super().__init__(rule_key=KnownCharacteristics.COMPLEXITY.value)
         self.deps = [
@@ -623,8 +642,11 @@ class CharacteristicComplexityRule(CharacteristicRule):
             KnownCharacteristics.TIME_PERIOD.value,
         ]
 
-    def define_tasks(self, main_view: dd.DataFrame, view_results: Dict[Metric, Dict[ViewKey, ViewResult]]) -> Dict[str, Delayed]:
-
+    def define_tasks(
+        self,
+        main_view: dd.DataFrame,
+        view_results: Dict[Metric, Dict[ViewKey, ViewResult]],
+    ) -> Dict[str, Delayed]:
         tasks = {}
 
         return tasks
@@ -633,9 +655,8 @@ class CharacteristicComplexityRule(CharacteristicRule):
         self,
         result: dict,
         characteristics: Dict[str, RuleResult],
-        raw_stats: RawStats = None
+        raw_stats: RawStats = None,
     ) -> RuleResult:
-
         num_files = characteristics[KnownCharacteristics.FILE_COUNT.value].value
         num_processes = characteristics[KnownCharacteristics.PROC_COUNT.value].value
         num_time_periods = characteristics[KnownCharacteristics.TIME_PERIOD.value].value
@@ -656,12 +677,14 @@ class CharacteristicComplexityRule(CharacteristicRule):
 
 
 class CharacteristicFileCountRule(CharacteristicRule):
-
     def __init__(self) -> None:
         super().__init__(rule_key=KnownCharacteristics.FILE_COUNT.value)
 
-    def define_tasks(self, main_view: dd.DataFrame, view_results: Dict[Metric, Dict[ViewKey, ViewResult]]) -> Dict[str, Delayed]:
-
+    def define_tasks(
+        self,
+        main_view: dd.DataFrame,
+        view_results: Dict[Metric, Dict[ViewKey, ViewResult]],
+    ) -> Dict[str, Delayed]:
         x = main_view.reset_index()
 
         tasks = {}
@@ -670,16 +693,11 @@ class CharacteristicFileCountRule(CharacteristicRule):
             tasks['total_count'] = x[COL_FILE_NAME].nunique()
 
             if COL_PROC_NAME in x.columns:
-
-                fpp = x \
-                    .groupby([COL_FILE_NAME])[COL_PROC_NAME] \
-                    .nunique() \
-                    .to_frame()
+                fpp = x.groupby([COL_FILE_NAME])[COL_PROC_NAME].nunique().to_frame()
 
                 fpp_count = fpp[fpp[COL_PROC_NAME] == 1][COL_PROC_NAME].count()
 
             else:
-
                 fpp_count = 0
 
             tasks['fpp_count'] = fpp_count
@@ -715,7 +733,9 @@ class CharacteristicFileCountRule(CharacteristicRule):
             shared_count = total_count - fpp_count
             shared_per = f"{shared_count/total_count*100:.2f}%"
 
-            shared_fmt = f"{shared_count:,} {self.pluralize.plural_noun('file', shared_count)}"
+            shared_fmt = (
+                f"{shared_count:,} {self.pluralize.plural_noun('file', shared_count)}"
+            )
             fpp_fmt = f"{fpp_count:,} {self.pluralize.plural_noun('file', fpp_count)}"
 
             compact_desc.append(f"[bold]{shared_title}[/bold]: {shared_per}")
@@ -737,11 +757,14 @@ class CharacteristicFileCountRule(CharacteristicRule):
 
 
 class CharacteristicIOOpsRule(CharacteristicRule):
-
     def __init__(self) -> None:
         super().__init__(rule_key=KnownCharacteristics.IO_COUNT.value)
 
-    def define_tasks(self, main_view: dd.DataFrame, view_results: Dict[Metric, Dict[ViewKey, ViewResult]]) -> Dict[str, Delayed]:
+    def define_tasks(
+        self,
+        main_view: dd.DataFrame,
+        view_results: Dict[Metric, Dict[ViewKey, ViewResult]],
+    ) -> Dict[str, Delayed]:
         tasks = {}
         tasks['total_count'] = main_view['count'].sum()
         for io_type in IO_TYPES:
@@ -780,11 +803,14 @@ class CharacteristicIOOpsRule(CharacteristicRule):
 
 
 class CharacteristicIOSizeRule(CharacteristicRule):
-
     def __init__(self) -> None:
         super().__init__(rule_key=KnownCharacteristics.IO_SIZE.value)
 
-    def define_tasks(self, main_view: dd.DataFrame, view_results: Dict[Metric, Dict[ViewKey, ViewResult]]) -> Dict[str, Delayed]:
+    def define_tasks(
+        self,
+        main_view: dd.DataFrame,
+        view_results: Dict[Metric, Dict[ViewKey, ViewResult]],
+    ) -> Dict[str, Delayed]:
         tasks = {}
         tasks['total_size'] = main_view['data_size'].sum()
         for io_type in IO_TYPES:
@@ -806,19 +832,24 @@ class CharacteristicIOSizeRule(CharacteristicRule):
         compact_desc = [value_fmt]
         detail_list = []
 
-        for i, io_type in enumerate(IO_TYPES):
-            if io_type != 'metadata':
-                size_col = f"{io_type}_size"
-                size = int(result[size_col])
-                compact_desc.append((
-                    f"[bold]{COMPACT_IO_TYPES[i]}[/bold]: "
-                    f"{size/total_size*100:.2f}%"
-                ))
-                detail_list.append((
-                    f"{io_type.capitalize()} - "
-                    f"{format_bytes(size)} "
-                    f"({size/total_size*100:.2f}%)"
-                ))
+        if total_size > 0:
+            for i, io_type in enumerate(IO_TYPES):
+                if io_type != 'metadata':
+                    size_col = f"{io_type}_size"
+                    size = int(result[size_col])
+                    compact_desc.append(
+                        (
+                            f"[bold]{COMPACT_IO_TYPES[i]}[/bold]: "
+                            f"{size/total_size*100:.2f}%"
+                        )
+                    )
+                    detail_list.append(
+                        (
+                            f"{io_type.capitalize()} - "
+                            f"{format_bytes(size)} "
+                            f"({size/total_size*100:.2f}%)"
+                        )
+                    )
 
         return RuleResult(
             compact_desc=' - '.join(compact_desc),
@@ -833,31 +864,26 @@ class CharacteristicIOSizeRule(CharacteristicRule):
 
 
 class CharacteristicIOTimeRule(CharacteristicRule):
-
     def __init__(self) -> None:
         super().__init__(rule_key=KnownCharacteristics.IO_TIME.value)
 
-    def define_tasks(self, main_view: dd.DataFrame, view_results: Dict[Metric, Dict[ViewKey, ViewResult]]) -> Dict[str, Delayed]:
+    def define_tasks(
+        self,
+        main_view: dd.DataFrame,
+        view_results: Dict[Metric, Dict[ViewKey, ViewResult]],
+    ) -> Dict[str, Delayed]:
         view_types = main_view.index._meta.names
 
         tasks = {}
 
         if COL_PROC_NAME in view_types:
-
-            tasks['total_time'] = main_view \
-                .groupby(['proc_name']) \
-                .sum()['time'] \
-                .max()
+            tasks['total_time'] = main_view.groupby(['proc_name']).sum()['time'].max()
 
             for io_type in IO_TYPES:
                 time_col = f"{io_type}_time"
-                tasks[time_col] = main_view \
-                    .groupby(['proc_name']) \
-                    .sum()[time_col] \
-                    .max()
+                tasks[time_col] = main_view.groupby(['proc_name']).sum()[time_col].max()
 
         else:
-
             tasks['total_time'] = main_view['time'].sum()
 
             for io_type in IO_TYPES:
@@ -882,7 +908,9 @@ class CharacteristicIOTimeRule(CharacteristicRule):
             time = result[time_col]
             time_per = f"{time/total_time*100:.2f}%"
             compact_desc.append(f"[bold]{COMPACT_IO_TYPES[i]}[/bold]: {time_per}")
-            detail_list.append(f"{io_type.capitalize()} - {time:.2f} seconds ({time_per})")
+            detail_list.append(
+                f"{io_type.capitalize()} - {time:.2f} seconds ({time_per})"
+            )
 
         return RuleResult(
             compact_desc=' - '.join(compact_desc),
@@ -898,7 +926,6 @@ class CharacteristicIOTimeRule(CharacteristicRule):
 
 
 class CharacteristicProcessCount(CharacteristicRule):
-
     def __init__(self, rule_key: str) -> None:
         super().__init__(rule_key=rule_key)
         self.col = COL_PROC_NAME
@@ -920,7 +947,11 @@ class CharacteristicProcessCount(CharacteristicRule):
                 KnownCharacteristics.IO_TIME.value,
             ]
 
-    def define_tasks(self, main_view: dd.DataFrame, view_results: Dict[Metric, Dict[ViewKey, ViewResult]]) -> Dict[str, Delayed]:
+    def define_tasks(
+        self,
+        main_view: dd.DataFrame,
+        view_results: Dict[Metric, Dict[ViewKey, ViewResult]],
+    ) -> Dict[str, Delayed]:
         view_types = main_view.index._meta.names
 
         tasks = {}
@@ -934,28 +965,33 @@ class CharacteristicProcessCount(CharacteristicRule):
                 return tasks
 
         if self.col == COL_PROC_NAME:
-            tasks[f"{self.col}s"] = main_view \
-                .map_partitions(lambda df: df.index.get_level_values(COL_PROC_NAME)) \
-                .nunique()
+            tasks[f"{self.col}s"] = main_view.map_partitions(
+                lambda df: df.index.get_level_values(COL_PROC_NAME)
+            ).nunique()
         else:
-            tasks[f"{self.col}s"] = main_view \
-                .map_partitions(set_proc_name_parts) \
-                .reset_index() \
-                .groupby([self.col, COL_PROC_NAME]) \
-                .agg({
-                    'count': sum,
-                    'time': sum,
-                    'read_size': sum,
-                    'write_size': sum,
-                }) \
-                .groupby([self.col]) \
-                .agg({
-                    'count': sum,
-                    'time': max,
-                    'read_size': sum,
-                    'write_size': sum,
-                }) \
+            tasks[f"{self.col}s"] = (
+                main_view.map_partitions(set_proc_name_parts)
+                .reset_index()
+                .groupby([self.col, COL_PROC_NAME])
+                .agg(
+                    {
+                        'count': sum,
+                        'time': sum,
+                        'read_size': sum,
+                        'write_size': sum,
+                    }
+                )
+                .groupby([self.col])
+                .agg(
+                    {
+                        'count': sum,
+                        'time': max,
+                        'read_size': sum,
+                        'write_size': sum,
+                    }
+                )
                 .sort_values('time', ascending=False)
+            )
 
         return tasks
 
@@ -965,7 +1001,6 @@ class CharacteristicProcessCount(CharacteristicRule):
         characteristics: Dict[str, RuleResult] = None,
         raw_stats: RawStats = None,
     ) -> RuleResult:
-
         if self.col == COL_PROC_NAME:
             num_processes = int(result[f"{self.col}s"])
 
@@ -989,7 +1024,7 @@ class CharacteristicProcessCount(CharacteristicRule):
         nodes_apps = pd.DataFrame(result[f"{self.col}s"])
 
         detail_list = []
-        if len(nodes_apps) > 1:
+        if len(nodes_apps) > 1 and total_size > 0:
             for node, row in nodes_apps.iterrows():
                 read_size = row['read_size']
                 write_size = row['write_size']
@@ -997,19 +1032,27 @@ class CharacteristicProcessCount(CharacteristicRule):
                 write_size_fmt = format_bytes(write_size)
                 read_size_per = read_size / total_size * 100
                 write_size_per = write_size / total_size * 100
-                detail_list.append(' - '.join([
-                    node,
-                    f"{row['time']:.2f} s ({row['time'] / max_io_time * 100:.2f}%)",
-                    f"{read_size_fmt}/{write_size_fmt} R/W ({read_size_per:.2f}/{write_size_per:.2f}%)",
-                    f"{int(row['count']):,} ops ({row['count'] / total_ops * 100:.2f}%)"
-                ]))
+                detail_list.append(
+                    ' - '.join(
+                        [
+                            node,
+                            f"{row['time']:.2f} s ({row['time'] / max_io_time * 100:.2f}%)",
+                            f"{read_size_fmt}/{write_size_fmt} R/W ({read_size_per:.2f}/{write_size_per:.2f}%)",
+                            f"{int(row['count']):,} ops ({row['count'] / total_ops * 100:.2f}%)",
+                        ]
+                    )
+                )
 
         num_nodes_apps = len(nodes_apps)
 
         if self.col == COL_NODE_NAME:
-            value_fmt = f"{num_nodes_apps} {self.pluralize.plural_noun('node', num_nodes_apps)}"
+            value_fmt = (
+                f"{num_nodes_apps} {self.pluralize.plural_noun('node', num_nodes_apps)}"
+            )
         else:
-            value_fmt = f"{num_nodes_apps} {self.pluralize.plural_noun('app', num_nodes_apps)}"
+            value_fmt = (
+                f"{num_nodes_apps} {self.pluralize.plural_noun('app', num_nodes_apps)}"
+            )
 
         return RuleResult(
             compact_desc=value_fmt,
@@ -1024,12 +1067,14 @@ class CharacteristicProcessCount(CharacteristicRule):
 
 
 class CharacteristicTimePeriodCountRule(CharacteristicRule):
-
     def __init__(self) -> None:
         super().__init__(rule_key=KnownCharacteristics.TIME_PERIOD.value)
 
-    def define_tasks(self, main_view: dd.DataFrame, view_results: Dict[Metric, Dict[ViewKey, ViewResult]]) -> Dict[str, Delayed]:
-
+    def define_tasks(
+        self,
+        main_view: dd.DataFrame,
+        view_results: Dict[Metric, Dict[ViewKey, ViewResult]],
+    ) -> Dict[str, Delayed]:
         x = main_view.reset_index()
 
         tasks = {}
@@ -1047,7 +1092,6 @@ class CharacteristicTimePeriodCountRule(CharacteristicRule):
         characteristics: Dict[str, RuleResult] = None,
         raw_stats: RawStats = None,
     ) -> RuleResult:
-
         num_time_periods = int(result[f"total_count"])
 
         compact_desc = f"{num_time_periods:,} {self.pluralize.plural_noun('time period', num_time_periods)}"
@@ -1065,12 +1109,19 @@ class CharacteristicTimePeriodCountRule(CharacteristicRule):
 
 
 class CharacteristicXferSizeRule(CharacteristicRule):
-
     def __init__(self, rule_key: str) -> None:
         super().__init__(rule_key)
-        self.io_op = 'write' if rule_key is KnownCharacteristics.WRITE_XFER_SIZE.value else 'read'
+        self.io_op = (
+            'write'
+            if rule_key is KnownCharacteristics.WRITE_XFER_SIZE.value
+            else 'read'
+        )
 
-    def define_tasks(self, main_view: dd.DataFrame, view_results: Dict[Metric, Dict[ViewKey, ViewResult]]) -> Dict[str, Delayed]:
+    def define_tasks(
+        self,
+        main_view: dd.DataFrame,
+        view_results: Dict[Metric, Dict[ViewKey, ViewResult]],
+    ) -> Dict[str, Delayed]:
         tasks = {}
 
         count_col, min_col, max_col, per_col, xfer_col = (
@@ -1097,7 +1148,6 @@ class CharacteristicXferSizeRule(CharacteristicRule):
         characteristics: Dict[str, RuleResult] = None,
         raw_stats: RawStats = None,
     ) -> RuleResult:
-
         count_col, min_col, max_col, per_col, xfer_col = (
             f"{self.io_op}_count",
             f"{self.io_op}_min",
@@ -1115,14 +1165,18 @@ class CharacteristicXferSizeRule(CharacteristicRule):
 
         xfer_sizes = pd.DataFrame(result['xfer_sizes'])
         xfer_sizes[xfer_col] = pd.cut(
-            xfer_sizes.index, bins=XFER_SIZE_BINS, labels=XFER_SIZE_BIN_LABELS, right=True)
-        xfer_bins = xfer_sizes \
-            .groupby([xfer_col], observed=True) \
-            .sum() \
-            .replace(0, np.nan) \
+            xfer_sizes.index,
+            bins=XFER_SIZE_BINS,
+            labels=XFER_SIZE_BIN_LABELS,
+            right=True,
+        )
+        xfer_bins = (
+            xfer_sizes.groupby([xfer_col], observed=True)
+            .sum()
+            .replace(0, np.nan)
             .dropna()
-        xfer_bins.loc[:, per_col] = xfer_bins[count_col] / \
-            xfer_bins[count_col].sum()
+        )
+        xfer_bins.loc[:, per_col] = xfer_bins[count_col] / xfer_bins[count_col].sum()
 
         total_ops = int(xfer_bins[count_col].sum())
 
@@ -1140,7 +1194,8 @@ class CharacteristicXferSizeRule(CharacteristicRule):
         detail_list = []
         for xfer, row in xfer_bins.iterrows():
             detail_list.append(
-                f"{xfer} - {int(row[count_col]):,} ops ({row['per'] * 100:.2f}%)")
+                f"{xfer} - {int(row[count_col]):,} ops ({row['per'] * 100:.2f}%)"
+            )
 
         result = RuleResult(
             compact_desc=compact_desc,
