@@ -9,14 +9,14 @@ py.install_sources(
         'cluster_management.py',
         'constants.py',
         'darshan.py',
-        'dlp.py',
+        'dftracer.py',
         'recorder.py',
         'rule_engine.py',
         'rules.py',
         'scoring.py',
         'types.py',
     ],
-    subdir: 'wisio'
+    subdir: 'wisio',
 )
 
 subdir('_darshan')
