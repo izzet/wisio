@@ -1,4 +1,4 @@
-add_project_arguments('-fPIC', '-g', '-rdynamic', language: 'cpp')
+# add_project_arguments('-fPIC', '-rdynamic', language: 'cpp')
 
 # cpp-logger
 cpp_logger_sources = [
@@ -45,6 +45,7 @@ mpi_dep = dependency('mpi', language: 'cpp', required: true)
 ncurses_dep = dependency('ncurses', required: true)
 nlohmann_json_dep = dependency('nlohmann_json', required: true)
 parquet_dep = dependency('parquet', required: true)
+zlib_dep = dependency('zlib', required: false)
 
 executable(
     meson.project_name() + '-recorder2parquet',
@@ -59,6 +60,7 @@ executable(
         nlohmann_json_dep,
         parquet_dep,
         recorder_dep,
+        zlib_dep,
     ],
-    link_args: ['-liberty', '-lreadline', '-lstdc++fs', '-lz'],
+    link_args: ['-liberty', '-lreadline', '-lstdc++fs'],
 )
