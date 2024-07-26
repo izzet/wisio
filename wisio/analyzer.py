@@ -280,7 +280,7 @@ class Analyzer(abc.ABC):
             .agg(HLM_AGG, split_out=math.ceil(math.sqrt(traces.npartitions))) \
             .persist() \
             .reset_index() \
-            .repartition(partition_size)
+            .repartition(partition_size=partition_size)
         hlm = flatten_column_names(hlm)
         return hlm.rename(columns=HLM_COLS).persist()
 
