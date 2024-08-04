@@ -555,7 +555,7 @@ class AnalyzerResultOutput(object):
                                 'enabled' if output.runtime_config.processes else 'disabled')
             setup_table.add_row('Cluster type', output.runtime_config.cluster_type)
             setup_table.add_row('Debug', 'enabled' if output.runtime_config.debug else 'disabled')
-            setup_table.add_row('Slope threshold', f"{output.runtime_config.slope_threshold:.2f}")
+            setup_table.add_row('Threshold', f"{output.runtime_config.threshold:.2f}")
             debug_table.add_row('Runtime Config', setup_table)
 
             debug_panel = Panel(debug_table, title='Debug', padding=1)
@@ -570,7 +570,7 @@ class AnalyzerResultOutput(object):
             else:
                 console.print(bot_panel)
 
-        run_dir = f"{self.runtime_config.working_dir}/{self.runtime_config.run_id}"
+        run_dir = f"{self.runtime_config.working_dir}"
 
         console.save_html(f"{run_dir}/output.html", clear=False)
         console.save_text(f"{run_dir}/output.txt", clear=False)
@@ -578,7 +578,7 @@ class AnalyzerResultOutput(object):
 
     def csv(self, name: str, max_bottlenecks_per_view_type=3, show_debug=True):
 
-        run_dir = f"{self.runtime_config.working_dir}/{self.runtime_config.run_id}"
+        run_dir = f"{self.runtime_config.working_dir}"
         ensure_dir(run_dir)
 
         self._create_output_df(name=name).to_csv(f"{run_dir}/run.csv", encoding='utf8')
@@ -606,7 +606,7 @@ class AnalyzerResultOutput(object):
 
     def sqlite(self, name: str, run_db_path: str = None):
 
-        run_dir = f"{self.runtime_config.working_dir}/{self.runtime_config.run_id}"
+        run_dir = f"{self.runtime_config.working_dir}"
         ensure_dir(run_dir)
 
         con = sqlite3.connect(f"{run_dir}/result.db")
@@ -1362,7 +1362,7 @@ class AnalysisResultPlots(object):
         metric: Metric,
         view_keys: List[ViewKey],
         legends: List[str] = [],
-        slope_threshold: int = 45,
+        threshold: int = 45,
         ax: Axes = None,
         xlabel: str = None,
         ylabel: str = None,
@@ -1382,7 +1382,7 @@ class AnalysisResultPlots(object):
                 ax=ax,
                 color=color,
                 metric=metric,
-                slope_threshold=slope_threshold,
+                threshold=threshold,
                 view=view,
                 x_col=x_col,
                 y_col=y_col,
@@ -1405,12 +1405,12 @@ class AnalysisResultPlots(object):
         ax: Axes,
         color: str,
         metric: Metric,
-        slope_threshold: int,
+        threshold: int,
         view: pd.DataFrame,
         x_col: str,
         y_col: str,
     ):
-        slope_cond = view[f"{metric}_slope"] < slope_threshold
+        slope_cond = view[f"{metric}_slope"] < threshold
         view.loc[slope_cond, f"{x_col}_line"] = view[x_col]
         line = view[f"{x_col}_line"].to_numpy()
         x = view[x_col].to_numpy()

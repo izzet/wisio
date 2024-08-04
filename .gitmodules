@@ -1,10 +1,9 @@
 [submodule "tools/lib/backward-cpp"]
 	path = tools/lib/backward-cpp
-	url = git@github.com:bombela/backward-cpp.git
+	url = https://github.com/bombela/backward-cpp.git
 [submodule "tools/lib/cpp-logger"]
 	path = tools/lib/cpp-logger
-	url = git@github.com:hariharan-devarajan/cpp-logger.git
+	url = https://github.com/hariharan-devarajan/cpp-logger.git
 [submodule "tools/lib/recorder"]
 	path = tools/lib/recorder
-	url = git@github.com:hariharan-devarajan/Recorder.git
-	branch = pilgrim
+	url = https://github.com/uiuc-hpc/Recorder.git

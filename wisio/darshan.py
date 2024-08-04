@@ -6,7 +6,7 @@ from glob import glob
 from typing import List
 
 from ._darshan.analysis import create_dxt_dataframe
-from .cluster_management import ClusterConfig
+from .config import AnalysisConfig, CheckpointConfig, ClusterConfig, OutputConfig
 from .constants import EVENT_READ_TRACES
 from .analyzer import CHECKPOINT_MAIN_VIEW, Analyzer
 from .types import AnalysisAccuracy, Metric, RawStats, ViewType
@@ -30,26 +30,23 @@ DXT_COLS = {
 
 
 class DarshanAnalyzer(Analyzer):
-
     def __init__(
         self,
-        working_dir: str,
-        bottleneck_dir: str = '',
-        checkpoint: bool = False,
-        checkpoint_dir: str = '',
-        cluster_config: ClusterConfig = None,
+        analysis_config: AnalysisConfig,
+        checkpoint_config: CheckpointConfig,
+        cluster_config: ClusterConfig,
+        output_config: OutputConfig,
         debug=False,
         verbose=False,
     ):
         super().__init__(
             name='Darshan',
-            bottleneck_dir=bottleneck_dir,
-            checkpoint=checkpoint,
-            checkpoint_dir=checkpoint_dir,
+            analysis_config=analysis_config,
+            checkpoint_config=checkpoint_config,
             cluster_config=cluster_config,
+            output_config=output_config,
             debug=debug,
             verbose=verbose,
-            working_dir=working_dir,
         )
 
     def analyze_dxt(
@@ -60,7 +57,7 @@ class DarshanAnalyzer(Analyzer):
         exclude_bottlenecks: List[str] = [],
         exclude_characteristics: List[str] = [],
         logical_view_types: bool = False,
-        slope_threshold: int = 45,
+        threshold: int = 45,
         time_granularity: int = 1e3,
         view_types: List[ViewType] = ['file_name', 'proc_name', 'time_range'],
     ):
@@ -69,7 +66,9 @@ class DarshanAnalyzer(Analyzer):
         traces = dd.from_pandas(data=pd.DataFrame(), npartitions=1)
 
         # Check checkpoint status
-        main_view_name = self.get_checkpoint_name(CHECKPOINT_MAIN_VIEW, *sorted(view_types))
+        main_view_name = self.get_checkpoint_name(
+            CHECKPOINT_MAIN_VIEW, *sorted(view_types)
+        )
         if not self.checkpoint or not self.has_checkpoint(name=main_view_name):
             # Read traces
             with EventLogger(key=EVENT_READ_TRACES, message='Read traces'):
@@ -85,7 +84,7 @@ class DarshanAnalyzer(Analyzer):
                 job_time=delayed(job_time),
                 time_granularity=time_granularity,
                 total_count=traces.index.count().persist(),
-            )
+            ),
         )
 
         # Analyze traces
@@ -96,7 +95,7 @@ class DarshanAnalyzer(Analyzer):
             logical_view_types=logical_view_types,
             metrics=metrics,
             raw_stats=RawStats(**raw_stats),
-            slope_threshold=slope_threshold,
+            threshold=threshold,
             traces=traces,
             view_types=view_types,
         )
@@ -112,4 +111,6 @@ class DarshanAnalyzer(Analyzer):
                 df2, _ = create_dxt_dataframe(trace_path, time_granularity)
                 df = pd.concat([df, df2])
 
-        return dd.from_pandas(df, npartitions=max(1, self.cluster_config.n_workers)), job_time
+        return dd.from_pandas(
+            df, npartitions=max(1, self.cluster_config.n_workers)
+        ), job_time

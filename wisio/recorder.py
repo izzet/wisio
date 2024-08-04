@@ -6,7 +6,7 @@ from dask.distributed import Future, get_client
 from typing import List, Union
 
 from .analyzer import CHECKPOINT_MAIN_VIEW, Analyzer
-from .cluster_management import ClusterConfig
+from .config import AnalysisConfig, CheckpointConfig, ClusterConfig, OutputConfig
 from .constants import EVENT_READ_TRACES, IO_CATS
 from .types import AnalysisAccuracy, Metric, RawStats, ViewType
 from .utils.dask_utils import EventLogger
@@ -33,26 +33,23 @@ RENAMED_COLS = {'duration': 'time'}
 
 
 class RecorderAnalyzer(Analyzer):
-
     def __init__(
         self,
-        working_dir: str,
-        bottleneck_dir: str = '',
-        checkpoint: bool = False,
-        checkpoint_dir: str = '',
-        cluster_config: ClusterConfig = None,
+        analysis_config: AnalysisConfig,
+        checkpoint_config: CheckpointConfig,
+        cluster_config: ClusterConfig,
+        output_config: OutputConfig,
         debug=False,
         verbose=False,
     ):
         super().__init__(
             name='Recorder',
-            bottleneck_dir=bottleneck_dir,
-            checkpoint=checkpoint,
-            checkpoint_dir=checkpoint_dir,
+            analysis_config=analysis_config,
+            checkpoint_config=checkpoint_config,
             cluster_config=cluster_config,
+            output_config=output_config,
             debug=debug,
             verbose=verbose,
-            working_dir=working_dir,
         )
 
     def analyze_parquet(
@@ -63,7 +60,7 @@ class RecorderAnalyzer(Analyzer):
         exclude_bottlenecks: List[str] = [],
         exclude_characteristics: List[str] = [],
         logical_view_types: bool = False,
-        slope_threshold: int = 45,
+        threshold: int = 45,
         time_granularity: int = 1e7,
         view_types: List[ViewType] = ['file_name', 'proc_name', 'time_range'],
     ):
@@ -71,7 +68,9 @@ class RecorderAnalyzer(Analyzer):
         traces = pd.DataFrame()
 
         # Check checkpoint status
-        main_view_name = self.get_checkpoint_name(CHECKPOINT_MAIN_VIEW, *sorted(view_types))
+        main_view_name = self.get_checkpoint_name(
+            CHECKPOINT_MAIN_VIEW, *sorted(view_types)
+        )
         if not self.checkpoint or not self.has_checkpoint(name=main_view_name):
             # Read traces
             with EventLogger(key=EVENT_READ_TRACES, message='Read traces'):
@@ -87,7 +86,7 @@ class RecorderAnalyzer(Analyzer):
                 job_time=job_time.persist(),
                 time_granularity=time_granularity,
                 total_count=total_count.persist(),
-            )
+            ),
         )
 
         # Analyze traces
@@ -98,7 +97,7 @@ class RecorderAnalyzer(Analyzer):
             logical_view_types=logical_view_types,
             metrics=metrics,
             raw_stats=RawStats(**raw_stats),
-            slope_threshold=slope_threshold,
+            threshold=threshold,
             traces=traces,
             view_types=view_types,
         )
@@ -107,7 +106,7 @@ class RecorderAnalyzer(Analyzer):
         return self.job_time
 
     def read_parquet_files(self, trace_path: str, time_granularity: int):
-        traces = dd.read_parquet(f"{trace_path}/*.parquet")
+        traces = dd.read_parquet(trace_path)
 
         job_time = traces['tend'].max() - traces['tstart'].min()
 
@@ -122,10 +121,12 @@ class RecorderAnalyzer(Analyzer):
             time_granularity=time_granularity,
         )
 
-        traces = traces[(traces['cat'] == CAT_POSIX) & (traces['io_cat'].isin(IO_CATS))] \
-            .map_partitions(self._set_time_ranges, time_ranges=time_ranges) \
-            .rename(columns=RENAMED_COLS) \
+        traces = (
+            traces[(traces['cat'] == CAT_POSIX) & (traces['io_cat'].isin(IO_CATS))]
+            .map_partitions(self._set_time_ranges, time_ranges=time_ranges)
+            .rename(columns=RENAMED_COLS)
             .drop(columns=DROPPED_COLS, errors='ignore')
+        )
 
         total_count = traces.index.count()
 
@@ -147,4 +148,6 @@ class RecorderAnalyzer(Analyzer):
     def _set_time_ranges(df: pd.DataFrame, time_ranges: Union[Future, np.ndarray]):
         if isinstance(time_ranges, Future):
             time_ranges = time_ranges.result()
-        return df.assign(time_range=np.digitize(df['tmid'], bins=time_ranges, right=True))
+        return df.assign(
+            time_range=np.digitize(df['tmid'], bins=time_ranges, right=True)
+        )
