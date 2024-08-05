@@ -4,6 +4,8 @@
 
 # WisIO: Automated I/O Analysis for HPC Workflows
 
+[![Build and Test](https://github.com/izzet/wisio/actions/workflows/ci.yml/badge.svg)](https://github.com/izzet/wisio/actions/workflows/ci.yml)
+
 ## Overview
 
 **"Extract wisdom from large-scale rich I/O traces of HPC workflows."**
