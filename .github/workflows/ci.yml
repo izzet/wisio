@@ -11,7 +11,7 @@ jobs:
       fail-fast: false
       matrix:
         os: ["ubuntu-22.04"]
-        python: ["3.9", "3.10", "3.11"]
+        python: ["3.9", "3.10", "3.11.8"]
     name: ${{ matrix.os }}-${{ matrix.python }}
     runs-on: ${{ matrix.os }}
     env:
