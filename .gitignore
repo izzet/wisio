@@ -5,11 +5,13 @@
 .ipynb_checkpoints
 .mesonpy-*
 .pyenv
+.pytest_cache
 .spack
 .vscode
 .wisio
 __pycache__
 build
+builddir
 dask-worker-space
 dist
 tmp

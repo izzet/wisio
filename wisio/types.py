@@ -40,8 +40,7 @@ class AnalysisRuntimeConfig:
     num_threads_per_worker: int
     num_workers: int
     processes: bool
-    run_id: str
-    slope_threshold: float
+    threshold: float
     verbose: bool
     working_dir: str
 

@@ -16,6 +16,7 @@
 #include <nlohmann/json.hpp>
 #include <parquet/arrow/writer.h>
 #include <reader.h>
+#include <reader-private.h>
 #include <regex>
 #include <set>
 #include <signal.h>
@@ -31,6 +32,8 @@
 namespace fs = std::experimental::filesystem;
 
 #define WISIO_LOGGER cpplogger::Logger::Instance("WISIO")
+#define WISIO_LOGDEBUG(format, ...) \
+    WISIO_LOGGER->log(cpplogger::LOG_DEBUG, format, __VA_ARGS__);
 #define WISIO_LOGINFO(format, ...) \
     WISIO_LOGGER->log(cpplogger::LOG_INFO, format, __VA_ARGS__);
 #define WISIO_LOGWARN(format, ...) \
@@ -370,6 +373,7 @@ char *get_filename(Record *record)
     }
     const char *func_name = recorder_get_func_name(&reader, record);
     const char *open_condition = strstr(func_name, "open");
+    const char *opendir_condition = strstr(func_name, "opendir");
     const char *mpi_condition = strstr(func_name, "MPI");
     const char *close_condition = strstr(func_name, "close");
     const char *closedir_condition = strstr(func_name, "closedir");
@@ -396,6 +400,8 @@ char *get_filename(Record *record)
     const char *fcntl_condition = strstr(func_name, "fcntl");
     const char *rmdir_condition = strstr(func_name, "rmdir");
     const char *chmod_condition = strstr(func_name, "chmod");
+    if (opendir_condition)
+        return record->args[0];
     if (open_condition && !mpi_condition)
         return record->args[0];
     if (open_condition && mpi_condition)
@@ -797,6 +803,7 @@ void handle_one_record(Record *record, void *arg)
             else
             {
                 const char *open_condition = strstr(func_id, "open");
+                const char *opendir_condition = strstr(func_id, "opendir");
                 const char *close_condition = strstr(func_id, "close");
 
                 const char *fopen_condition = strstr(func_id, "fopen");
@@ -840,7 +847,7 @@ void handle_one_record(Record *record, void *arg)
                             }
                         }
                     }
-                    else if (open_condition)
+                    else if (open_condition && !opendir_condition)
                     {
                         int open_flag = atol(record->args[1]); // get open flags
                         // The file creation flags are O_CLOEXEC, O_CREAT, O_DIRECTORY, O_EXCL, O_NOCTTY, O_NOFOLLOW, O_TMPFILE, and O_TRUNC
@@ -892,7 +899,7 @@ void handle_one_record(Record *record, void *arg)
         }
         writer->categoryBuilder.Append(cat);
         writer->ioCategoryBuilder.Append(io_cat);
-        writer->levelBuilder.Append(record->level);
+        writer->levelBuilder.Append(record->call_depth);
         writer->hostnameBuilder.Append(writer->directory.hostname);
         writer->procnameBuilder.Append(proc_name);
         writer->appBuilder.Append(writer->directory.app);
@@ -1012,19 +1019,14 @@ int max(int a, int b) { return a > b ? a : b; }
 
 int process_rank(char *parquet_file_dir, int rank, Directory dir, ParquetWriter *writer)
 {
-    CST cst;
-    CFG cfg;
     writer->directory = dir;
     writer->rank = rank;
-    int records = recorder_read_cst(&reader, rank, &cst);
-    if (records > 0)
+    CST *cst = reader_get_cst(&reader, 0);
+    if (cst->entries > 0)
     {
-        recorder_read_cfg(&reader, rank, &cfg);
-        recorder_decode_records(&reader, &cst, &cfg, handle_one_record, writer);
-        WISIO_LOGINFO("rank %d finished, unique call signatures: %d", rank, cst.entries);
-        recorder_free_cst(&cst);
-        recorder_free_cfg(&cfg);
-        return cst.entries;
+        recorder_decode_records(&reader, rank, handle_one_record, writer);
+        WISIO_LOGINFO("rank %d finished, unique call signatures: %d", rank, cst->entries);
+        return cst->entries;
     }
     return 0;
 }
@@ -1049,15 +1051,15 @@ private:
 int main(int argc, char **argv)
 {
     MPI_Init(&argc, &argv);
-    struct sigaction sa;
-    sa.sa_handler = signal_handler;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_RESTART;
-    sigaction(SIGSEGV, &sa, NULL);
-    sigaction(SIGUSR1, &sa, NULL);
-    sigaction(SIGABRT, &sa, NULL);
-    sigaction(SIGHUP, &sa, NULL);
-    sigaction(SIGTERM, &sa, NULL);
+    // struct sigaction sa;
+    // sa.sa_handler = signal_handler;
+    // sigemptyset(&sa.sa_mask);
+    // sa.sa_flags = SA_RESTART;
+    // sigaction(SIGSEGV, &sa, NULL);
+    // sigaction(SIGUSR1, &sa, NULL);
+    // sigaction(SIGABRT, &sa, NULL);
+    // sigaction(SIGHUP, &sa, NULL);
+    // sigaction(SIGTERM, &sa, NULL);
     char *wisio_log_level = getenv("WISIO_LOG_LEVEL");
     if (wisio_log_level == nullptr)
     {
@@ -1074,7 +1076,7 @@ int main(int argc, char **argv)
         else if (strcmp(wisio_log_level, "DEBUG") == 0)
         {
             WISIO_LOGINFO("Enabling DEBUG loggin", "");
-            WISIO_LOGGER->level = cpplogger::LoggerType::LOG_WARN;
+            WISIO_LOGGER->level = cpplogger::LoggerType::LOG_DEBUG;
         }
     }
     char parquet_file_dir[256], parquet_file_path[256];

@@ -1,0 +1,71 @@
+name: Build and Test
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["ubuntu-22.04"]
+        python: ["3.9", "3.10", "3.11.8"]
+    name: ${{ matrix.os }}-${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    env:
+      OMPI_ALLOW_RUN_AS_ROOT: 1
+      OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
+    steps:
+      - uses: actions/checkout@v4
+        if: github.event_name == 'push'
+        with:
+          submodules: recursive
+      - uses: actions/checkout@v4
+        if: github.event_name == 'pull_request'
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install system dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            ca-certificates \
+            lsb-release \
+            wget
+          wget https://apache.jfrog.io/artifactory/arrow/$(lsb_release --id --short | tr 'A-Z' 'a-z')/apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
+          sudo apt install -y ./apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
+          sudo apt update
+          sudo apt install -y \
+            build-essential \
+            cmake \
+            git \
+            libarrow-dev \
+            libncurses-dev \
+            libopenmpi-dev \
+            libparquet-dev \
+            libreadline-dev \
+            meson \
+            ninja-build \
+            nlohmann-json3-dev \
+            openmpi-bin \
+            openmpi-common
+      - name: Install WisIO
+        run: |
+          pip install --upgrade pip
+          pip install meson-python
+          pip install .[darshan]
+          pip install -r tests/requirements.txt
+      - name: Run Python tests
+        run: |
+          pytest -v
+      - name: Run C++ tests
+        run: |
+          meson build
+          meson compile -C build
+          meson test -v -C build
+          meson test -v -C build --setup=mpi

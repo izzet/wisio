@@ -1,0 +1,2 @@
+dir: ${hydra:run.dir}/checkpoints
+enabled: false

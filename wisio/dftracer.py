@@ -5,8 +5,9 @@ from dask import delayed
 from dask.bag import read_text
 from glob import glob
 from typing import List
+
 from .analyzer import Analyzer
-from .cluster_management import ClusterConfig
+from .config import AnalysisConfig, CheckpointConfig, ClusterConfig, OutputConfig
 from .constants import (
     COL_ACC_PAT,
     COL_COUNT,
@@ -148,23 +149,21 @@ def _io_function(json_object, current_dict, time_approximate, condition_fn):
 class DFTracerAnalyzer(Analyzer):
     def __init__(
         self,
-        working_dir: str,
-        bottleneck_dir: str = '',
-        checkpoint: bool = False,
-        checkpoint_dir: str = '',
-        cluster_config: ClusterConfig = None,
+        analysis_config: AnalysisConfig,
+        checkpoint_config: CheckpointConfig,
+        cluster_config: ClusterConfig,
+        output_config: OutputConfig,
         debug=False,
         verbose=False,
     ):
         super().__init__(
             name='DFTracer',
-            bottleneck_dir=bottleneck_dir,
-            checkpoint=checkpoint,
-            checkpoint_dir=checkpoint_dir,
+            analysis_config=analysis_config,
+            checkpoint_config=checkpoint_config,
             cluster_config=cluster_config,
+            output_config=output_config,
             debug=debug,
             verbose=verbose,
-            working_dir=working_dir,
         )
 
     def analyze_pfw(
@@ -175,7 +174,7 @@ class DFTracerAnalyzer(Analyzer):
         exclude_characteristics: List[str] = [],
         logical_view_types: bool = False,
         metrics=['duration'],
-        slope_threshold: int = 45,
+        threshold: int = 45,
         time_granularity: int = 1e6,
         view_types: List[ViewType] = ['file_name', 'proc_name', 'time_range'],
     ):
@@ -206,7 +205,7 @@ class DFTracerAnalyzer(Analyzer):
             logical_view_types=logical_view_types,
             metrics=metrics,
             raw_stats=RawStats(**raw_stats),
-            slope_threshold=slope_threshold,
+            threshold=threshold,
             traces=traces,
             view_types=view_types,
         )

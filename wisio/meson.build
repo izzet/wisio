@@ -6,7 +6,7 @@ py.install_sources(
         'analysis_utils.py',
         'analyzer.py',
         'analyzer_result.py',
-        'cluster_management.py',
+        'cluster_manager.py',
         'constants.py',
         'darshan.py',
         'dftracer.py',

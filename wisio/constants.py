@@ -33,8 +33,13 @@ COL_TIME_OVERALL = 'time_overall'
 COL_TIME_RANGE = 'time_range'
 
 VIEW_TYPES = ['time_range', 'file_name', 'proc_name']  # Order matters!
-LOGICAL_VIEW_TYPES = [('proc_name', 'app_name'), ('proc_name', 'node_name'), (
-    'proc_name', 'rank'), ('file_name', 'file_dir'), ('file_name', 'file_pattern')]
+LOGICAL_VIEW_TYPES = [
+    ('proc_name', 'app_name'),
+    ('proc_name', 'node_name'),
+    ('proc_name', 'rank'),
+    ('file_name', 'file_dir'),
+    ('file_name', 'file_pattern'),
+]
 
 ACC_PAT_SUFFIXES = ['time', 'size', 'count']
 DERIVED_MD_OPS = ['close', 'open', 'seek', 'stat']
@@ -66,7 +71,7 @@ XFER_SIZE_BINS = [
     4 * 1024.0 * 1024.0,
     16 * 1024.0 * 1024.0,
     64 * 1024.0 * 1024.0,
-    np.inf
+    np.inf,
 ]
 XFER_SIZE_BIN_LABELS = [
     '<4 kiB',
@@ -89,7 +94,7 @@ XFER_SIZE_BIN_NAMES = [
     '4 MiB',
     '16 MiB',
     '64 MiB',
-    '>64 MiB'
+    '>64 MiB',
 ]
 
 EVENT_ATT_REASONS = 'attach_reasons'

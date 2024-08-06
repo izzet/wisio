@@ -1,0 +1,20 @@
+type: LSF
+debug: false
+job_directives_skip:
+  - -n
+  - -R
+  - -M
+  - -P
+  - -W 00:30
+job_extra_directives:
+  - -nnodes 1
+  - -G asccasc
+  - -q pdebug
+  - -W 120
+  - -o .wisio/recorder_cm1_32_4_lsf/worker_logs/%J.log
+  - -e .wisio/recorder_cm1_32_4_lsf/worker_logs/%J.log
+local_dir: /tmp/.wisio/worker_dir
+memory: 1600
+n_threads_per_worker: 16
+n_workers: 8
+use_stdin: true
