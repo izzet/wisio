@@ -1091,7 +1091,7 @@ class AnalysisResultPlots(object):
         self.main_view = main_view
         self.view_results = view_results
         self.bottlenecks = evaluated_views  # TODO
-        self._cmap = plt.cm.get_cmap('RdYlGn')
+        self._cmap = plt.get_cmap('RdYlGn')
 
     def bottleneck_bar(
         self,
@@ -1251,7 +1251,7 @@ class AnalysisResultPlots(object):
 
         # Add the colorbar separately using the RdYlGn colormap
         # You can adjust the position and size of the colorbar as desired
-        cmap = plt.cm.RdYlGn  # Choose the RdYlGn colormap
+        cmap = plt.get_cmap('RdYlGn')  # Choose the RdYlGn colormap
         norm = plt.Normalize(vmin=0, vmax=1)  # Normalize the data
         mappable = plt.cm.ScalarMappable(norm=norm, cmap=cmap)  # Create the mappable
         mappable.set_array(SCORE_BINS['time'])  # Set the data for the colorbar
