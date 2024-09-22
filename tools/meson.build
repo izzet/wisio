@@ -1,38 +1,11 @@
-# cpp-logger
-cpp_logger_sources = [
-    'lib/cpp-logger/src/cpp-logger/logger.cpp',
-    'lib/cpp-logger/src/cpp-logger/clogger.cpp',
-]
-cpp_logger_lib = static_library(
-    'cpp_logger',
-    cpp_logger_sources,
-    include_directories: include_directories('lib/cpp-logger/include'),
-    install: false,
-)
-cpp_logger_dep = declare_dependency(
-    link_with: cpp_logger_lib,
-    include_directories: include_directories('lib/cpp-logger/include'),
-)
+backward_cpp_proj = subproject('backward-cpp')
+backward_dep = backward_cpp_proj.get_variable('backward_dep')
 
-# backward-cpp
-backward_cpp_inc = include_directories('lib/backward-cpp')
-backward_cpp_dep = declare_dependency(include_directories: backward_cpp_inc)
+cpp_logger_proj = subproject('cpp-logger')
+cpp_logger_dep = cpp_logger_proj.get_variable('cpp_logger_dep')
 
-# recorder
-reader_lib = static_library(
-    'reader',
-    'lib/recorder/tools/reader.c',
-    'lib/recorder/tools/reader-cst-cfg.c',
-    include_directories: ['lib/recorder/include', 'lib/recorder/tools'],
-    install: false,
-)
-recorder_dep = declare_dependency(
-    include_directories: [
-        include_directories('lib/recorder/include'),
-        include_directories('lib/recorder/tools'),
-    ],
-    link_with: reader_lib,
-)
+recorder_proj = subproject('recorder')
+reader_dep = recorder_proj.get_variable('reader_dep')
 
 # 3rd party
 arrow_dep = dependency('arrow', required: true)
@@ -51,7 +24,7 @@ recorder2parquet_exe = executable(
     install: true,
     dependencies: [
         arrow_dep,
-        backward_cpp_dep,
+        backward_dep,
         cpp_logger_dep,
         libiberty_dep,
         libstdcxxfs_dep,
@@ -59,8 +32,8 @@ recorder2parquet_exe = executable(
         ncurses_dep,
         nlohmann_json_dep,
         parquet_dep,
+        reader_dep,
         readline_dep,
-        recorder_dep,
         zlib_dep,
     ],
 )

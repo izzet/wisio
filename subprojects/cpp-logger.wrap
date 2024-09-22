@@ -1,0 +1,6 @@
+[wrap-git]
+directory = cpp-logger
+method = cmake
+url = https://github.com/hariharan-devarajan/cpp-logger.git
+revision = v0.0.4
+clone-recursive = true
