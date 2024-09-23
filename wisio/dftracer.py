@@ -1,8 +1,11 @@
+import dask
+import dask.bag as db
 import json
 import logging
 import numpy as np
+import os
+import zindex_py as zindex
 from dask import delayed
-from dask.bag import read_text
 from glob import glob
 from typing import List
 
@@ -34,6 +37,22 @@ PFW_COL_MAPPING = {
     'hostname': COL_HOST_NAME,
     'filename': COL_FILE_NAME,
 }
+
+
+def _create_index(filename):
+    index_file = f"{filename}.zindex"
+    if not os.path.exists(index_file):
+        status = zindex.create_index(
+            filename,
+            index_file=f"file:{index_file}",
+            regex="id:\b([0-9]+)",
+            numeric=True,
+            unique=True,
+            debug=False,
+            verbose=False,
+        )
+        logging.debug(f"Creating Index for {filename} returned {status}")
+    return filename
 
 
 def _load_objects(line, time_granularity, time_approximate, condition_fn):
@@ -69,9 +88,45 @@ def _load_objects(line, time_granularity, time_approximate, condition_fn):
     return d
 
 
+def _generate_line_batches(filename, max_line):
+    batch_size = 1024 * 16
+    for start in range(0, max_line, batch_size):
+        end = min((start + batch_size - 1), (max_line - 1))
+        logging.debug(f"Created a batch for {filename} from [{start}, {end}] lines")
+        yield filename, start, end
+
+
 def _get_conditions_default(json_obj):
     io_cond = "POSIX" == json_obj["cat"]
     return False, False, io_cond
+
+
+def _get_line_number(filename):
+    index_file = f"{filename}.zindex"
+    line_number = zindex.get_max_line(
+        filename,
+        index_file=index_file,
+        debug=False,
+        verbose=False,
+    )
+    logging.debug(f" The {filename} has {line_number} lines")
+    return (filename, line_number)
+
+
+def _get_size(filename):
+    if filename.endswith('.pfw'):
+        size = os.stat(filename).st_size
+    elif filename.endswith('.pfw.gz'):
+        index_file = f"{filename}.zindex"
+        line_number = zindex.get_max_line(
+            filename,
+            index_file=index_file,
+            debug=False,
+            verbose=False,
+        )
+        size = line_number * 256
+    logging.debug(f" The {filename} has {size/1024**3} GB size")
+    return int(size)
 
 
 def _io_columns(time_approximate=True):
@@ -146,6 +201,19 @@ def _io_function(json_object, current_dict, time_approximate, condition_fn):
     return d
 
 
+def _load_indexed_gzip_files(filename, start, end):
+    index_file = f"{filename}.zindex"
+    json_lines = zindex.zquery(
+        filename,
+        index_file=index_file,
+        raw=f"select a.line from LineOffsets a where a.line >= {start} AND a.line <= {end};",
+        debug=False,
+        verbose=False,
+    )
+    logging.debug(f"Read {len(json_lines)} json lines for [{start}, {end}]")
+    return json_lines
+
+
 class DFTracerAnalyzer(Analyzer):
     def __init__(
         self,
@@ -168,7 +236,7 @@ class DFTracerAnalyzer(Analyzer):
 
     def analyze_pfw(
         self,
-        trace_path_pattern: str,
+        trace_path: str,
         accuracy: AnalysisAccuracy = 'pessimistic',
         exclude_bottlenecks: List[str] = [],
         exclude_characteristics: List[str] = [],
@@ -181,7 +249,7 @@ class DFTracerAnalyzer(Analyzer):
         # Read traces
         with EventLogger(key=EVENT_READ_TRACES, message='Read traces'):
             traces = self.read_pfw(
-                trace_path_pattern=trace_path_pattern,
+                trace_path=trace_path,
                 time_granularity=time_granularity,
             )
 
@@ -210,10 +278,8 @@ class DFTracerAnalyzer(Analyzer):
             view_types=view_types,
         )
 
-    def read_pfw(
-        self, trace_path_pattern: str, time_granularity: int, time_approximate=True
-    ):
-        trace_paths = glob(trace_path_pattern)
+    def read_pfw(self, trace_path: str, time_granularity: int, time_approximate=True):
+        trace_paths = glob(trace_path)
         all_files = []
         pfw_pattern = []
         pfw_gz_pattern = []
@@ -226,11 +292,51 @@ class DFTracerAnalyzer(Analyzer):
                 all_files.append(trace_path)
             else:
                 logging.warn(f"Ignoring unsuported file {trace_path}")
+        if len(all_files) == 0:
+            logging.error("No files selected for .pfw and .pfw.gz")
+            exit(1)
+        logging.debug(f"Processing {all_files}")
+        if len(pfw_gz_pattern) > 0:
+            db.from_sequence(pfw_gz_pattern).map(_create_index).compute()
+            logging.info(f"Created index for {len(pfw_gz_pattern)} files")
+        total_size = db.from_sequence(all_files).map(_get_size).sum().compute()
+        logging.info(f"Total size of all files are {total_size} bytes")
+        pfw_bag = None
+        pfw_gz_bag = None
+        if len(pfw_gz_pattern) > 0:
+            max_line_numbers = (
+                db.from_sequence(pfw_gz_pattern).map(_get_line_number).compute()
+            )
+            logging.debug(f"Max lines per file are {max_line_numbers}")
+            json_line_delayed = []
+            total_lines = 0
+            for filename, max_line in max_line_numbers:
+                total_lines += max_line
+                for _, start, end in _generate_line_batches(filename, max_line):
+                    json_line_delayed.append((filename, start, end))
 
+            logging.info(
+                f"Loading {len(json_line_delayed)} batches out of {len(pfw_gz_pattern)} files and has {total_lines} lines overall"
+            )
+            json_line_bags = []
+            for filename, start, end in json_line_delayed:
+                num_lines = end - start + 1
+                json_line_bags.append(
+                    dask.delayed(_load_indexed_gzip_files, nout=num_lines)(
+                        filename, start, end
+                    )
+                )
+            json_lines = db.concat(json_line_bags)
+            pfw_gz_bag = json_lines.map(
+                _load_objects,
+                time_granularity=time_granularity,
+                time_approximate=time_approximate,
+                condition_fn=None,
+            ).filter(lambda x: "name" in x)
         main_bag = None
         if len(pfw_pattern) > 0:
-            main_bag = (
-                read_text(pfw_pattern)
+            pfw_bag = (
+                db.read_text(pfw_pattern)
                 .map(
                     _load_objects,
                     time_granularity=time_granularity,
@@ -239,7 +345,12 @@ class DFTracerAnalyzer(Analyzer):
                 )
                 .filter(lambda x: "name" in x)
             )
-
+        if len(pfw_gz_pattern) > 0 and len(pfw_pattern) > 0:
+            main_bag = db.concat([pfw_bag, pfw_gz_bag])
+        elif len(pfw_gz_pattern) > 0:
+            main_bag = pfw_gz_bag
+        elif len(pfw_pattern) > 0:
+            main_bag = pfw_bag
         if main_bag:
             columns = {
                 'name': "string",
@@ -272,6 +383,9 @@ class DFTracerAnalyzer(Analyzer):
             )
             # self.events = self.events.persist()
             # _ = wait(self.events)
+        else:
+            logging.error("Unable to load traces")
+            exit(1)
 
         events[COL_PROC_NAME] = (
             'app#'
