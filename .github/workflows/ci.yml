@@ -62,13 +62,13 @@ jobs:
           pip install -r tests/requirements.txt
       - name: Install WisIO
         run: |
-          pip install --user .[darshan,dftracer]
+          pip install .[darshan,dftracer] -Cinstall-args="--prefix=$HOME/.local"
       - name: Run Python tests
         run: |
           pytest -v
       - name: Run C++ tests
         run: |
-          meson build
+          meson build --prefix=$HOME/.local
           meson compile -C build
           meson test -v -C build
           meson test -v -C build --setup=mpi
