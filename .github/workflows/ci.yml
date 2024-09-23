@@ -57,12 +57,11 @@ jobs:
             openmpi-common
       - name: Install Python dependencies
         run: |
-          pip install --upgrade pip
-          pip install meson-python
+          pip install --upgrade meson-python pip setuptools wheel
           pip install -r tests/requirements.txt
       - name: Install WisIO
         run: |
-          pip install .[darshan,dftracer] -Cinstall-args="--prefix=$HOME/.local"
+          pip install .[darshan,dftracer] -Csetup-args="--prefix=$HOME/.local"
       - name: Run Python tests
         run: |
           pytest -v

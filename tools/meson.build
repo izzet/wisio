@@ -1,32 +1,43 @@
 cmake = import('cmake')
 
+custom_include_dir = join_paths(get_option('prefix'), 'include')
+
 backward_opts = cmake.subproject_options()
-backward_opts.add_cmake_defines({
-    'BACKWARD_SHARED': true,
-    'CMAKE_INSTALL_LIBDIR': get_option('libdir'),
-    'CMAKE_INSTALL_PREFIX': get_option('prefix'),
-})
+backward_opts.add_cmake_defines(
+    {
+        'BACKWARD_SHARED': true,
+        'CMAKE_CXX_FLAGS': '-I' + custom_include_dir,
+        'CMAKE_INSTALL_LIBDIR': get_option('libdir'),
+        'CMAKE_INSTALL_PREFIX': get_option('prefix'),
+    },
+)
 backward_proj = cmake.subproject('backward-cpp', options: backward_opts)
 backward_dep = backward_proj.dependency('backward')
 
 cpp_logger_opts = cmake.subproject_options()
-cpp_logger_opts.add_cmake_defines({
-    'CMAKE_INSTALL_LIBDIR': get_option('libdir'),
-    'CMAKE_INSTALL_PREFIX': get_option('prefix'),
-})
+cpp_logger_opts.add_cmake_defines(
+    {
+        'CMAKE_CXX_FLAGS': '-I' + custom_include_dir,
+        'CMAKE_INSTALL_LIBDIR': get_option('libdir'),
+        'CMAKE_INSTALL_PREFIX': get_option('prefix'),
+    },
+)
 cpp_logger_proj = cmake.subproject('cpp-logger', options: cpp_logger_opts)
 cpp_logger_dep = cpp_logger_proj.dependency('cpp_logger')
 
 recorder_opts = cmake.subproject_options()
-recorder_opts.add_cmake_defines({
-    'CMAKE_INSTALL_LIBDIR': get_option('libdir'),
-    'CMAKE_INSTALL_PREFIX': get_option('prefix'),
-    'RECORDER_INSTALL_LIB_DIR': get_option('libdir'), 
-})
+recorder_opts.add_cmake_defines(
+    {
+        'CMAKE_CXX_FLAGS': '-I' + custom_include_dir,
+        'CMAKE_INSTALL_LIBDIR': get_option('libdir'),
+        'CMAKE_INSTALL_PREFIX': get_option('prefix'),
+        'RECORDER_INSTALL_LIB_DIR': get_option('libdir'),
+    },
+)
 recorder_proj = cmake.subproject('recorder', options: recorder_opts)
 reader_dep = recorder_proj.dependency('reader')
 
-# 3rd party
+# 3rd party dependencies
 arrow_dep = dependency('arrow', required: true)
 libiberty_dep = dependency('libiberty', required: false)
 libstdcxxfs_dep = cpp.find_library('stdc++fs', required: true)
@@ -40,6 +51,7 @@ zlib_dep = dependency('zlib', required: false)
 recorder2parquet_exe = executable(
     meson.project_name() + '-recorder2parquet',
     'recorder2parquet.cpp',
+    include_directories: include_directories(custom_include_dir),
     install: true,
     dependencies: [
         arrow_dep,
