@@ -169,12 +169,10 @@ class Analyzer(abc.ABC):
         # Compute upper bounds
         with EventLogger(key=EVENT_COMP_METBD, message='Compute metric boundaries'):
             metric_boundaries = self.restore_extra_data(
-                name='_'.join(
-                    [
-                        CHECKPOINT_METRIC_BOUNDARIES,
-                        *sorted(metrics),
-                        *sorted(view_types),
-                    ]
+                name=self.get_checkpoint_name(
+                    CHECKPOINT_METRIC_BOUNDARIES,
+                    *sorted(metrics),
+                    *sorted(view_types),
                 ),
                 fallback=lambda: self.compute_metric_boundaries(
                     main_view=main_view,
