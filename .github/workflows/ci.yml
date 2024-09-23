@@ -55,12 +55,14 @@ jobs:
             nlohmann-json3-dev \
             openmpi-bin \
             openmpi-common
-      - name: Install WisIO
+      - name: Install Python dependencies
         run: |
           pip install --upgrade pip
           pip install meson-python
-          pip install .[darshan,dftracer]
           pip install -r tests/requirements.txt
+      - name: Install WisIO
+        run: |
+          pip install --user .[darshan,dftracer]
       - name: Run Python tests
         run: |
           pytest -v
