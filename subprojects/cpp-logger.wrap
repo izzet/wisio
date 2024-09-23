@@ -4,3 +4,6 @@ method = cmake
 url = https://github.com/hariharan-devarajan/cpp-logger.git
 revision = v0.0.4
 clone-recursive = true
+
+[provide]
+cpp_logger = cpp_logger_dep

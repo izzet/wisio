@@ -45,6 +45,7 @@ jobs:
             cmake \
             git \
             libarrow-dev \
+            libhdf5-dev \
             libncurses-dev \
             libopenmpi-dev \
             libparquet-dev \
@@ -58,7 +59,7 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install meson-python
-          pip install .[darshan]
+          pip install .[darshan,dftracer]
           pip install -r tests/requirements.txt
       - name: Run Python tests
         run: |

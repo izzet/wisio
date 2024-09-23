@@ -1,11 +1,30 @@
-backward_cpp_proj = subproject('backward-cpp')
-backward_dep = backward_cpp_proj.get_variable('backward_dep')
+cmake = import('cmake')
 
-cpp_logger_proj = subproject('cpp-logger')
-cpp_logger_dep = cpp_logger_proj.get_variable('cpp_logger_dep')
+backward_opts = cmake.subproject_options()
+backward_opts.add_cmake_defines({
+    'BACKWARD_SHARED': true,
+    'CMAKE_INSTALL_LIBDIR': get_option('libdir'),
+    'CMAKE_INSTALL_PREFIX': get_option('prefix'),
+})
+backward_proj = cmake.subproject('backward-cpp', options: backward_opts)
+backward_dep = backward_proj.dependency('backward')
 
-recorder_proj = subproject('recorder')
-reader_dep = recorder_proj.get_variable('reader_dep')
+cpp_logger_opts = cmake.subproject_options()
+cpp_logger_opts.add_cmake_defines({
+    'CMAKE_INSTALL_LIBDIR': get_option('libdir'),
+    'CMAKE_INSTALL_PREFIX': get_option('prefix'),
+})
+cpp_logger_proj = cmake.subproject('cpp-logger', options: cpp_logger_opts)
+cpp_logger_dep = cpp_logger_proj.dependency('cpp_logger')
+
+recorder_opts = cmake.subproject_options()
+recorder_opts.add_cmake_defines({
+    'CMAKE_INSTALL_LIBDIR': get_option('libdir'),
+    'CMAKE_INSTALL_PREFIX': get_option('prefix'),
+    'RECORDER_INSTALL_LIB_DIR': get_option('libdir'), 
+})
+recorder_proj = cmake.subproject('recorder', options: recorder_opts)
+reader_dep = recorder_proj.dependency('reader')
 
 # 3rd party
 arrow_dep = dependency('arrow', required: true)

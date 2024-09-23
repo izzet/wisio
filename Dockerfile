@@ -13,6 +13,7 @@ RUN apt-get update && \
     cmake \
     git \
     libarrow-dev \
+    libhdf5-dev \
     libncurses-dev \
     libopenmpi-dev \
     libparquet-dev \
@@ -31,7 +32,7 @@ WORKDIR /wisio
 
 RUN pip install --upgrade pip && \
     pip install meson-python && \
-    pip install .[darshan] && \
+    pip install .[darshan,dftracer] && \
     pip install -r tests/requirements.txt
 
 ENTRYPOINT ["wisio"]
