@@ -1,10 +1,11 @@
 .git/* export-ignore
 .github/* export-ignore
 .vscode/* export-ignore
+
 assets/* export-ignore
-tools/build/* export-ignore
-tools/lib/* export-ignore
 docs/* export-ignore
 notebooks/* export-ignore
 results/* export-ignore
 scripts/* export-ignore
+
+.wakatime-project export-ignore
