@@ -11,5 +11,5 @@ py.install_sources(
         'logger.py',
         'yaml_utils.py',
     ],
-    subdir: 'wisio/utils'
+    subdir: 'wisio/utils',
 )
