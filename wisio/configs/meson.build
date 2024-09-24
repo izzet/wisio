@@ -11,4 +11,5 @@ config_files += ['__init__.py']
 py.install_sources(
     config_files,
     subdir: 'wisio/configs',
+    preserve_path: true,
 )
