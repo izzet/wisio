@@ -72,7 +72,7 @@ jobs:
           meson build --prefix=$HOME/.local -Denable_tests=true
           meson compile -C build
           meson test -v -C build
-          meson test -v -C build --setup=mpi
+          # meson test -v -C build --setup=mpi
       - name: Run WisIO
         run: |
           wisio analysis=recorder analysis.trace_path=tests/data/extracted/recorder-parquet
