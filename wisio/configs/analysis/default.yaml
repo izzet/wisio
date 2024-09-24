@@ -3,8 +3,6 @@ metrics:
   - iops
 logical_view_types: false
 threshold: 45
-trace_path: ./trace.darshan
-type: DARSHAN
 view_types:
   - file_name
   - proc_name

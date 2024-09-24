@@ -1,4 +1,5 @@
 defaults:
   - default
 
+trace_path: ./trace.darshan
 type: DARSHAN

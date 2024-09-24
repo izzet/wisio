@@ -1,4 +1,5 @@
 defaults:
   - default
 
+time_granularity: 10000000
 type: RECORDER
