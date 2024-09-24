@@ -53,6 +53,9 @@ jobs:
       - name: Build WisIO
         run: |
           python3 -m build -Csetup-args="--prefix=$HOME/.local" .
+          target_platform=$(auditwheel show dist/*.whl | grep manylinux_ | awk -F'"' '{print $2}')
+          auditwheel repair dist/*.whl --plat $target_platform --wheel-dir dist/
+          rm dist/*linux_x86_64.whl
       - name: Upload distributions
         uses: actions/upload-artifact@v3
         with:
