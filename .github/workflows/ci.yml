@@ -61,13 +61,18 @@ jobs:
           pip install -r tests/requirements.txt
       - name: Install WisIO
         run: |
-          pip install .[darshan,dftracer] -Csetup-args="--prefix=$HOME/.local"
+          pip install .[darshan,dftracer] \
+            -Csetup-args="--prefix=$HOME/.local" \
+            -Csetup-args="-Denable_tests=true"
       - name: Run Python tests
         run: |
           pytest -v
       - name: Run C++ tests
         run: |
-          meson build --prefix=$HOME/.local
+          meson build --prefix=$HOME/.local -Denable_tests=true
           meson compile -C build
           meson test -v -C build
           meson test -v -C build --setup=mpi
+      - name: Run WisIO
+        run: |
+          wisio analysis=recorder analysis.trace_path=tests/data/extracted/recorder-parquet
