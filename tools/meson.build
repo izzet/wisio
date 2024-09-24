@@ -69,44 +69,32 @@ recorder2parquet_exe = executable(
     ],
 )
 
-test_data_dir = 'tests/data'
-extracted_dir = test_data_dir + '/extracted'
+if get_option('enable_tests')
+    test_dir = 'tests'
+    raw_data_dir = 'tests/data'
+    raw_data_name = 'recorder-raw'
+    extracted_dir = raw_data_dir + '/extracted'
 
-prepare_test_data = custom_target(
-    'prepare_test_data',
-    output: '0_0.parquet',
-    command: [
-        'sh',
-        '-c', 'if [ ! -d '
-        + meson.project_source_root()
-        + '/'
-        + extracted_dir
-        + '/recorder-raw ]; then '
-        + 'mkdir -p '
-        + meson.project_source_root()
-        + '/'
-        + extracted_dir
-        + '/recorder-raw && '
-        + 'tar -xzf '
-        + meson.project_source_root()
-        + '/'
-        + test_data_dir
-        + '/recorder-raw.tar.gz -C '
-        + meson.project_source_root()
-        + '/'
-        + extracted_dir
-        + '/recorder-raw; '
-        + 'fi',
-    ],
-    build_by_default: false,
-)
+    prepare_test_data = custom_target(
+        'prepare_test_data',
+        output: '0_0.parquet',
+        command: [
+            'sh',
+            meson.project_source_root() / test_dir / 'prepare_test_data.sh',  
+            meson.project_source_root() / raw_data_dir,
+            raw_data_name,
+            meson.project_source_root() / extracted_dir,
+        ],
+        build_by_default: false,
+    )
 
-test(
-    'test_recorder2parquet',
-    recorder2parquet_exe,
-    args: [meson.project_source_root() + '/' + extracted_dir + '/recorder-raw'],
-    depends: prepare_test_data,
-    timeout: 0,
-)
+    test(
+        'test_recorder2parquet',
+        recorder2parquet_exe,
+        args: [meson.project_source_root() / extracted_dir / raw_data_name],
+        depends: prepare_test_data,
+        timeout: 0,
+    )
 
-add_test_setup('mpi', exe_wrapper: ['mpirun', '-np', '2'])
+    add_test_setup('mpi', exe_wrapper: ['mpirun', '-np', '2'])
+endif
