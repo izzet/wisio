@@ -1,10 +1,10 @@
 <p align="center">
-    <img src="./assets/logo.png">
+    <img src="https://grc.iit.edu/assets/images/logo-81e1c5c91f2ce84c3ea68ed772a4ef8c.png" width="300">
 </p>
 
 # WisIO: Workflow I/O Analysis Tool
 
-[![Build and Test](https://github.com/izzet/wisio/actions/workflows/ci.yml/badge.svg)](https://github.com/izzet/wisio/actions/workflows/ci.yml)
+![Build and Test](https://github.com/izzet/wisio/actions/workflows/ci.yml/badge.svg)
 ![PyPI - Version](https://img.shields.io/pypi/v/wisio?label=PyPI)
 ![PyPI - Wheel](https://img.shields.io/pypi/wheel/wisio?label=Wheel)
 ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/wisio?label=Python)
