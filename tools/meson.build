@@ -1,11 +1,13 @@
-cmake = import('cmake')
-
 custom_include_dir = join_paths(get_option('prefix'), 'include')
+link_shared = get_option('link_shared')
+
+cmake = import('cmake')
 
 backward_opts = cmake.subproject_options()
 backward_opts.add_cmake_defines(
     {
-        'BACKWARD_SHARED': true,
+        'BACKWARD_SHARED': link_shared,
+        'BUILD_SHARED_LIBS': link_shared,
         'CMAKE_CXX_FLAGS': '-I' + custom_include_dir,
         'CMAKE_INSTALL_LIBDIR': get_option('libdir'),
         'CMAKE_INSTALL_PREFIX': get_option('prefix'),
@@ -17,6 +19,7 @@ backward_dep = backward_proj.dependency('backward')
 cpp_logger_opts = cmake.subproject_options()
 cpp_logger_opts.add_cmake_defines(
     {
+        'BUILD_SHARED_LIBS': link_shared,
         'CMAKE_CXX_FLAGS': '-I' + custom_include_dir,
         'CMAKE_INSTALL_LIBDIR': get_option('libdir'),
         'CMAKE_INSTALL_PREFIX': get_option('prefix'),
@@ -28,6 +31,7 @@ cpp_logger_dep = cpp_logger_proj.dependency('cpp_logger')
 recorder_opts = cmake.subproject_options()
 recorder_opts.add_cmake_defines(
     {
+        'BUILD_SHARED_LIBS': link_shared,
         'CMAKE_CXX_FLAGS': '-I' + custom_include_dir,
         'CMAKE_INSTALL_LIBDIR': get_option('libdir'),
         'CMAKE_INSTALL_PREFIX': get_option('prefix'),
