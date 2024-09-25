@@ -11,6 +11,7 @@
                 "Tyriar.sort-lines",
                 "WakaTime.vscode-wakatime",
                 "charliermarsh.ruff",
+                "foxundermoon.shell-format",
                 "mesonbuild.mesonbuild",
                 "ms-azuretools.vscode-docker",
                 "ms-python.debugpy",
@@ -21,6 +22,7 @@
                 "ms-vscode.cpptools-extension-pack",
                 "ms-vscode-remote.remote-containers",
                 "redhat.vscode-yaml",
+                "tamasfe.even-better-toml",
                 "vscode-icons-team.vscode-icons"
             ]
         }
