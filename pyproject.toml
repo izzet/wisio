@@ -4,7 +4,7 @@ requires = ["meson-python>=0.15.0"]
 
 [project]
 name = "wisio"
-version = "0.0.4"
+version = "0.0.5"
 authors = [{ name = "Izzet Yildirim", email = "izzetcyildirim@gmail.com" }]
 maintainers = [{ name = "Izzet Yildirim", email = "izzetcyildirim@gmail.com" }]
 requires-python = ">=3.8"
