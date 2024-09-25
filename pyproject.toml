@@ -54,6 +54,9 @@ documentation = "https://grc.iit.edu/docs/category/wisio/"
 source = "https://github.com/izzet/wisio"
 tracker = "https://github.com/izzet/wisio/issues"
 
+[tool.meson-python.args]
+install = ["--skip-subprojects"]
+
 [tool.ruff.format]
 quote-style = "preserve"
 
