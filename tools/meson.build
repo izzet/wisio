@@ -100,5 +100,5 @@ if get_option('enable_tests')
         timeout: 0,
     )
 
-    add_test_setup('mpi', exe_wrapper: ['mpirun', '-np', '2'])
+    add_test_setup('mpi', exe_wrapper: ['mpirun', '--allow-run-as-root', '--oversubscribe', '-np', '2'])
 endif

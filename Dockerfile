@@ -31,7 +31,7 @@ COPY . /wisio
 WORKDIR /wisio
 
 RUN pip install --upgrade pip && \
-    pip install meson-python && \
+    pip install build meson-python setuptools wheel && \
     pip install .[darshan,dftracer] && \
     pip install -r tests/requirements.txt
 
