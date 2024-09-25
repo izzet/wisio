@@ -50,7 +50,7 @@ dftracer = ["zindex_py==0.0.2"]
 wisio = "wisio.__main__:main"
 
 [project.urls]
-documentation = "https://wisio.readthedocs.io"
+documentation = "https://grc.iit.edu/docs/category/wisio/"
 source = "https://github.com/izzet/wisio"
 tracker = "https://github.com/izzet/wisio/issues"
 
