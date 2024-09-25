@@ -61,7 +61,7 @@ def handle_darshan(config: MainConfig):
         metrics=config.analysis.metrics,
         threshold=config.analysis.threshold,
         time_granularity=config.analysis.time_granularity,
-        trace_path=config.analysis.trace_path,
+        trace_path_pattern=config.analysis.trace_path,
         view_types=config.analysis.view_types,
     )
     _handle_output(output_config=config.output, result=result)
