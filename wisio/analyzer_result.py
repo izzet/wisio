@@ -764,7 +764,10 @@ class AnalyzerResultOutput(object):
                 num_procs = int(characteristic_value)
             elif characteristic == KnownCharacteristics.TIME_PERIOD.value:
                 num_time_periods = int(characteristic_value)
-        per_io_time = io_time/job_time
+
+        per_io_time = 0
+        if job_time > 0:
+            per_io_time = io_time/job_time
 
         output_characteristics = AnalyzerResultOutputCharacteristicsType(
             complexity=complexity,
