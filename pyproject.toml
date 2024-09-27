@@ -57,6 +57,9 @@ tracker = "https://github.com/izzet/wisio/issues"
 [tool.meson-python.args]
 install = ["--skip-subprojects"]
 
+[tool.pyright]
+exclude = ["assets/", "build/", "scripts/", "subprojects/", "tmp/"]
+
 [tool.ruff.format]
 quote-style = "preserve"
 
