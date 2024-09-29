@@ -62,13 +62,14 @@ def _load_objects(line, time_granularity, time_approximate, condition_fn):
         and line != ""
         and len(line) > 0
         and "[" != line[0]
+        and "]" != line[0]
         and line != "\n"
     ):
         val = {}
         try:
             val = json.loads(line)
             logging.debug(f"Loading dict {val}")
-            if "name" in val:
+            if "name" in val and "ts" in val:
                 val["ts"] = int(val["ts"])
                 if val["ts"] > 0:
                     d["name"] = val["name"]
