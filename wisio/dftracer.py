@@ -186,9 +186,13 @@ def _io_function(json_object, current_dict, time_approximate, condition_fn):
     #         d["total_time"] = I.to_string(I.empty())
     #         d["io_time"] = I.to_string(I.empty())
     if "args" in json_object:
-        if "fname" in json_object["args"]:
+        if "fhash" in json_object["args"]:
+            d["filename"] = json_object["args"]["fhash"]
+        elif "fname" in json_object["args"]:
             d["filename"] = json_object["args"]["fname"]
-        if "hostname" in json_object["args"]:
+        if "hhash" in json_object["args"]:
+            d["hostname"] = json_object["args"]["hhash"]
+        elif "hostname" in json_object["args"]:
             d["hostname"] = json_object["args"]["hostname"]
 
         if "POSIX" == json_object["cat"] and "ret" in json_object["args"]:
