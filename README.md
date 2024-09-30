@@ -11,7 +11,7 @@
 
 ## Overview
 
-WisIO is an open-source tool designed to efficiently analyze multi-terabyte-scale workflow performance data over distributed resources. It provides a comprehensive analysis of I/O performance, identifying bottlenecks and potential root causes through advanced rule-based analysis. With its extensible design, WisIO can be tailored to various use cases, providing actionable insights for improving application performance and resource utilization. By leveraging parallel computing and multi-perspective views, WisIO enables rapid detection of complex I/O issues, making it an invaluable asset for HPC professionals and researchers.
+WisIO (Wisdom from I/O Behavior) is an open-source tool designed to efficiently analyze multi-terabyte-scale workflow performance data over distributed resources. It provides a comprehensive analysis of I/O performance, identifying bottlenecks and potential root causes through advanced rule-based analysis. With its extensible design, WisIO can be tailored to various use cases, providing actionable insights for improving application performance and resource utilization. By leveraging parallel computing and multi-perspective views, WisIO enables rapid detection of complex I/O issues, making it an invaluable asset for HPC professionals and researchers.
 
 ## Installation
 
