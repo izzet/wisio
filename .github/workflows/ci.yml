@@ -64,13 +64,14 @@ jobs:
         run: |
           pip install .[darshan,dftracer] \
             -Csetup-args="--prefix=$HOME/.local" \
-            -Csetup-args="-Denable_tests=true"
+            -Csetup-args="-Denable_tests=true" \
+            -Csetup-args="-Denable_tools=true"
       - name: Run Python tests
         run: |
           pytest --verbose
       - name: Run C++ tests
         run: |
-          meson build --prefix=$HOME/.local -Denable_tests=true
+          meson build --prefix=$HOME/.local -Denable_tests=true -Denable_tools=true
           meson compile -C build --verbose
           meson test -C build --verbose
           meson test -C build --verbose --setup=mpi

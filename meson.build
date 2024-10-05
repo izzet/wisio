@@ -11,5 +11,8 @@ cpp = meson.get_compiler('cpp')
 py = import('python').find_installation(pure: false)
 py_dep = py.dependency()
 
-subdir('tools')
 subdir('wisio')
+
+if get_option('enable_tools')
+    subdir('tools')
+endif
