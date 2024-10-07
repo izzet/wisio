@@ -909,7 +909,7 @@ class ConsoleOutput(Output):
             view_key = tuple(view_name.split('.'))
             view_tree = Tree(
                 (
-                    f"{humanized_view_name(view_key, '>').replace('Period', '').strip()} View "
+                    f"{humanized_view_name(view_key, '>').replace(' Period', '')} View "
                     f"({bot_count} {pluralize.plural_noun('bottleneck', bot_count)} "
                     f"with {reason_count} {pluralize.plural_noun('reason', reason_count)})"
                 )
