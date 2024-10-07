@@ -61,7 +61,7 @@ install = ["--skip-subprojects"]
 exclude = ["assets/", "build/", "scripts/", "subprojects/", "tmp/"]
 
 [tool.ruff]
-line-length = 120
+line-length = 88
 
 [tool.ruff.format]
 quote-style = "preserve"
