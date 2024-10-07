@@ -20,5 +20,4 @@ py.install_sources(
 )
 
 subdir('_darshan')
-subdir('configs')
 subdir('utils')
