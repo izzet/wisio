@@ -1,7 +1,0 @@
-type: CONSOLE
-compact: true
-max_bottlenecks: 2
-root_only: true
-show_debug: false
-show_characteristics: true
-show_header: true

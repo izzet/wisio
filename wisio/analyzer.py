@@ -1,5 +1,4 @@
 import abc
-import dask.bag as db
 import dask.dataframe as dd
 import itertools as it
 import json
@@ -7,21 +6,12 @@ import logging
 import math
 import os
 from dask.base import compute, unpack_collections
-from dask.delayed import Delayed
+from dask.delayed import Delayed, delayed
 from dask.distributed import fire_and_forget, get_client, wait
 from typing import Callable, Dict, List, Tuple, Union
 
-from .analysis import THRESHOLD_FUNCTIONS, set_bound_columns, set_metric_slope
+from .analysis import THRESHOLD_FUNCTIONS, set_metric_slope
 from .analysis_utils import set_file_dir, set_file_pattern, set_proc_name_parts
-from .analyzer_result import AnalysisResult
-from .cluster_manager import ClusterManager
-from .config import (
-    AnalysisConfig,
-    CheckpointConfig,
-    ClusterConfig,
-    OutputConfig,
-    get_working_dir,
-)
 from .constants import (
     ACC_PAT_SUFFIXES,
     COL_FILE_NAME,
@@ -42,7 +32,7 @@ from .rule_engine import RuleEngine
 from .scoring import ViewEvaluator
 from .types import (
     AnalysisAccuracy,
-    AnalysisRuntimeConfig,
+    AnalyzerResultType,
     Metric,
     RawStats,
     ViewKey,
@@ -52,12 +42,12 @@ from .types import (
 from .utils.dask_utils import EventLogger, flatten_column_names
 from .utils.file_utils import ensure_dir
 from .utils.json_encoders import NpEncoder
-from .utils.logger import setup_logging
 
 
 CHECKPOINT_MAIN_VIEW = '_main_view'
 CHECKPOINT_METRIC_BOUNDARIES = '_metric_boundaries'
 CHECKPOINT_HLM = '_hlm'
+CHECKPOINT_RAW_STATS = '_raw_stats'
 EXTRA_COLS = ['io_cat', 'acc_pat', 'func_id']
 HLM_AGG = {
     'time': [sum],
@@ -84,48 +74,44 @@ WAIT_ENABLED = True
 class Analyzer(abc.ABC):
     def __init__(
         self,
-        name: str,
-        analysis_config: AnalysisConfig,
-        checkpoint_config: CheckpointConfig,
-        cluster_config: ClusterConfig,
-        output_config: OutputConfig,
-        debug=False,
-        verbose=False,
+        bottleneck_dir: str = "",
+        checkpoint: bool = True,
+        checkpoint_dir: str = "",
+        debug: bool = False,
+        time_approximate: bool = True,
+        time_granularity: float = 1e6,
+        verbose: bool = False,
     ):
-        if checkpoint_config.enabled:
-            assert checkpoint_config.dir != '', 'Checkpoint directory must be defined'
+        if checkpoint:
+            assert checkpoint_dir != '', 'Checkpoint directory must be defined'
 
-        self.bottleneck_dir = analysis_config.bottleneck_dir
-        self.checkpoint = checkpoint_config.enabled
-        self.checkpoint_dir = checkpoint_config.dir
-        self.cluster_config = cluster_config
+        self.bottleneck_dir = bottleneck_dir
+        self.checkpoint = checkpoint
+        self.checkpoint_dir = checkpoint_dir
         self.debug = debug
-        self.name = name
-        self.output_config = output_config
+        self.time_approximate = time_approximate
+        self.time_granularity = time_granularity
         self.verbose = verbose
-        self.working_dir = get_working_dir()
 
-        # Setup logging
-        ensure_dir(self.working_dir)
-        setup_logging(filename=f"{self.working_dir}/analyzer.log", debug=debug)
-        logging.info(f"Initializing {name} analyzer")
+        # Setup directories
+        ensure_dir(self.bottleneck_dir)
+        ensure_dir(self.checkpoint_dir)
 
-        # Boot cluster
-        self.cluster_manager = ClusterManager(config=cluster_config)
-        self.cluster_manager.boot()
-
-    def analyze_traces(
+    def analyze_trace(
         self,
-        traces: dd.DataFrame,
-        metrics: List[Metric],
-        raw_stats: RawStats,
+        trace_path: str,
         accuracy: AnalysisAccuracy = 'pessimistic',
         exclude_bottlenecks: List[str] = [],
         exclude_characteristics: List[str] = [],
         logical_view_types: bool = False,
+        metrics: List[Metric] = ['iops'],
         threshold: int = 45,
         view_types: List[ViewType] = ['file_name', 'proc_name', 'time_range'],
-    ):
+    ) -> AnalyzerResultType:
+        # Read trace & stats
+        traces = self.read_trace(trace_path=trace_path)
+        raw_stats = self.read_stats(traces=traces)
+
         # Create checkpoint names
         hlm_name = self.get_checkpoint_name(CHECKPOINT_HLM, *sorted(view_types))
         main_view_name = self.get_checkpoint_name(
@@ -233,32 +219,41 @@ class Analyzer(abc.ABC):
         with EventLogger(
             key=EVENT_SAVE_BOT, message='Save I/O bottlenecks', level=logging.DEBUG
         ):
-            bottleneck_dir = self.save_bottlenecks(bottlenecks=bottlenecks)
+            self.save_bottlenecks(bottlenecks=bottlenecks)
 
         # Return result
-        return AnalysisResult(
-            bottleneck_dir=bottleneck_dir,
+        return AnalyzerResultType(
+            bottleneck_dir=self.bottleneck_dir,
             bottleneck_rules=bottleneck_rules,
             characteristics=characteristics,
             evaluated_views=evaluated_views,
             main_view=main_view,
             metric_boundaries=metric_boundaries,
             raw_stats=raw_stats,
-            runtime_config=AnalysisRuntimeConfig(
-                accuracy=accuracy,
-                checkpoint=self.checkpoint,
-                cluster_type=self.cluster_config.type,
-                debug=self.debug,
-                memory=self.cluster_config.memory,
-                num_threads_per_worker=self.cluster_config.n_threads_per_worker,
-                num_workers=self.cluster_config.n_workers,
-                processes=self.cluster_config.processes,
-                threshold=threshold,
-                verbose=self.verbose,
-                working_dir=self.working_dir,
-            ),
             view_results=view_results,
         )
+
+    def read_stats(self, traces: dd.DataFrame) -> RawStats:
+        # TODO
+        job_time = 0
+        raw_stats: RawStats = self.restore_extra_data(
+            name=CHECKPOINT_RAW_STATS,
+            fallback=lambda: dict(
+                job_time=delayed(job_time),
+                time_granularity=self.time_granularity,
+                total_count=traces.index.count().persist(),
+            ),
+        )
+        return raw_stats
+
+    def read_trace(self, trace_path: str) -> dd.DataFrame:
+        raise NotImplementedError
+
+    def compute_job_time(self, traces: dd.DataFrame) -> float:
+        return traces['tend'].max() - traces['tstart'].min()
+
+    def compute_total_count(self, traces: dd.DataFrame) -> int:
+        return traces.index.count()
 
     def compute_high_level_metrics(
         self,
@@ -506,20 +501,16 @@ class Analyzer(abc.ABC):
             if force or not self.has_checkpoint(name=name):
                 view = fallback()
                 view.to_parquet(f"{view_path}", compute=True, write_metadata_file=True)
-                self.cluster_manager.client.cancel(view)
+                get_client().cancel(view)
             if persist:
                 return dd.read_parquet(f"{view_path}").persist()
             return dd.read_parquet(f"{view_path}")
         return fallback()
 
     def save_bottlenecks(self, bottlenecks: dd.DataFrame, partition_size='64MB'):
-        bottleneck_dir = self.bottleneck_dir
-        if not bottleneck_dir:
-            bottleneck_dir = f"{self.working_dir}/bottlenecks"
         bottlenecks.repartition(partition_size=partition_size).to_parquet(
-            bottleneck_dir, compute=True, write_metadata_file=True
+            self.bottleneck_dir, compute=True, write_metadata_file=True
         )
-        return bottleneck_dir
 
     @staticmethod
     def store_extra_data(data: Tuple[Dict], data_path: str):

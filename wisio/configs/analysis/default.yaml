@@ -1,9 +1,0 @@
-bottleneck_dir: ${hydra:run.dir}/bottlenecks
-metrics:
-  - iops
-logical_view_types: false
-threshold: 45
-view_types:
-  - file_name
-  - proc_name
-  - time_range

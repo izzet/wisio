@@ -3,17 +3,13 @@ import json
 import numpy as np
 import pandas as pd
 from dask.distributed import Future, get_client
-from typing import List, Union
+from typing import Union
 
-from .analyzer import CHECKPOINT_MAIN_VIEW, Analyzer
-from .config import AnalysisConfig, CheckpointConfig, ClusterConfig, OutputConfig
-from .constants import EVENT_READ_TRACES, IO_CATS
-from .types import AnalysisAccuracy, Metric, RawStats, ViewType
-from .utils.dask_utils import EventLogger
+from .analyzer import Analyzer
+from .constants import IO_CATS
 
 
 CAT_POSIX = 0
-CHECKPOINT_RAW_STATS = '_raw_stats'
 DROPPED_COLS = [
     'app',
     'bandwidth',
@@ -33,82 +29,8 @@ RENAMED_COLS = {'duration': 'time'}
 
 
 class RecorderAnalyzer(Analyzer):
-    def __init__(
-        self,
-        analysis_config: AnalysisConfig,
-        checkpoint_config: CheckpointConfig,
-        cluster_config: ClusterConfig,
-        output_config: OutputConfig,
-        debug=False,
-        verbose=False,
-    ):
-        super().__init__(
-            name='Recorder',
-            analysis_config=analysis_config,
-            checkpoint_config=checkpoint_config,
-            cluster_config=cluster_config,
-            output_config=output_config,
-            debug=debug,
-            verbose=verbose,
-        )
-
-    def analyze_parquet(
-        self,
-        trace_path: str,
-        metrics: List[Metric],
-        accuracy: AnalysisAccuracy = 'pessimistic',
-        exclude_bottlenecks: List[str] = [],
-        exclude_characteristics: List[str] = [],
-        logical_view_types: bool = False,
-        threshold: int = 45,
-        time_granularity: int = 1e7,
-        view_types: List[ViewType] = ['file_name', 'proc_name', 'time_range'],
-    ):
-        # Init traces
-        traces = pd.DataFrame()
-
-        # Check checkpoint status
-        main_view_name = self.get_checkpoint_name(
-            CHECKPOINT_MAIN_VIEW, *sorted(view_types)
-        )
-        if not self.checkpoint or not self.has_checkpoint(name=main_view_name):
-            # Read traces
-            with EventLogger(key=EVENT_READ_TRACES, message='Read traces'):
-                traces, job_time, total_count = self.read_parquet_files(
-                    trace_path=trace_path,
-                    time_granularity=time_granularity,
-                )
-
-        # Prepare raw stats
-        raw_stats = self.restore_extra_data(
-            name=CHECKPOINT_RAW_STATS,
-            fallback=lambda: dict(
-                job_time=job_time.persist(),
-                time_granularity=time_granularity,
-                total_count=total_count.persist(),
-            ),
-        )
-
-        # Analyze traces
-        return self.analyze_traces(
-            accuracy=accuracy,
-            exclude_bottlenecks=exclude_bottlenecks,
-            exclude_characteristics=exclude_characteristics,
-            logical_view_types=logical_view_types,
-            metrics=metrics,
-            raw_stats=RawStats(**raw_stats),
-            threshold=threshold,
-            traces=traces,
-            view_types=view_types,
-        )
-
-    def compute_job_time(self) -> dd.core.Scalar:
-        return self.job_time
-
-    def read_parquet_files(self, trace_path: str, time_granularity: int):
+    def read_trace(self, trace_path: str) -> dd.DataFrame:
         traces = dd.read_parquet(trace_path)
-
-        job_time = traces['tend'].max() - traces['tstart'].min()
 
         traces['acc_pat'] = traces['acc_pat'].astype(np.uint8)
         traces['count'] = 1
@@ -118,7 +40,7 @@ class RecorderAnalyzer(Analyzer):
         global_min_max = self._load_global_min_max(trace_path=trace_path)
         time_ranges = self._compute_time_ranges(
             global_min_max=global_min_max,
-            time_granularity=time_granularity,
+            time_granularity=self.time_granularity,
         )
 
         traces = (
@@ -128,9 +50,7 @@ class RecorderAnalyzer(Analyzer):
             .drop(columns=DROPPED_COLS, errors='ignore')
         )
 
-        total_count = traces.index.count()
-
-        return traces, job_time, total_count
+        return traces
 
     @staticmethod
     def _compute_time_ranges(global_min_max: dict, time_granularity: int):

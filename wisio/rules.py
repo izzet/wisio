@@ -1092,10 +1092,9 @@ class CharacteristicTimePeriodCountRule(CharacteristicRule):
         characteristics: Dict[str, RuleResult] = None,
         raw_stats: RawStats = None,
     ) -> RuleResult:
-        num_time_periods = int(result[f"total_count"])
-
+        num_time_periods = int(result["total_count"])
         compact_desc = f"{num_time_periods:,} {self.pluralize.plural_noun('time period', num_time_periods)}"
-
+        time_granularity = raw_stats["time_granularity"]
         return RuleResult(
             compact_desc=compact_desc,
             description='Time Periods',
@@ -1104,7 +1103,7 @@ class CharacteristicTimePeriodCountRule(CharacteristicRule):
             object_hash=None,
             reasons=None,
             value=num_time_periods,
-            value_fmt=f"{compact_desc} (Time Granularity: {raw_stats.time_granularity:,})",
+            value_fmt=f"{compact_desc} (Time Granularity: {time_granularity:,})",
         )
 
 

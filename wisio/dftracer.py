@@ -1,16 +1,14 @@
 import dask
 import dask.bag as db
+import dask.dataframe as dd
 import json
 import logging
 import numpy as np
 import os
 import zindex_py as zindex
-from dask import delayed
 from glob import glob
-from typing import List
 
 from .analyzer import Analyzer
-from .config import AnalysisConfig, CheckpointConfig, ClusterConfig, OutputConfig
 from .constants import (
     COL_ACC_PAT,
     COL_COUNT,
@@ -21,15 +19,11 @@ from .constants import (
     COL_PROC_NAME,
     COL_TIME,
     COL_TIME_RANGE,
-    EVENT_READ_TRACES,
     IOCategory,
 )
-from .types import AnalysisAccuracy, RawStats, ViewType
-from .utils.dask_utils import EventLogger
 
 
 CAT_POSIX = 'POSIX'
-CHECKPOINT_RAW_STATS = '_raw_stats'
 DFTRACER_TIME_RESOLUTION = 1e6
 PFW_COL_MAPPING = {
     'name': COL_FUNC_ID,
@@ -220,70 +214,7 @@ def _load_indexed_gzip_files(filename, start, end):
 
 
 class DFTracerAnalyzer(Analyzer):
-    def __init__(
-        self,
-        analysis_config: AnalysisConfig,
-        checkpoint_config: CheckpointConfig,
-        cluster_config: ClusterConfig,
-        output_config: OutputConfig,
-        debug=False,
-        verbose=False,
-    ):
-        super().__init__(
-            name='DFTracer',
-            analysis_config=analysis_config,
-            checkpoint_config=checkpoint_config,
-            cluster_config=cluster_config,
-            output_config=output_config,
-            debug=debug,
-            verbose=verbose,
-        )
-
-    def analyze_pfw(
-        self,
-        trace_path: str,
-        accuracy: AnalysisAccuracy = 'pessimistic',
-        exclude_bottlenecks: List[str] = [],
-        exclude_characteristics: List[str] = [],
-        logical_view_types: bool = False,
-        metrics=['duration'],
-        threshold: int = 45,
-        time_granularity: int = 1e6,
-        view_types: List[ViewType] = ['file_name', 'proc_name', 'time_range'],
-    ):
-        # Read traces
-        with EventLogger(key=EVENT_READ_TRACES, message='Read traces'):
-            traces = self.read_pfw(
-                trace_path=trace_path,
-                time_granularity=time_granularity,
-            )
-
-        job_time = traces['te'].max() - traces['ts'].min()
-
-        # Prepare raw stats
-        raw_stats = self.restore_extra_data(
-            name=CHECKPOINT_RAW_STATS,
-            fallback=lambda: dict(
-                job_time=delayed(job_time),
-                time_granularity=time_granularity,
-                total_count=traces.index.count().persist(),
-            ),
-        )
-
-        # Analyze traces
-        return self.analyze_traces(
-            accuracy=accuracy,
-            exclude_bottlenecks=exclude_bottlenecks,
-            exclude_characteristics=exclude_characteristics,
-            logical_view_types=logical_view_types,
-            metrics=metrics,
-            raw_stats=RawStats(**raw_stats),
-            threshold=threshold,
-            traces=traces,
-            view_types=view_types,
-        )
-
-    def read_pfw(self, trace_path: str, time_granularity: int, time_approximate=True):
+    def read_trace(self, trace_path: str) -> dd.DataFrame:
         trace_paths = glob(trace_path)
         all_files = []
         pfw_pattern = []
@@ -334,8 +265,8 @@ class DFTracerAnalyzer(Analyzer):
             json_lines = db.concat(json_line_bags)
             pfw_gz_bag = json_lines.map(
                 _load_objects,
-                time_granularity=time_granularity,
-                time_approximate=time_approximate,
+                time_granularity=self.time_granularity,
+                time_approximate=self.time_approximate,
                 condition_fn=None,
             ).filter(lambda x: "name" in x)
         main_bag = None
@@ -344,8 +275,8 @@ class DFTracerAnalyzer(Analyzer):
                 db.read_text(pfw_pattern)
                 .map(
                     _load_objects,
-                    time_granularity=time_granularity,
-                    time_approximate=time_approximate,
+                    time_granularity=self.time_granularity,
+                    time_approximate=self.time_approximate,
                     condition_fn=None,
                 )
                 .filter(lambda x: "name" in x)
@@ -382,7 +313,7 @@ class DFTracerAnalyzer(Analyzer):
             ) / DFTRACER_TIME_RESOLUTION
             events['te'] = events['ts'] + events['dur']
             events[COL_TIME_RANGE] = (
-                ((events['te'] / time_granularity) * DFTRACER_TIME_RESOLUTION)
+                ((events['te'] / self.time_granularity) * DFTRACER_TIME_RESOLUTION)
                 .round()
                 .astype(int)
             )

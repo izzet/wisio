@@ -77,4 +77,4 @@ jobs:
           meson test -C build --verbose --setup=mpi
       - name: Run WisIO
         run: |
-          wisio analysis=recorder analysis.trace_path=tests/data/extracted/recorder-parquet
+          wisio +analyzer=recorder trace_path=tests/data/extracted/recorder-parquet

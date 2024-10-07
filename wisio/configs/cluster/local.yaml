@@ -1,5 +1,0 @@
-type: LOCAL
-debug: false
-local_dir: /tmp/.wisio/worker_dir
-memory: 0
-n_workers: 8

@@ -3,7 +3,6 @@ from time import perf_counter
 
 
 class ElapsedTimeLogger(object):
-
     def __init__(self, message: str, level=logging.INFO, stacklevel=3):
         self.level = level
         self.message = message
@@ -25,15 +24,3 @@ class ElapsedTimeLogger(object):
                 msg=f"{self.message} ({self.elapsed_time})",
                 stacklevel=self.stacklevel,
             )
-
-
-def setup_logging(filename: str, debug: bool):
-    logging.basicConfig(
-        datefmt='%H:%M:%S',
-        format='[%(levelname)s] [%(asctime)s] %(message)s [%(pathname)s:%(lineno)d]',
-        handlers=[
-            logging.FileHandler(filename=filename),
-            logging.StreamHandler(),
-        ],
-        level=logging.DEBUG if debug else logging.INFO,
-    )
