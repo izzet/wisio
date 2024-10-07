@@ -1,46 +1,64 @@
 import os
 import pathlib
 import pytest
-import wisio
-from hydra import compose, initialize_config_dir
-from hydra.core.config_store import ConfigStore
-from wisio.config import AnalysisType, MainConfig
+from hydra import compose, initialize
+from hydra.core.hydra_config import HydraConfig
+from typing import List
+
+from wisio.config import init_hydra_config_store
 from wisio.__main__ import main
 
-config_dir = os.path.dirname(wisio.__file__) + "/configs"
 
-cs = ConfigStore.instance()
-cs.store(name="base_config", node=MainConfig)
+@pytest.fixture(scope="function")
+def override_hydra_config():
+    def _override_hydra_config(overrides: List[str]):
+        with initialize(version_base=None, config_path=None):
+            init_hydra_config_store()
+            cfg = compose(
+                config_name="config",
+                overrides=overrides,
+                return_hydra_config=True,
+            )
+            HydraConfig.instance().set_config(cfg)
+            return cfg
+
+    yield _override_hydra_config
+
+    _override_hydra_config([])
 
 
 @pytest.mark.parametrize(
-    "analysis_type, trace_path",
-    [(AnalysisType.RECORDER, "tests/data/extracted/recorder-parquet")],
+    "analyzer, trace_path",
+    [("recorder", "tests/data/extracted/recorder-parquet")],
 )
-@pytest.mark.parametrize("checkpoint", ["enabled", "disabled"])
+@pytest.mark.parametrize("checkpoint", [True, False])
 def test_e2e(
-    analysis_type: AnalysisType,
-    checkpoint: str,
+    analyzer: str,
     trace_path: str,
+    checkpoint: bool,
     tmp_path: pathlib.Path,
+    override_hydra_config,
 ) -> None:
-    with initialize_config_dir(config_dir=config_dir, version_base=None):
-        config = compose(
-            config_name="config",
-            overrides=[
-                f"analysis={analysis_type.value}",
-                f"analysis.bottleneck_dir={tmp_path}/bottlenecks",
-                f"analysis.trace_path={trace_path}",
-                f"checkpoint={checkpoint}",
-                f"checkpoint.dir={tmp_path}/checkpoints",
-            ],
-        )
-        assert config.analysis.type == analysis_type
-        assert config.analysis.trace_path == trace_path
+    bottleneck_dir = f"{tmp_path}/bottlenecks"
+    checkpoint_dir = f"{tmp_path}/checkpoints"
 
-    main(config)
+    cfg = override_hydra_config(
+        [
+            f"+analyzer={analyzer}",
+            f"analyzer.bottleneck_dir={bottleneck_dir}",
+            f"analyzer.checkpoint={checkpoint}",
+            f"analyzer.checkpoint_dir={checkpoint_dir}",
+            f"hydra.run.dir={tmp_path}",
+            f"hydra.runtime.output_dir={tmp_path}",
+            f"trace_path={trace_path}",
+        ]
+    )
 
-    assert os.path.exists(f"{tmp_path}/bottlenecks")
+    assert HydraConfig.get().runtime.output_dir == tmp_path.as_posix()
+    assert cfg.trace_path == trace_path
 
-    if checkpoint == "enabled":
-        assert os.path.exists(f"{tmp_path}/checkpoints")
+    main(cfg)
+
+    assert os.path.exists(bottleneck_dir)
+    if checkpoint:
+        assert os.path.exists(checkpoint_dir)
