@@ -1,5 +1,5 @@
 import hydra
-from dask_jobqueue import LSFCluster, PBSCluster
+from dask_jobqueue import LSFCluster, PBSCluster, SLURMCluster
 from distributed import Client, LocalCluster
 from hydra.utils import instantiate
 from typing import Union
@@ -18,7 +18,7 @@ except ModuleNotFoundError:
 
 
 AnalyzerType = Union[DarshanAnalyzer, DFTracerAnalyzer, RecorderAnalyzer]
-ClusterType = Union[LocalCluster, LSFCluster, PBSCluster]
+ClusterType = Union[LocalCluster, LSFCluster, PBSCluster, SLURMCluster]
 OutputType = Union[ConsoleOutput, CSVOutput, SQLiteOutput]
 
 

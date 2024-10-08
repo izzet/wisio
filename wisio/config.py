@@ -1,4 +1,5 @@
 import logging
+import socket
 from dataclasses import asdict, dataclass, field
 from hydra.core.config_store import ConfigStore
 from hydra.conf import HelpConf, JobConf
@@ -45,28 +46,30 @@ class ClusterConfig:
 @dataclass
 class JobQueueClusterSchedulerConfig:
     dashboard_address: Optional[str] = None
-    host: Optional[str] = None
+    host: Optional[str] = field(default_factory=socket.gethostname)
 
 
 @dataclass
-class JobQueueClusterConfig:
-    cores: int = 1
+class JobQueueClusterConfig(ClusterConfig):
+    cores: int = 16
     death_timeout: Optional[int] = 60
     job_directives_skip: Optional[List[str]] = field(default_factory=list)
     job_extra_directives: Optional[List[str]] = field(default_factory=list)
     log_directory: Optional[str] = ""
-    memory: Optional[str] = "8GB"
-    processes: Optional[int] = 8
-    scheduler_options: Optional[JobQueueClusterSchedulerConfig] = None
+    memory: Optional[str] = None
+    processes: Optional[int] = 1
+    scheduler_options: Optional[JobQueueClusterSchedulerConfig] = field(
+        default_factory=JobQueueClusterSchedulerConfig
+    )
 
 
 @dataclass
 class LocalClusterConfig(ClusterConfig):
     _target_: str = "dask.distributed.LocalCluster"
-    host: Optional[str] = ""
+    host: Optional[str] = None
     memory_limit: Optional[int] = None
     n_workers: Optional[int] = None
-    processes: Optional[bool] = False
+    processes: Optional[bool] = True
     silence_logs: Optional[int] = logging.CRITICAL
 
 
@@ -79,6 +82,11 @@ class LSFClusterConfig(JobQueueClusterConfig):
 @dataclass
 class PBSClusterConfig(JobQueueClusterConfig):
     _target_: str = "dask_jobqueue.PBSCluster"
+
+
+@dataclass
+class SLURMClusterConfig(JobQueueClusterConfig):
+    _target_: str = "dask_jobqueue.SLURMCluster"
 
 
 @dataclass
@@ -213,6 +221,7 @@ def init_hydra_config_store() -> None:
     cs.store(group="cluster", name="local", node=LocalClusterConfig)
     cs.store(group="cluster", name="lsf", node=LSFClusterConfig)
     cs.store(group="cluster", name="pbs", node=PBSClusterConfig)
+    cs.store(group="cluster", name="slurm", node=SLURMClusterConfig)
     cs.store(group="output", name="console", node=ConsoleOutputConfig)
     cs.store(group="output", name="csv", node=CSVOutputConfig)
     cs.store(group="output", name="sqlite", node=SQLiteOutputConfig)
