@@ -30,27 +30,32 @@ RENAMED_COLS = {'duration': 'time'}
 
 class RecorderAnalyzer(Analyzer):
     def read_trace(self, trace_path: str) -> dd.DataFrame:
-        traces = dd.read_parquet(trace_path)
+        self.global_min_max = self._load_global_min_max(trace_path=trace_path)
+        return dd.read_parquet(trace_path)
 
+    def postread_trace(self, traces: dd.DataFrame) -> dd.DataFrame:
         traces['acc_pat'] = traces['acc_pat'].astype(np.uint8)
         traces['count'] = 1
         traces['duration'] = traces['duration'].astype(np.float64)
         traces['io_cat'] = traces['io_cat'].astype(np.uint8)
-
-        global_min_max = self._load_global_min_max(trace_path=trace_path)
         time_ranges = self._compute_time_ranges(
-            global_min_max=global_min_max,
+            global_min_max=self.global_min_max,
             time_granularity=self.time_granularity,
         )
-
         traces = (
             traces[(traces['cat'] == CAT_POSIX) & (traces['io_cat'].isin(IO_CATS))]
             .map_partitions(self._set_time_ranges, time_ranges=time_ranges)
             .rename(columns=RENAMED_COLS)
             .drop(columns=DROPPED_COLS, errors='ignore')
         )
-
         return traces
+
+    def compute_total_count(self, traces: dd.DataFrame) -> int:
+        return (
+            traces[(traces['cat'] == CAT_POSIX) & (traces['io_cat'].isin(IO_CATS))]
+            .index.count()
+            .persist()
+        )
 
     @staticmethod
     def _compute_time_ranges(global_min_max: dict, time_granularity: int):

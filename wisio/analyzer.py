@@ -1,12 +1,13 @@
 import abc
 import dask.dataframe as dd
+import hashlib
 import itertools as it
 import json
 import logging
 import math
 import os
 from dask.base import compute, unpack_collections
-from dask.delayed import Delayed, delayed
+from dask.delayed import Delayed
 from dask.distributed import fire_and_forget, get_client, wait
 from typing import Callable, Dict, List, Tuple, Union
 
@@ -24,6 +25,7 @@ from .constants import (
     EVENT_COMP_PERS,
     EVENT_DET_BOT,
     EVENT_SAVE_BOT,
+    EVENT_SAVE_VIEWS,
     LOGICAL_VIEW_TYPES,
     AccessPattern,
     IOCategory,
@@ -48,6 +50,7 @@ CHECKPOINT_MAIN_VIEW = '_main_view'
 CHECKPOINT_METRIC_BOUNDARIES = '_metric_boundaries'
 CHECKPOINT_HLM = '_hlm'
 CHECKPOINT_RAW_STATS = '_raw_stats'
+CHECKPOINT_VIEW = '_view'
 EXTRA_COLS = ['io_cat', 'acc_pat', 'func_id']
 HLM_AGG = {
     'time': [sum],
@@ -111,9 +114,9 @@ class Analyzer(abc.ABC):
         # Read trace & stats
         traces = self.read_trace(trace_path=trace_path)
         raw_stats = self.read_stats(traces=traces)
+        traces = self.postread_trace(traces=traces)
 
         # Create checkpoint names
-        hlm_name = self.get_checkpoint_name(CHECKPOINT_HLM, *sorted(view_types))
         main_view_name = self.get_checkpoint_name(
             CHECKPOINT_MAIN_VIEW, *sorted(view_types)
         )
@@ -123,14 +126,13 @@ class Analyzer(abc.ABC):
             # Compute high-level metrics
             with EventLogger(key=EVENT_COMP_HLM, message='Compute high-level metrics'):
                 hlm = self.restore_view(
-                    name=hlm_name,
+                    name=self.get_checkpoint_name(CHECKPOINT_HLM, *sorted(view_types)),
                     fallback=lambda: self.compute_high_level_metrics(
                         traces=traces,
                         view_types=view_types,
                     ),
-                    force=False,
-                    persist=True,
                 )
+                hlm = hlm.persist()
                 self._wait_all(tasks=hlm)
 
         # Compute main view
@@ -141,13 +143,11 @@ class Analyzer(abc.ABC):
                     hlm=hlm,
                     view_types=view_types,
                 ),
-                force=False,
-                persist=True,
             )
             # TODO remove dropped columns
             main_view = main_view.drop(
                 columns=['bw', 'intensity', 'iops', 'att_perf'], errors='ignore'
-            )
+            ).persist()
             self._wait_all(tasks=main_view)
 
         # return traces, main_view
@@ -188,6 +188,26 @@ class Analyzer(abc.ABC):
                 )
                 view_results.update(logical_view_results)
             self._wait_all(tasks=view_results)
+
+        if self.checkpoint:
+            with EventLogger(
+                key=EVENT_SAVE_VIEWS, message='Checkpoint views', level=logging.DEBUG
+            ):
+                view_checkpoint_tasks = []
+                for metric, views in view_results.items():
+                    for view_key, view_result in views.items():
+                        view_checkpoint_name = self.get_checkpoint_name(
+                            CHECKPOINT_VIEW, metric, *list(view_key)
+                        )
+                        if not self.has_checkpoint(name=view_checkpoint_name):
+                            view_checkpoint_tasks.append(
+                                self.store_view(
+                                    name=view_checkpoint_name,
+                                    view=view_result.view,
+                                    compute=True,
+                                )
+                            )
+                self._wait_all(tasks=view_checkpoint_tasks)
 
         # Evaluate views
         view_evaluator = ViewEvaluator()
@@ -234,14 +254,14 @@ class Analyzer(abc.ABC):
         )
 
     def read_stats(self, traces: dd.DataFrame) -> RawStats:
-        # TODO
-        job_time = 0
+        job_time = self.compute_job_time(traces=traces)
+        total_count = self.compute_total_count(traces=traces)
         raw_stats: RawStats = self.restore_extra_data(
-            name=CHECKPOINT_RAW_STATS,
+            name=self.get_checkpoint_name(CHECKPOINT_RAW_STATS),
             fallback=lambda: dict(
-                job_time=delayed(job_time),
+                job_time=job_time,
                 time_granularity=self.time_granularity,
-                total_count=traces.index.count().persist(),
+                total_count=total_count,
             ),
         )
         return raw_stats
@@ -249,11 +269,14 @@ class Analyzer(abc.ABC):
     def read_trace(self, trace_path: str) -> dd.DataFrame:
         raise NotImplementedError
 
+    def postread_trace(self, traces: dd.DataFrame) -> dd.DataFrame:
+        return traces
+
     def compute_job_time(self, traces: dd.DataFrame) -> float:
         return traces['tend'].max() - traces['tstart'].min()
 
     def compute_total_count(self, traces: dd.DataFrame) -> int:
-        return traces.index.count()
+        return traces.index.count().persist()
 
     def compute_high_level_metrics(
         self,
@@ -427,12 +450,16 @@ class Analyzer(abc.ABC):
         metric_boundary: dd.core.Scalar,
         threshold: int,
     ) -> ViewResult:
-        # Compute view
-        view = self._compute_view(
-            metric=metric,
-            metric_boundary=metric_boundary,
-            records=records,
-            view_type=view_type,
+        # Restore view
+        view = self.restore_view(
+            name=self.get_checkpoint_name(CHECKPOINT_VIEW, metric, *list(view_key)),
+            fallback=lambda: self._compute_view(
+                records=records,
+                view_type=view_type,
+                metric=metric,
+                metric_boundary=metric_boundary,
+            ),
+            write_to_disk=False,
         )
 
         # Filter by slope
@@ -461,7 +488,10 @@ class Analyzer(abc.ABC):
         )
 
     def get_checkpoint_name(self, *args):
-        return '_'.join(args)
+        checkpoint_name = "_".join(args)
+        if self.verbose:
+            return checkpoint_name
+        return hashlib.md5(checkpoint_name.encode("utf-8")).hexdigest()
 
     def get_checkpoint_path(self, name: str):
         return f"{self.checkpoint_dir}/{name}"
@@ -494,21 +524,21 @@ class Analyzer(abc.ABC):
         name: str,
         fallback: Callable[[], dd.DataFrame],
         force=False,
-        persist=False,
+        write_to_disk=True,
     ):
         if self.checkpoint:
             view_path = self.get_checkpoint_path(name=name)
             if force or not self.has_checkpoint(name=name):
                 view = fallback()
-                view.to_parquet(f"{view_path}", compute=True, write_metadata_file=True)
+                if not write_to_disk:
+                    return view
+                self.store_view(name=name, view=view)
                 get_client().cancel(view)
-            if persist:
-                return dd.read_parquet(f"{view_path}").persist()
-            return dd.read_parquet(f"{view_path}")
+            return dd.read_parquet(view_path)
         return fallback()
 
     def save_bottlenecks(self, bottlenecks: dd.DataFrame, partition_size='64MB'):
-        bottlenecks.repartition(partition_size=partition_size).to_parquet(
+        return bottlenecks.repartition(partition_size=partition_size).to_parquet(
             self.bottleneck_dir, compute=True, write_metadata_file=True
         )
 
@@ -516,6 +546,15 @@ class Analyzer(abc.ABC):
     def store_extra_data(data: Tuple[Dict], data_path: str):
         with open(data_path, 'w') as f:
             return json.dump(data[0], f, cls=NpEncoder)
+
+    def store_view(
+        self, name: str, view: dd.DataFrame, compute=True, partition_size='64MB'
+    ):
+        return view.repartition(partition_size=partition_size).to_parquet(
+            self.get_checkpoint_path(name=name),
+            compute=compute,
+            write_metadata_file=True,
+        )
 
     @staticmethod
     def view_permutations(view_types: List[ViewType]):

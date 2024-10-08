@@ -29,7 +29,11 @@ init_hydra_config_store()
 def main(cfg: Config) -> None:
     cluster: ClusterType = instantiate(cfg.cluster)
     client = Client(cluster)
-    analyzer: AnalyzerType = instantiate(cfg.analyzer)
+    analyzer: AnalyzerType = instantiate(
+        cfg.analyzer,
+        debug=cfg.debug,
+        verbose=cfg.verbose,
+    )
     result = analyzer.analyze_trace(
         trace_path=cfg.trace_path,
         # accuracy=cfg.accuracy,

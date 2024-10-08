@@ -14,10 +14,8 @@ class AnalyzerConfig:
     bottleneck_dir: Optional[str] = "${hydra:runtime.output_dir}/bottlenecks"
     checkpoint: Optional[bool] = True
     checkpoint_dir: Optional[str] = "${hydra:runtime.output_dir}/checkpoints"
-    debug: Optional[bool] = False
     time_approximate: Optional[bool] = True
     time_granularity: Optional[float] = MISSING
-    verbose: Optional[bool] = False
 
 
 @dataclass
