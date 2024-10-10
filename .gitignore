@@ -14,5 +14,7 @@ build
 builddir
 dask-worker-space
 dist
+multirun/
+outputs/
 tmp
 venv-*
