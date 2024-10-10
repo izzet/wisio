@@ -41,6 +41,7 @@ def main(cfg: Config) -> None:
         exclude_characteristics=cfg.exclude_characteristics,
         logical_view_types=cfg.logical_view_types,
         metrics=cfg.metrics,
+        percentile=cfg.percentile,
         threshold=cfg.threshold,
         view_types=cfg.view_types,
     )

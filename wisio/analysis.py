@@ -2,28 +2,29 @@ import dask.dataframe as dd
 import numpy as np
 import pandas as pd
 from typing import Callable, Dict, List, Union
+
 from .types import Metric, Score, ViewType
 
 
 BW_BINS = [  # bw_ranges = [0, 1, 128, 1024, 1024*64]
     0,  # -- 'critical'
-    1024 ** 2,  # 1MB -- 'very high'
-    1024 ** 2 * 16,  # 16MB -- 'high',
-    1024 ** 2 * 16 * 16,  # 256MB -- 'medium',
-    1024 ** 3,  # 1GB -- 'low',
-    1024 ** 3 * 16,  # 16GB -- 'very low',
-    1024 ** 3 * 16 * 4,  # 64GB -- 'trivial',
-    1024 ** 4  # 1TB -- 'none
+    1024**2,  # 1MB -- 'very high'
+    1024**2 * 16,  # 16MB -- 'high',
+    1024**2 * 16 * 16,  # 256MB -- 'medium',
+    1024**3,  # 1GB -- 'low',
+    1024**3 * 16,  # 16GB -- 'very low',
+    1024**3 * 16 * 4,  # 64GB -- 'trivial',
+    1024**4,  # 1TB -- 'none
 ]
 BW_BINS_PER_PROC = [
     1,  # -- 'critical'
-    1024 ** 2,  # 1MB -- 'very high'
-    1024 ** 2 * 10,  # 10MB -- 'high'
-    1024 ** 2 * 128,  # 128MB -- 'medium' --- fast hd
-    1024 ** 2 * 256,  # 256MB -- 'low', --- nvme perf
-    1024 ** 2 * 512,  # 512MB -- 'very low', --- hbm memory
-    1024 ** 3,  # 1GB 'trivial' --- single thread bw for memory
-    1024 ** 3 * 64,  # 64GB -- 'none', -- agg bw for memory
+    1024**2,  # 1MB -- 'very high'
+    1024**2 * 10,  # 10MB -- 'high'
+    1024**2 * 128,  # 128MB -- 'medium' --- fast hd
+    1024**2 * 256,  # 256MB -- 'low', --- nvme perf
+    1024**2 * 512,  # 512MB -- 'very low', --- hbm memory
+    1024**3,  # 1GB 'trivial' --- single thread bw for memory
+    1024**3 * 64,  # 64GB -- 'none', -- agg bw for memory
 ]
 IS_NORMALIZED: Dict[Metric, bool] = dict(
     att_perf=True,
@@ -50,16 +51,7 @@ SCORE_BINS: Dict[Metric, List[float]] = dict(
         np.tan(np.deg2rad(20)),  # 0.36397023
         np.tan(np.deg2rad(10)),  # 0.17632698
     ],
-    time=[
-        0,
-        0.001,
-        0.01,
-        0.1,
-        0.25,
-        0.5,
-        0.75,
-        0.9
-    ]
+    time=[0, 0.001, 0.01, 0.1, 0.25, 0.5, 0.75, 0.9],
 )
 SCORE_INITIALS = {
     'none': 'NA',
@@ -102,14 +94,18 @@ def set_bound_columns(ddf: Union[dd.DataFrame, pd.DataFrame], is_initial=False):
 
     # records which tend towards 1 >> 0.9
     ddf['intensity'] = 0.0
-    ddf['intensity'] = ddf['intensity'].mask(ddf['size'] > 0, ddf['count'] / ddf['size'])
+    ddf['intensity'] = ddf['intensity'].mask(
+        ddf['size'] > 0, ddf['count'] / ddf['size']
+    )
 
     if not is_initial:
         return ddf.drop(columns=['bw_intensity'])
     return ddf
 
 
-def set_metric_scores(df: pd.DataFrame, view_type: ViewType, metric: Metric, metric_boundary=None):
+def set_metric_scores(
+    df: pd.DataFrame, view_type: ViewType, metric: Metric, metric_boundary=None
+):
     bin_col, score_col, slope_col = (
         f"{metric}_bin",
         f"{metric}_score",
@@ -139,14 +135,17 @@ def set_metric_scores(df: pd.DataFrame, view_type: ViewType, metric: Metric, met
 
 
 def set_metric_slope(df: pd.DataFrame, metric: Metric):
+    pth_col = f"{metric}_pth"
     slope_col = f"{metric}_slope"
 
     if metric == 'iops':
         df['time_per'] = df['time'] / df['time'].sum()
         df['count_per'] = df['count'] / df['count'].sum()
         df[slope_col] = df['count_per'] / df['time_per']
+        df[pth_col] = (1 / df[slope_col]).rank(pct=True)
     elif metric == 'time':
         df[slope_col] = df[metric] / df[metric].sum()
+        df[pth_col] = df[slope_col].rank(pct=True)
 
     # 1. io_time == too trivial -- >50% threshold
     # 2. iops == slope analysis -- <45 degree roc (iops) as the main metric

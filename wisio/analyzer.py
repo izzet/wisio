@@ -9,7 +9,7 @@ import os
 from dask.base import compute, unpack_collections
 from dask.delayed import Delayed
 from dask.distributed import fire_and_forget, get_client, wait
-from typing import Callable, Dict, List, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 from .analysis import THRESHOLD_FUNCTIONS, set_metric_slope
 from .analysis_utils import set_file_dir, set_file_pattern, set_proc_name_parts
@@ -108,9 +108,14 @@ class Analyzer(abc.ABC):
         exclude_characteristics: List[str] = [],
         logical_view_types: bool = False,
         metrics: List[Metric] = ['iops'],
-        threshold: int = 45,
+        percentile: Optional[float] = None,
+        threshold: Optional[int] = None,
         view_types: List[ViewType] = ['file_name', 'proc_name', 'time_range'],
     ) -> AnalyzerResultType:
+        # Check if both percentile and threshold are none
+        if percentile is None and threshold is None:
+            raise ValueError('Either percentile or threshold must be defined')
+
         # Read trace & stats
         traces = self.read_trace(trace_path=trace_path)
         raw_stats = self.read_stats(traces=traces)
@@ -172,19 +177,21 @@ class Analyzer(abc.ABC):
         with EventLogger(key=EVENT_COMP_PERS, message='Compute perspectives'):
             view_results = self.compute_views(
                 main_view=main_view,
-                metrics=metrics,
                 metric_boundaries=metric_boundaries,
+                metrics=metrics,
+                percentile=percentile,
                 threshold=threshold,
                 view_types=view_types,
             )
             if logical_view_types:
                 logical_view_results = self.compute_logical_views(
                     main_view=main_view,
-                    metrics=metrics,
                     metric_boundaries=metric_boundaries,
+                    metrics=metrics,
+                    percentile=percentile,
                     threshold=threshold,
-                    view_types=view_types,
                     view_results=view_results,
+                    view_types=view_types,
                 )
                 view_results.update(logical_view_results)
             self._wait_all(tasks=view_results)
@@ -363,7 +370,8 @@ class Analyzer(abc.ABC):
         main_view: dd.DataFrame,
         metrics: List[Metric],
         metric_boundaries: Dict[Metric, dd.core.Scalar],
-        threshold: int,
+        percentile: Optional[float],
+        threshold: Optional[int],
         view_types: List[ViewType],
     ):
         # Keep view results
@@ -387,6 +395,7 @@ class Analyzer(abc.ABC):
                 view_result = self.compute_view(
                     metric=metric,
                     metric_boundary=metric_boundaries[metric],
+                    percentile=percentile,
                     records=parent_records,
                     threshold=threshold,
                     view_key=view_key,
@@ -400,11 +409,12 @@ class Analyzer(abc.ABC):
     def compute_logical_views(
         self,
         main_view: dd.DataFrame,
-        metrics: List[Metric],
         metric_boundaries: Dict[Metric, dd.core.Scalar],
-        threshold: int,
-        view_types: List[ViewType],
+        metrics: List[Metric],
+        percentile: Optional[float],
+        threshold: Optional[int],
         view_results: Dict[Metric, Dict[ViewKey, ViewResult]],
+        view_types: List[ViewType],
     ):
         for metric in metrics:
             for view_key in LOGICAL_VIEW_TYPES:
@@ -432,6 +442,7 @@ class Analyzer(abc.ABC):
                     metric=metric,
                     metric_boundary=metric_boundaries[metric],
                     records=parent_records,
+                    percentile=percentile,
                     threshold=threshold,
                     view_key=view_key,
                     view_type=view_type,
@@ -443,12 +454,13 @@ class Analyzer(abc.ABC):
 
     def compute_view(
         self,
-        records: dd.DataFrame,
-        view_key: ViewKey,
-        view_type: str,
         metric: str,
         metric_boundary: dd.core.Scalar,
-        threshold: int,
+        percentile: Optional[float],
+        records: dd.DataFrame,
+        threshold: Optional[int],
+        view_key: ViewKey,
+        view_type: str,
     ) -> ViewResult:
         # Restore view
         view = self.restore_view(
@@ -464,7 +476,12 @@ class Analyzer(abc.ABC):
 
         # Filter by slope
         critical_view = view
-        if threshold > 0:
+        if percentile is not None and percentile > 0:
+            critical_view = view.query(
+                f"{metric}_pth >= @percentile",
+                local_dict={'percentile': percentile},
+            ).persist()
+        elif threshold is not None and threshold > 0:
             corrected_threshold = THRESHOLD_FUNCTIONS[metric](threshold)
             critical_view = view.query(
                 f"{metric}_slope <= @threshold",

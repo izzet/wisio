@@ -200,7 +200,8 @@ class Config:
     metrics: Optional[List[str]] = field(default_factory=lambda: ["iops"])
     logical_view_types: Optional[bool] = False
     output: OutputConfig = MISSING
-    threshold: Optional[int] = 45
+    percentile: Optional[float] = None
+    threshold: Optional[int] = None
     time_granularity: Optional[float] = 1e6
     trace_path: str = MISSING
     verbose: Optional[bool] = False
