@@ -862,10 +862,10 @@ class ConsoleOutput(Output):
             else:
                 console.print(bot_panel)
 
-        console.save_html(f"{self.output_dir}/console.html", clear=False)
-        console.save_text(f"{self.output_dir}/console.txt", clear=False)
+        console.save_html(f"{self.output_dir}/result.html", clear=False)
+        console.save_text(f"{self.output_dir}/result.txt", clear=False)
         console.save_svg(
-            f"{self.output_dir}/console.svg",
+            f"{self.output_dir}/result.svg",
             theme=DEFAULT_TERMINAL_THEME,
             title="WisIO",
             clear=True,
