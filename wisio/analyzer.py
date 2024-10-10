@@ -71,6 +71,7 @@ VIEW_AGG = {
     'size': sum,
     'time': sum,
 }
+HASH_CHECKPOINT_NAMES = False
 WAIT_ENABLED = True
 
 
@@ -506,9 +507,9 @@ class Analyzer(abc.ABC):
 
     def get_checkpoint_name(self, *args):
         checkpoint_name = "_".join(args)
-        if self.verbose:
-            return checkpoint_name
-        return hashlib.md5(checkpoint_name.encode("utf-8")).hexdigest()
+        if HASH_CHECKPOINT_NAMES:
+            return hashlib.md5(checkpoint_name.encode("utf-8")).hexdigest()
+        return checkpoint_name
 
     def get_checkpoint_path(self, name: str):
         return f"{self.checkpoint_dir}/{name}"
