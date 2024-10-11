@@ -32,7 +32,7 @@ WORKDIR /wisio
 
 RUN pip install --upgrade pip && \
     pip install build meson-python setuptools wheel && \
-    pip install .[darshan,dftracer] && \
+    pip install .[darshan,dftracer] -Csetup-args="-Denable_tools=true" && \
     pip install -r tests/requirements.txt
 
 ENTRYPOINT ["wisio"]
