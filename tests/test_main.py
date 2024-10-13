@@ -1,6 +1,6 @@
-import os
 import pathlib
 import pytest
+from glob import glob
 from hydra import compose, initialize
 from hydra.core.hydra_config import HydraConfig
 from typing import List
@@ -29,13 +29,18 @@ def override_hydra_config():
 
 @pytest.mark.parametrize(
     "analyzer, trace_path",
-    [("recorder", "tests/data/extracted/recorder-parquet")],
+    [
+        ("dftracer", "tests/data/extracted/dftracer-raw"),
+        ("recorder", "tests/data/extracted/recorder-parquet"),
+    ],
 )
 @pytest.mark.parametrize("checkpoint", [True, False])
+@pytest.mark.parametrize("percentile", [0.99])
 def test_e2e(
     analyzer: str,
     trace_path: str,
     checkpoint: bool,
+    percentile: float,
     tmp_path: pathlib.Path,
     override_hydra_config,
 ) -> None:
@@ -50,15 +55,23 @@ def test_e2e(
             f"analyzer.checkpoint_dir={checkpoint_dir}",
             f"hydra.run.dir={tmp_path}",
             f"hydra.runtime.output_dir={tmp_path}",
+            f"percentile={percentile}",
             f"trace_path={trace_path}",
         ]
     )
 
-    assert HydraConfig.get().runtime.output_dir == tmp_path.as_posix()
+    hydra_config = HydraConfig.get()
+    assert hydra_config.run.dir == tmp_path.as_posix()
+    assert hydra_config.runtime.output_dir == tmp_path.as_posix()
+    assert cfg.analyzer.bottleneck_dir == bottleneck_dir
+    assert cfg.analyzer.checkpoint == checkpoint
+    assert cfg.analyzer.checkpoint_dir == checkpoint_dir
+    assert cfg.percentile == percentile
     assert cfg.trace_path == trace_path
 
+    # Run the main function
     main(cfg)
 
-    assert os.path.exists(bottleneck_dir)
+    assert any(glob(f"{bottleneck_dir}/*.parquet")), "No bottleneck found"
     if checkpoint:
-        assert os.path.exists(checkpoint_dir)
+        assert any(glob(f"{checkpoint_dir}/*.json")), "No checkpoint found"

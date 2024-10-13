@@ -316,6 +316,8 @@ class DFTracerAnalyzer(Analyzer):
         load_data = {}
         load_fn = None
         metadata_cols = {}
+        if os.path.isdir(trace_path) and '*' not in trace_path:
+            trace_path = f"{trace_path}/*.pfw*"
         # ===============================================
         file_pattern = glob(trace_path)
         all_files = []

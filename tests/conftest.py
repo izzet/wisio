@@ -16,5 +16,7 @@ def extract_test_data():
 
         if not os.path.exists(extract_path):
             os.makedirs(extract_path)
+
+        if not any(os.scandir(extract_path)):
             with tarfile.open(tar_path, 'r:gz') as tar:
                 tar.extractall(path=extract_path)
