@@ -40,7 +40,9 @@ IS_REVERSED: Dict[Metric, bool] = dict(
     iops=True,
     time=False,
 )
-SCORE_BINS: Dict[Metric, List[float]] = dict(
+# PERCENTILE_BINS = [0, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99, 1]
+PERCENTILE_BINS = [0, 0.001, 0.01, 0.1, 0.25, 0.5, 0.75, 0.9]
+SLOPE_BINS: Dict[Metric, List[float]] = dict(
     iops=[
         np.tan(np.deg2rad(80)),  # 5.67128182
         np.tan(np.deg2rad(70)),  # 2.74747742
@@ -104,15 +106,20 @@ def set_bound_columns(ddf: Union[dd.DataFrame, pd.DataFrame], is_initial=False):
 
 
 def set_metric_scores(
-    df: pd.DataFrame, view_type: ViewType, metric: Metric, metric_boundary=None
+    df: pd.DataFrame,
+    view_type: ViewType,
+    metric: Metric,
+    metric_boundary: float,
+    is_slope_based: bool,
 ):
-    bin_col, score_col, slope_col = (
+    bin_col, score_col, slope_col, pth_col = (
         f"{metric}_bin",
         f"{metric}_score",
         f"{metric}_slope",
+        f"{metric}_pth",
     )
 
-    bins = SCORE_BINS[metric]
+    bins = SLOPE_BINS[metric] if is_slope_based else PERCENTILE_BINS
     names = SCORE_NAMES
 
     # if IS_NORMALIZED[metric]:
@@ -128,15 +135,35 @@ def set_metric_scores(
     # if metric in ['bw', 'iops']:
     #     df = df.query(f"{metric} > 0")
 
-    df[bin_col] = np.digitize(df[slope_col], bins=bins, right=True)
+    if is_slope_based:
+        df[bin_col] = np.digitize(df[slope_col], bins=bins, right=True)
+    else:
+        df[bin_col] = np.digitize(df[pth_col], bins=bins, right=True)
+
     df[score_col] = np.choose(df[bin_col] - 1, choices=names, mode='clip')
 
     return df
 
 
-def set_metric_slope(df: pd.DataFrame, metric: Metric):
+def set_metric_slope(
+    df: pd.DataFrame,
+    metrics: List[Metric],
+    metric: Metric,
+    metric_boundary: float,
+):
     pth_col = f"{metric}_pth"
     slope_col = f"{metric}_slope"
+
+    # Dask metadata errors occur without initializing all metric columns
+    if "time_per" not in df.columns:
+        df["time_per"] = 0.0
+    if "count_per" not in df.columns:
+        df["count_per"] = 0.0
+    for metric2 in metrics:
+        if f"{metric2}_pth" not in df.columns:
+            df[f"{metric2}_pth"] = 0.0
+        if f"{metric2}_slope" not in df.columns:
+            df[f"{metric2}_slope"] = 0.0
 
     if metric == 'iops':
         df['time_per'] = df['time'] / df['time'].sum()
@@ -144,8 +171,9 @@ def set_metric_slope(df: pd.DataFrame, metric: Metric):
         df[slope_col] = df['count_per'] / df['time_per']
         df[pth_col] = (1 / df[slope_col]).rank(pct=True)
     elif metric == 'time':
-        df[slope_col] = df[metric] / df[metric].sum()
-        df[pth_col] = df[slope_col].rank(pct=True)
+        df[slope_col] = df[metric] / metric_boundary
+        df[pth_col] = df[metric] / metric_boundary
+        # df[pth_col] = df[slope_col].rank(pct=True)
 
     # 1. io_time == too trivial -- >50% threshold
     # 2. iops == slope analysis -- <45 degree roc (iops) as the main metric

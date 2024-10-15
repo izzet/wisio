@@ -116,6 +116,7 @@ class Analyzer(abc.ABC):
         # Check if both percentile and threshold are none
         if percentile is None and threshold is None:
             raise ValueError('Either percentile or threshold must be defined')
+        is_slope_based = threshold is not None
 
         # Read trace & stats
         traces = self.read_trace(trace_path=trace_path)
@@ -224,6 +225,7 @@ class Analyzer(abc.ABC):
                 metric_boundaries=metric_boundaries,
                 metrics=metrics,
                 view_results=view_results,
+                is_slope_based=is_slope_based,
             )
             self._wait_all(tasks=evaluated_views)
 
@@ -240,6 +242,7 @@ class Analyzer(abc.ABC):
             bottlenecks, bottleneck_rules = rule_engine.process_bottlenecks(
                 evaluated_views=evaluated_views,
                 exclude_bottlenecks=exclude_bottlenecks,
+                group_behavior=False,
                 metric_boundaries=metric_boundaries,
             )
             self._wait_all(tasks=bottlenecks)
@@ -394,6 +397,7 @@ class Analyzer(abc.ABC):
                 )
 
                 view_result = self.compute_view(
+                    metrics=metrics,
                     metric=metric,
                     metric_boundary=metric_boundaries[metric],
                     percentile=percentile,
@@ -440,6 +444,7 @@ class Analyzer(abc.ABC):
                     )
 
                 view_result = self.compute_view(
+                    metrics=metrics,
                     metric=metric,
                     metric_boundary=metric_boundaries[metric],
                     records=parent_records,
@@ -455,7 +460,8 @@ class Analyzer(abc.ABC):
 
     def compute_view(
         self,
-        metric: str,
+        metrics: List[Metric],
+        metric: Metric,
         metric_boundary: dd.core.Scalar,
         percentile: Optional[float],
         records: dd.DataFrame,
@@ -469,6 +475,7 @@ class Analyzer(abc.ABC):
             fallback=lambda: self._compute_view(
                 records=records,
                 view_type=view_type,
+                metrics=metrics,
                 metric=metric,
                 metric_boundary=metric_boundary,
             ),
@@ -585,7 +592,8 @@ class Analyzer(abc.ABC):
         self,
         records: dd.DataFrame,
         view_type: str,
-        metric: str,
+        metrics: List[Metric],
+        metric: Metric,
         metric_boundary: dd.core.Scalar,
     ) -> dd.DataFrame:
         view_types = records.index._meta.names
@@ -616,7 +624,12 @@ class Analyzer(abc.ABC):
             view = records.reset_index().groupby([view_type]).agg(non_proc_agg_dict)
 
         # Set metric slope
-        view = view.map_partitions(set_metric_slope, metric=metric)
+        view = view.map_partitions(
+            set_metric_slope,
+            metrics=metrics,
+            metric=metric,
+            metric_boundary=metric_boundary,
+        )
 
         # Return view
         return view
