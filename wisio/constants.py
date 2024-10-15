@@ -50,6 +50,12 @@ COMPACT_IO_TYPES = ['R', 'W', 'M']
 FILE_PATTERN_PLACEHOLDER = '[0-9]'
 PROC_NAME_SEPARATOR = '#'
 
+HUMANIZED_METRICS = dict(
+    bw='I/O Bandwidth',
+    intensity='I/O Intensity',
+    iops='I/O Operations per Second',
+    time='I/O Time',
+)
 HUMANIZED_VIEW_TYPES = dict(
     app_name='App',
     file_dir='File Directory',

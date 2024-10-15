@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Literal, Optional, Union, Tuple
 
-from .constants import HUMANIZED_VIEW_TYPES
+from .constants import HUMANIZED_METRICS, HUMANIZED_VIEW_TYPES
 
 
 class Score(Enum):
@@ -26,7 +26,9 @@ Metric = Literal[
     'time',
 ]
 ViewType = Literal['file_name', 'proc_name', 'time_range']
-ViewKey = Union[Tuple[ViewType], Tuple[ViewType, ViewType], Tuple[ViewType, ViewType, ViewType]]
+ViewKey = Union[
+    Tuple[ViewType], Tuple[ViewType, ViewType], Tuple[ViewType, ViewType, ViewType]
+]
 
 
 @dataclass
@@ -239,11 +241,21 @@ class AnalyzerResultType:
     view_results: ViewResultsPerViewPerMetric
 
 
+def humanized_metric_name(metric: Metric):
+    return HUMANIZED_METRICS[metric]
+
+
 def humanized_view_name(view_key_type: Union[ViewKey, ViewType], separator='_'):
     if isinstance(view_key_type, tuple):
-        return separator.join([HUMANIZED_VIEW_TYPES[view_type] for view_type in view_key_type])
+        return separator.join(
+            [HUMANIZED_VIEW_TYPES[view_type] for view_type in view_key_type]
+        )
     return HUMANIZED_VIEW_TYPES[view_key_type]
 
 
 def view_name(view_key_type: Union[ViewKey, ViewType], separator='_'):
-    return separator.join(view_key_type) if isinstance(view_key_type, tuple) else view_key_type
+    return (
+        separator.join(view_key_type)
+        if isinstance(view_key_type, tuple)
+        else view_key_type
+    )

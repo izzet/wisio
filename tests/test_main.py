@@ -35,11 +35,13 @@ def override_hydra_config():
     ],
 )
 @pytest.mark.parametrize("checkpoint", [True, False])
-@pytest.mark.parametrize("percentile", [0.99])
+@pytest.mark.parametrize("metric", ["time", "iops"])
+@pytest.mark.parametrize("percentile", [0.95])
 def test_e2e(
     analyzer: str,
     trace_path: str,
     checkpoint: bool,
+    metric: str,
     percentile: float,
     tmp_path: pathlib.Path,
     override_hydra_config,
@@ -55,6 +57,7 @@ def test_e2e(
             f"analyzer.checkpoint_dir={checkpoint_dir}",
             f"hydra.run.dir={tmp_path}",
             f"hydra.runtime.output_dir={tmp_path}",
+            f"metrics=[{metric}]",
             f"percentile={percentile}",
             f"trace_path={trace_path}",
         ]
@@ -66,6 +69,7 @@ def test_e2e(
     assert cfg.analyzer.bottleneck_dir == bottleneck_dir
     assert cfg.analyzer.checkpoint == checkpoint
     assert cfg.analyzer.checkpoint_dir == checkpoint_dir
+    assert cfg.metrics == [metric]
     assert cfg.percentile == percentile
     assert cfg.trace_path == trace_path
 

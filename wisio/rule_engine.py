@@ -42,25 +42,19 @@ from .types import (
     ViewKey,
     ViewResult,
     ViewType,
-    view_name,
+    view_name as format_view_name,
 )
 
 
 def _assign_behavior(bottlenecks: pd.DataFrame, metric: str):
-
     view_name_col, score_col = 'view_name', f"{metric}_score"
 
     view_names = list(bottlenecks[view_name_col].unique())
     scores = list(bottlenecks[score_col].unique())
 
-    bottlenecks = (
-        bottlenecks
-        .set_index([view_name_col, score_col])
-        .sort_index()
-    )
+    bottlenecks = bottlenecks.set_index([view_name_col, score_col]).sort_index()
 
     for view_name, score in it.product(view_names, scores):
-
         behavior_key = (view_name, score)
 
         if not behavior_key in bottlenecks.index:
@@ -73,10 +67,14 @@ def _assign_behavior(bottlenecks: pd.DataFrame, metric: str):
         if len(behaviors) > 1:
             cols = bottlenecks.columns
 
-            include_cond = '_min|_max|_count|_size|_time|excessive_|small_|_imbalance|_bin'
+            include_cond = (
+                '_min|_max|_count|_size|_time|excessive_|small_|_imbalance|_bin'
+            )
             exclude_cond = 'num_'
 
-            behavior_cols = cols[cols.str.contains(include_cond) & ~cols.str.contains(exclude_cond)]
+            behavior_cols = cols[
+                cols.str.contains(include_cond) & ~cols.str.contains(exclude_cond)
+            ]
 
             scaler = StandardScaler()
             scaled_behavior = scaler.fit_transform(behaviors[behavior_cols])
@@ -90,7 +88,6 @@ def _assign_behavior(bottlenecks: pd.DataFrame, metric: str):
 
 
 class RuleEngine(object):
-
     def __init__(
         self,
         rules: Dict[ViewType, List[str]],
@@ -107,7 +104,6 @@ class RuleEngine(object):
         view_results: Dict[Metric, Dict[ViewKey, ViewResult]],
         exclude_characteristics: List[str] = [],
     ) -> Characteristics:
-
         rules = [
             CharacteristicIOTimeRule(),
             CharacteristicIOOpsRule(),
@@ -133,23 +129,28 @@ class RuleEngine(object):
                 characteristics={dep: tasks[dep] for dep in impl.deps},
                 dask_key_name=f"characteristics-{rule}",
                 raw_stats=self.raw_stats,
-                result=impl.define_tasks(main_view=main_view, view_results=view_results),
+                result=impl.define_tasks(
+                    main_view=main_view, view_results=view_results
+                ),
             )
 
-        characteristics, = persist(tasks)
+        (characteristics,) = persist(tasks)
 
         return characteristics
 
     def process_bottlenecks(
         self,
         evaluated_views: ScoringPerViewPerMetric,
+        group_behavior: bool,
         metric_boundaries: Dict[Metric, dd.core.Scalar],
         exclude_bottlenecks: List[str] = [],
     ) -> Tuple[List[dict], Dict[str, BottleneckRule]]:
-
         rule_dict = {
-            rule: BottleneckRule(rule_key=rule, rule=KNOWN_RULES[rule], verbose=self.verbose)
-            for rule in KNOWN_RULES if rule not in exclude_bottlenecks
+            rule: BottleneckRule(
+                rule_key=rule, rule=KNOWN_RULES[rule], verbose=self.verbose
+            )
+            for rule in KNOWN_RULES
+            if rule not in exclude_bottlenecks
         }
 
         bottlenecks = []
@@ -169,13 +170,14 @@ class RuleEngine(object):
                     )
                 )
 
-        concatenated = (
-            dd.concat(bottlenecks)
-            .map_partitions(_assign_behavior, metric=metric)
-            .persist()
-        )
-
-        # concatenated = dd.concat(bottlenecks).persist()
+        if group_behavior:
+            concatenated = (
+                dd.concat(bottlenecks)
+                .map_partitions(_assign_behavior, metric=metric)
+                .persist()
+            )
+        else:
+            concatenated = dd.concat(bottlenecks).persist()
 
         return concatenated, rule_dict
 
@@ -199,9 +201,16 @@ class RuleEngine(object):
         if COL_FILE_DIR in view_types:
             details = set_file_dir(df=details.set_index(COL_FILE_NAME)).reset_index()
         elif COL_FILE_PATTERN in view_types:
-            details = set_file_pattern(df=details.set_index(COL_FILE_NAME)).reset_index()
-        elif any(view_type in view_types for view_type in [COL_APP_NAME, COL_NODE_NAME, COL_RANK]):
-            details = set_proc_name_parts(df=details.set_index(COL_PROC_NAME)).reset_index()
+            details = set_file_pattern(
+                df=details.set_index(COL_FILE_NAME)
+            ).reset_index()
+        elif any(
+            view_type in view_types
+            for view_type in [COL_APP_NAME, COL_NODE_NAME, COL_RANK]
+        ):
+            details = set_proc_name_parts(
+                df=details.set_index(COL_PROC_NAME)
+            ).reset_index()
 
         # TODO unique instead of nunique
         details = details.groupby(view_types).nunique()
@@ -215,7 +224,7 @@ class RuleEngine(object):
 
         bottlenecks['metric'] = metric
         bottlenecks['view_depth'] = len(view_key) if isinstance(view_key, tuple) else 1
-        bottlenecks['view_name'] = view_name(view_key, '.')
+        bottlenecks['view_name'] = format_view_name(view_key, '.')
 
         for rule, impl in rule_dict.items():
             rule_result = bottlenecks.eval(impl.rule.condition)
@@ -228,10 +237,12 @@ class RuleEngine(object):
                 bottlenecks = bottlenecks.join(reason_result)
 
         if len(view_types) == 1:
-            bottlenecks.index.rename('subject', inplace=True)  # change index name as subject
+            # change index name as subject
+            bottlenecks.index.rename('subject', inplace=True)
 
         bottlenecks = bottlenecks.reset_index()
-        bottlenecks['subject'] = bottlenecks['subject'].astype(str)  # change int type subject to str
+        # change int type subject to str
+        bottlenecks['subject'] = bottlenecks['subject'].astype(str)
 
         return bottlenecks
 
@@ -243,7 +254,9 @@ class RuleEngine(object):
         details = result['details']
 
         groupped_details = details.groupby(bottlenecks.index.names).nunique()
-        groupped_details.columns = groupped_details.columns.map(lambda col: f"num_{col}")
+        groupped_details.columns = groupped_details.columns.map(
+            lambda col: f"num_{col}"
+        )
 
         consolidated = bottlenecks.join(groupped_details)
 
@@ -252,7 +265,7 @@ class RuleEngine(object):
 
         consolidated['metric'] = metric
         consolidated['view_depth'] = len(view_key) if isinstance(view_key, tuple) else 1
-        consolidated['view_name'] = view_name(view_key, '.')
+        consolidated['view_name'] = format_view_name(view_key, '.')
         consolidated['rule'] = rule
 
         for i in range(MAX_REASONS):
@@ -262,10 +275,14 @@ class RuleEngine(object):
             consolidated[f"reason_{i}"] = consolidated[f"reason_{i}"].fillna(False)
 
         if len(bottlenecks.index.names) == 1:
-            consolidated.index.rename('subject', inplace=True)  # change index name as subject
+            consolidated.index.rename(
+                'subject', inplace=True
+            )  # change index name as subject
 
         consolidated = consolidated.reset_index()
-        consolidated['subject'] = consolidated['subject'].astype(str)  # change int type subject to str
+        consolidated['subject'] = consolidated['subject'].astype(
+            str
+        )  # change int type subject to str
 
         return consolidated.to_dict(orient='records')
 
@@ -305,7 +322,7 @@ class RuleEngine(object):
             bottleneck = dataclasses.asdict(result)
             bottleneck['metric'] = metric
             bottleneck['rule'] = rule
-            bottleneck['view_name'] = view_name(view_key, '>')
+            bottleneck['view_name'] = format_view_name(view_key, '>')
             return bottleneck
 
         return map(convert_rule_result_to_bottleneck, results)

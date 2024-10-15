@@ -18,7 +18,7 @@ from rich.tree import Tree
 from scipy.stats import skew
 from typing import Dict, List
 
-from .analysis import SCORE_BINS, SCORE_INITIALS, SCORE_NAMES
+from .analysis import SCORE_INITIALS, SCORE_NAMES
 from .constants import (
     COL_APP_NAME,
     COL_FILE_DIR,
@@ -27,7 +27,6 @@ from .constants import (
     COL_NODE_NAME,
     COL_PROC_NAME,
     COL_RANK,
-    COL_TIME_RANGE,
     EVENT_ATT_REASONS,
     EVENT_COMP_HLM,
     EVENT_COMP_MAIN_VIEW,
@@ -52,11 +51,12 @@ from .types import (
     OutputThroughputsType,
     OutputTimingsType,
     OutputType,
+    RawStats,
     Score,
+    humanized_metric_name,
     humanized_view_name,
-    view_name,
+    view_name as format_view_name,
 )
-from .utils.file_utils import ensure_dir
 
 
 class Output(abc.ABC):
@@ -125,16 +125,18 @@ class Output(abc.ABC):
         return output_df.sort_index()
 
     def _create_output_type(
-        self, metric: Metric, group_behavior: bool, result: AnalyzerResultType
+        self,
+        characteristics: Characteristics,
+        metric: Metric,
+        group_behavior: bool,
+        raw_stats: RawStats,
+        result: AnalyzerResultType,
     ) -> OutputType:
         bottlenecks = self._read_bottlenecks(
             bottleneck_dir=result.bottleneck_dir,
             group_behavior=group_behavior,
             metric=metric,
         )
-
-        (characteristics,) = dask.compute(result.characteristics)
-        (raw_stats,) = dask.compute(result.raw_stats)
 
         complexity = 0
         io_time = 0
@@ -195,7 +197,7 @@ class Output(abc.ABC):
             perspective_record_count_tree[metric] = {}
             num_metrics = num_metrics + 1
             for view_key, view_result in result.view_results[metric].items():
-                count_key = view_name(view_key, '>')
+                count_key = format_view_name(view_key, '>')
                 bot_important_count = view_result.view.reduction(len, sum)
                 view_critical_count = view_result.critical_view.reduction(len, sum)
                 view_record_count = view_result.records.reduction(len, sum)
@@ -450,17 +452,16 @@ class Output(abc.ABC):
 
         evaluated_record_dict = {}
         slope_filtered_record_dict = {}
-        for metric in result.evaluated_views:
-            evaluated_record_dict[metric] = {}
-            slope_filtered_record_dict[metric] = {}
-            for view_key in result.evaluated_views[metric]:
-                scoring = result.evaluated_views[metric][view_key]
-                evaluated_record_dict[metric][view_key] = (
-                    scoring.critical_view.reduction(len, sum)
-                )
-                slope_filtered_record_dict[metric][view_key] = (
-                    scoring.records_index.reduction(len, sum)
-                )
+        evaluated_record_dict[metric] = {}
+        slope_filtered_record_dict[metric] = {}
+        for view_key in result.evaluated_views[metric]:
+            scoring = result.evaluated_views[metric][view_key]
+            evaluated_record_dict[metric][view_key] = scoring.critical_view.reduction(
+                len, sum
+            )
+            slope_filtered_record_dict[metric][view_key] = (
+                scoring.records_index.reduction(len, sum)
+            )
         (
             evaluated_record_dict,
             slope_filtered_record_dict,
@@ -471,22 +472,19 @@ class Output(abc.ABC):
         evaluated_records = {}
         reasoned_records = {}
         slope_filtered_records = {}
-        for metric in result.evaluated_views:
-            evaluated_records[metric] = 0
-            reasoned_records[metric] = 0
-            slope_filtered_records[metric] = 0
-            for view_key in result.evaluated_views[metric]:
-                view_evaluated_records = evaluated_record_dict[metric][view_key]
-                view_slope_filtered_records = slope_filtered_record_dict[metric][
-                    view_key
-                ]
-                evaluated_records[metric] = (
-                    evaluated_records[metric] + view_evaluated_records
-                )
-                reasoned_records[metric] = evaluated_records[metric] * num_rules
-                slope_filtered_records[metric] = (
-                    slope_filtered_records[metric] + view_slope_filtered_records
-                )
+        evaluated_records[metric] = 0
+        reasoned_records[metric] = 0
+        slope_filtered_records[metric] = 0
+        for view_key in result.evaluated_views[metric]:
+            view_evaluated_records = evaluated_record_dict[metric][view_key]
+            view_slope_filtered_records = slope_filtered_record_dict[metric][view_key]
+            evaluated_records[metric] = (
+                evaluated_records[metric] + view_evaluated_records
+            )
+            reasoned_records[metric] = evaluated_records[metric] * num_rules
+            slope_filtered_records[metric] = (
+                slope_filtered_records[metric] + view_slope_filtered_records
+            )
 
         counts = OutputCountsType(
             avg_perspective_count=avg_perspective_count,
@@ -556,15 +554,21 @@ class Output(abc.ABC):
         )
 
     def _read_bottlenecks(
-        self, metric: Metric, group_behavior: bool, bottleneck_dir: str
+        self,
+        metric: Metric,
+        group_behavior: bool,
+        bottleneck_dir: str,
     ):
-        bottlenecks: dd.DataFrame = dd.read_parquet(bottleneck_dir)
+        bottlenecks = dd.read_parquet(bottleneck_dir).query(
+            'metric == @metric', local_dict={'metric': metric}
+        )
 
         if group_behavior:
             cols = bottlenecks.columns
 
             agg_dict = {}
-            agg_dict['behavior'] = 'count'  # count behaviors
+            if group_behavior:
+                agg_dict['behavior'] = 'count'  # count behaviors
             for col in cols:
                 if 'num_' in col:
                     agg_dict[col] = 'sum'
@@ -573,11 +577,18 @@ class Output(abc.ABC):
                 else:
                     agg_dict[col] = 'first'
 
-            bottlenecks = (
-                bottlenecks.groupby(['view_name', f"{metric}_score", 'behavior'])
-                .agg(agg_dict)
-                .compute()
-            )
+            if group_behavior:
+                bottlenecks = (
+                    bottlenecks.groupby(['view_name', f"{metric}_score", 'behavior'])
+                    .agg(agg_dict)
+                    .compute()
+                )
+            else:
+                bottlenecks = (
+                    bottlenecks.groupby(['view_name', f"{metric}_score"])
+                    .agg(agg_dict)
+                    .compute()
+                )
 
             # TODO find a better way
             reason_cols = cols[cols.str.contains('reason')]
@@ -618,250 +629,85 @@ class ConsoleOutput(Output):
         self.show_header = show_header
 
     def handle_result(self, metrics: List[Metric], result: AnalyzerResultType):
-        # TODO(izzet): make it work with multiple metrics
-        metric = metrics[0]
+        (characteristics,) = dask.compute(result.characteristics)
+        (raw_stats,) = dask.compute(result.raw_stats)
 
-        output = self._create_output_type(
-            group_behavior=self.group_behavior,
-            metric=metric,
-            result=result,
-        )
+        print_objects = []
 
-        bottlenecks = output._bottlenecks
-        characteristics = output._characteristics
-        raw_stats = output._raw_stats
-
-        if len(self.view_names) > 0:
-            bottlenecks = bottlenecks.query(
-                'view_name in @view_names', local_dict={'view_names': self.view_names}
+        if self.show_characteristics:
+            char_table = self._create_characteristics_table(
+                characteristics=characteristics,
+                compact=self.compact,
+                job_time=float(raw_stats["job_time"]),
             )
-        elif self.root_only:
-            bottlenecks = bottlenecks[bottlenecks['view_depth'] == 1]
-
-        char_table = self._create_characteristics_table(
-            characteristics=characteristics,
-            compact=self.compact,
-            job_time=output.characteristics.job_time,
-        )
-
-        char_panel = Panel(
-            renderable=char_table,
-            title=' '.join([self.name, 'I/O Characteristics']).strip()
-            if self.show_header
-            else None,
-            subtitle=(
-                '[bold]R[/bold]: Read - '
-                '[bold]W[/bold]: Write - '
-                '[bold]M[/bold]: Metadata '
-            ),
-            subtitle_align='left',
-            padding=1,
-        )
-
-        bot_table, total_bot_count, total_reason_count = self._create_bottleneck_table(
-            bottleneck_rules=result.bottleneck_rules,
-            bottlenecks=bottlenecks,
-            compact=self.compact,
-            max_bottlenecks=self.max_bottlenecks,
-            metric=metric,
-            pluralize=self.pluralize,
-        )
-
-        bot_panel = Panel(
-            bot_table,
-            title=(
-                f"{total_bot_count} I/O {self.pluralize.plural_noun('Bottleneck', total_bot_count)} with "
-                f"{total_reason_count} {self.pluralize.plural_noun('Reason', total_reason_count)}"
+            char_panel = Panel(
+                renderable=char_table,
+                title=' '.join([self.name, 'I/O Characteristics']).strip()
+                if self.show_header
+                else None,
+                subtitle=(
+                    '[bold]R[/bold]: Read - '
+                    '[bold]W[/bold]: Write - '
+                    '[bold]M[/bold]: Metadata '
+                ),
+                subtitle_align='left',
+                padding=1,
             )
-            if self.show_header
-            else None,
-            padding=1,
-        )
+            print_objects.append(char_panel)
+            print_objects.append(Padding(''))
+
+        for metric in metrics:
+            output = self._create_output_type(
+                characteristics=characteristics,
+                group_behavior=self.group_behavior,
+                metric=metric,
+                raw_stats=raw_stats,
+                result=result,
+            )
+
+            bottlenecks = output._bottlenecks
+            if len(self.view_names) > 0:
+                bottlenecks = bottlenecks.query(
+                    'view_name in @view_names',
+                    local_dict={'view_names': self.view_names},
+                )
+            elif self.root_only:
+                bottlenecks = bottlenecks[bottlenecks['view_depth'] == 1]
+
+            bot_table, total_bot_count, total_reason_count = (
+                self._create_bottleneck_table(
+                    bottleneck_rules=result.bottleneck_rules,
+                    bottlenecks=bottlenecks,
+                    compact=self.compact,
+                    max_bottlenecks=self.max_bottlenecks,
+                    metric=metric,
+                    pluralize=self.pluralize,
+                )
+            )
+
+            bot_panel = Panel(
+                bot_table,
+                title=(
+                    f"{humanized_metric_name(metric)}: "
+                    f"{total_bot_count} I/O {self.pluralize.plural_noun('Bottleneck', total_bot_count)} with "
+                    f"{total_reason_count} {self.pluralize.plural_noun('Reason', total_reason_count)}"
+                )
+                if self.show_header
+                else None,
+                padding=1,
+            )
+
+            print_objects.append(bot_panel)
+            print_objects.append(Padding(''))
+
+            if self.show_debug:
+                debug_table = self._create_debug_table(metric=metric, output=output)
+                debug_panel = Panel(debug_table, title='Debug', padding=1)
+                print_objects.append(debug_panel)
+                print_objects.append(Padding(''))
 
         console = Console(record=True)
-
-        if self.show_debug:
-            main_view_count = output.counts.main_view_count
-            raw_total_count = output.counts.raw_count
-
-            debug_table = Table(box=None, show_header=False)
-            debug_table.add_column(style="cyan")
-            debug_table.add_column()
-
-            retained_tree = Tree(f"raw: {raw_total_count} records (100%)")
-            main_view_tree = retained_tree.add(
-                f"aggregated view: {main_view_count} ({main_view_count/raw_total_count*100:.2f}% 100%)"
-            )
-
-            for metric in output.counts.perspective_count_tree:
-                metric_tree = Tree(
-                    (
-                        f"{metric}: "
-                        f"{output.counts.avg_perspective_count[metric]:.2f}±{output.counts.avg_perspective_count_std[metric]:.2f} "
-                        f"({output.counts.avg_perspective_count[metric]/raw_total_count*100:.2f}% "
-                        f"{output.counts.avg_perspective_count[metric]/main_view_count*100:.2f}%)"
-                        " -S> "
-                        f"{output.counts.avg_perspective_critical_count[metric]:.2f}±{output.counts.avg_perspective_critical_count_std[metric]:.2f} "
-                        f"({output.counts.avg_perspective_critical_count[metric]/raw_total_count*100:.2f}% "
-                        f"{output.counts.avg_perspective_critical_count[metric]/main_view_count*100:.2f}%)"
-                    )
-                )
-                for count_key in output.counts.perspective_count_tree[metric]:
-                    view_count = output.counts.perspective_count_tree[metric][count_key]
-                    view_critical_count = output.counts.perspective_critical_count_tree[
-                        metric
-                    ][count_key]
-                    metric_tree.add(
-                        (
-                            f"{count_key}: "
-                            f"{view_count} ({view_count/raw_total_count*100:.2f}% {view_count/main_view_count*100:.2f}%)"
-                            " -S> "
-                            f"{view_critical_count} ({view_critical_count/raw_total_count*100:.2f}% {view_critical_count/main_view_count*100:.2f}%)"
-                        )
-                    )
-                main_view_tree.add(metric_tree)
-
-            debug_table.add_row('Retained Records', retained_tree)
-
-            count_table = Table(box=None, show_header=True)
-            count_table.add_column()
-            count_table.add_column('Count')
-            count_table.add_column('Processed Record Count')
-            count_table.add_row(
-                'Perspectives',
-                f"{output.counts.num_perspectives}",
-                f"{output.counts.slope_filtered_records[metric]}",
-            )
-            count_table.add_row(
-                'Bottlenecks',
-                f"{output.counts.num_bottlenecks[metric]}",
-                f"{output.counts.evaluated_records[metric]}",
-            )
-            count_table.add_row(
-                'Rules',
-                f"{output.counts.num_rules}",
-                f"{output.counts.reasoned_records[metric]}",
-            )
-
-            debug_table.add_row('Counts', count_table)
-
-            tput_table = Table(box=None, show_header=True)
-            tput_table.add_column()
-            tput_table.add_column('Throughput')
-            tput_table.add_column('Record Throughput')
-            tput_table.add_row(
-                'Perspectives',
-                f"{output.throughputs.perspectives[metric]:.2f} perspectives/sec",
-                f"{output.throughputs.slope_filtered_records[metric]:.2f} records/sec",
-            )
-            tput_table.add_row(
-                'Bottlenecks',
-                f"{output.throughputs.bottlenecks[metric]:.2f} bottlenecks/sec",
-                f"{output.throughputs.evaluated_records[metric]:.2f} records/sec",
-            )
-            tput_table.add_row(
-                'Rules',
-                f"{output.throughputs.rules[metric]:.2f} rules/sec",
-                f"{output.throughputs.reasoned_records[metric]:.2f} records/sec",
-            )
-
-            debug_table.add_row('Throughputs', tput_table)
-
-            tot_bottlenecks = 0
-            for metric in output.counts.num_bottlenecks:
-                num_bottlenecks = output.counts.num_bottlenecks[metric]
-                tot_bottlenecks = tot_bottlenecks + num_bottlenecks
-            severity_tree = Tree(f"total: {tot_bottlenecks} bottlenecks (100%)")
-            for metric in output.counts.num_bottlenecks:
-                num_bottlenecks = output.counts.num_bottlenecks[metric]
-                severity_metric_tree = severity_tree.add(
-                    (
-                        f"{metric}: "
-                        f"{num_bottlenecks} "
-                        f"({num_bottlenecks/tot_bottlenecks*100:.2f}% 100%)"
-                    )
-                )
-                severity_metric_tree.add(
-                    (
-                        f"critical: "
-                        f"{output.severities.critical_count[metric]} "
-                        f"({output.severities.critical_count[metric]/tot_bottlenecks*100:.2f}% "
-                        f"{output.severities.critical_count[metric]/num_bottlenecks*100:.2f}%)"
-                    )
-                )
-                severity_metric_tree.add(
-                    (
-                        f"very high: "
-                        f"{output.severities.very_high_count[metric]} "
-                        f"({output.severities.very_high_count[metric]/tot_bottlenecks*100:.2f}% "
-                        f"{output.severities.very_high_count[metric]/num_bottlenecks*100:.2f}%)"
-                    )
-                )
-                severity_metric_tree.add(
-                    (
-                        f"high: "
-                        f"{output.severities.high_count[metric]} "
-                        f"({output.severities.high_count[metric]/tot_bottlenecks*100:.2f}% "
-                        f"{output.severities.high_count[metric]/num_bottlenecks*100:.2f}%)"
-                    )
-                )
-                severity_metric_tree.add(
-                    (
-                        f"medium: "
-                        f"{output.severities.medium_count[metric]} "
-                        f"({output.severities.medium_count[metric]/tot_bottlenecks*100:.2f}% "
-                        f"{output.severities.medium_count[metric]/num_bottlenecks*100:.2f}%)"
-                    )
-                )
-                severity_metric_tree.add(
-                    (
-                        f"low: "
-                        f"{output.severities.low_count[metric]} "
-                        f"({output.severities.low_count[metric]/tot_bottlenecks*100:.2f}% "
-                        f"{output.severities.low_count[metric]/num_bottlenecks*100:.2f}%)"
-                    )
-                )
-                severity_metric_tree.add(
-                    (
-                        f"very low: "
-                        f"{output.severities.very_low_count[metric]} "
-                        f"({output.severities.very_low_count[metric]/tot_bottlenecks*100:.2f}% "
-                        f"{output.severities.very_low_count[metric]/num_bottlenecks*100:.2f}%)"
-                    )
-                )
-                severity_metric_tree.add(
-                    (
-                        f"trivial: "
-                        f"{output.severities.trivial_count[metric]} "
-                        f"({output.severities.trivial_count[metric]/tot_bottlenecks*100:.2f}% "
-                        f"{output.severities.trivial_count[metric]/num_bottlenecks*100:.2f}%)"
-                    )
-                )
-                severity_metric_tree.add(
-                    (
-                        f"none: "
-                        f"{output.severities.none_count[metric]} "
-                        f"({output.severities.none_count[metric]/tot_bottlenecks*100:.2f}% "
-                        f"{output.severities.none_count[metric]/num_bottlenecks*100:.2f}%)"
-                    )
-                )
-
-            debug_table.add_row('Severities', severity_tree)
-
-            debug_panel = Panel(debug_table, title='Debug', padding=1)
-
-            if self.show_characteristics:
-                console.print(
-                    char_panel, Padding(''), bot_panel, Padding(''), debug_panel
-                )
-            else:
-                console.print(bot_panel, Padding(''), debug_panel)
-        else:
-            if self.show_characteristics:
-                console.print(char_panel, Padding(''), bot_panel)
-            else:
-                console.print(bot_panel)
-
+        console.print(*print_objects)
         console.save_html(f"{self.output_dir}/result.html", clear=False)
         console.save_text(f"{self.output_dir}/result.txt", clear=False)
         console.save_svg(
@@ -887,8 +733,8 @@ class ConsoleOutput(Output):
         total_bot_count = 0
         total_reason_count = 0
 
-        for view_name in view_names:
-            view_bottlenecks = bottlenecks[bottlenecks['view_name'] == view_name]
+        for view_name2 in view_names:
+            view_bottlenecks = bottlenecks[bottlenecks['view_name'] == view_name2]
             bot_count = len(view_bottlenecks)
             total_bot_count = total_bot_count + bot_count
             if bot_count == 0:
@@ -906,7 +752,7 @@ class ConsoleOutput(Output):
                 for rule, reason in reason_rules
             )
             total_reason_count = total_reason_count + reason_count
-            view_key = tuple(view_name.split('.'))
+            view_key = tuple(view_name2.split('.'))
             view_tree = Tree(
                 (
                     f"{humanized_view_name(view_key, '>').replace(' Period', '')} View "
@@ -1019,6 +865,176 @@ class ConsoleOutput(Output):
                 char_table.add_row(char.description, detail_tree)
 
         return char_table
+
+    def _create_debug_table(metric: Metric, output: OutputType):
+        main_view_count = output.counts.main_view_count
+        raw_total_count = output.counts.raw_count
+
+        debug_table = Table(box=None, show_header=False)
+        debug_table.add_column(style="cyan")
+        debug_table.add_column()
+
+        retained_tree = Tree(f"raw: {raw_total_count} records (100%)")
+        main_view_tree = retained_tree.add(
+            f"aggregated view: {main_view_count} ({main_view_count/raw_total_count*100:.2f}% 100%)"
+        )
+
+        for metric in output.counts.perspective_count_tree:
+            metric_tree = Tree(
+                (
+                    f"{metric}: "
+                    f"{output.counts.avg_perspective_count[metric]:.2f}±{output.counts.avg_perspective_count_std[metric]:.2f} "
+                    f"({output.counts.avg_perspective_count[metric]/raw_total_count*100:.2f}% "
+                    f"{output.counts.avg_perspective_count[metric]/main_view_count*100:.2f}%)"
+                    " -S> "
+                    f"{output.counts.avg_perspective_critical_count[metric]:.2f}±{output.counts.avg_perspective_critical_count_std[metric]:.2f} "
+                    f"({output.counts.avg_perspective_critical_count[metric]/raw_total_count*100:.2f}% "
+                    f"{output.counts.avg_perspective_critical_count[metric]/main_view_count*100:.2f}%)"
+                )
+            )
+            for count_key in output.counts.perspective_count_tree[metric]:
+                view_count = output.counts.perspective_count_tree[metric][count_key]
+                view_critical_count = output.counts.perspective_critical_count_tree[
+                    metric
+                ][count_key]
+                metric_tree.add(
+                    (
+                        f"{count_key}: "
+                        f"{view_count} ({view_count/raw_total_count*100:.2f}% {view_count/main_view_count*100:.2f}%)"
+                        " -S> "
+                        f"{view_critical_count} ({view_critical_count/raw_total_count*100:.2f}% {view_critical_count/main_view_count*100:.2f}%)"
+                    )
+                )
+            main_view_tree.add(metric_tree)
+
+        debug_table.add_row('Retained Records', retained_tree)
+
+        count_table = Table(box=None, show_header=True)
+        count_table.add_column()
+        count_table.add_column('Count')
+        count_table.add_column('Processed Record Count')
+        count_table.add_row(
+            'Perspectives',
+            f"{output.counts.num_perspectives}",
+            f"{output.counts.slope_filtered_records[metric]}",
+        )
+        count_table.add_row(
+            'Bottlenecks',
+            f"{output.counts.num_bottlenecks[metric]}",
+            f"{output.counts.evaluated_records[metric]}",
+        )
+        count_table.add_row(
+            'Rules',
+            f"{output.counts.num_rules}",
+            f"{output.counts.reasoned_records[metric]}",
+        )
+
+        debug_table.add_row('Counts', count_table)
+
+        tput_table = Table(box=None, show_header=True)
+        tput_table.add_column()
+        tput_table.add_column('Throughput')
+        tput_table.add_column('Record Throughput')
+        tput_table.add_row(
+            'Perspectives',
+            f"{output.throughputs.perspectives[metric]:.2f} perspectives/sec",
+            f"{output.throughputs.slope_filtered_records[metric]:.2f} records/sec",
+        )
+        tput_table.add_row(
+            'Bottlenecks',
+            f"{output.throughputs.bottlenecks[metric]:.2f} bottlenecks/sec",
+            f"{output.throughputs.evaluated_records[metric]:.2f} records/sec",
+        )
+        tput_table.add_row(
+            'Rules',
+            f"{output.throughputs.rules[metric]:.2f} rules/sec",
+            f"{output.throughputs.reasoned_records[metric]:.2f} records/sec",
+        )
+
+        debug_table.add_row('Throughputs', tput_table)
+
+        tot_bottlenecks = 0
+        for metric in output.counts.num_bottlenecks:
+            num_bottlenecks = output.counts.num_bottlenecks[metric]
+            tot_bottlenecks = tot_bottlenecks + num_bottlenecks
+        severity_tree = Tree(f"total: {tot_bottlenecks} bottlenecks (100%)")
+        for metric in output.counts.num_bottlenecks:
+            num_bottlenecks = output.counts.num_bottlenecks[metric]
+            severity_metric_tree = severity_tree.add(
+                (
+                    f"{metric}: "
+                    f"{num_bottlenecks} "
+                    f"({num_bottlenecks/tot_bottlenecks*100:.2f}% 100%)"
+                )
+            )
+            severity_metric_tree.add(
+                (
+                    f"critical: "
+                    f"{output.severities.critical_count[metric]} "
+                    f"({output.severities.critical_count[metric]/tot_bottlenecks*100:.2f}% "
+                    f"{output.severities.critical_count[metric]/num_bottlenecks*100:.2f}%)"
+                )
+            )
+            severity_metric_tree.add(
+                (
+                    f"very high: "
+                    f"{output.severities.very_high_count[metric]} "
+                    f"({output.severities.very_high_count[metric]/tot_bottlenecks*100:.2f}% "
+                    f"{output.severities.very_high_count[metric]/num_bottlenecks*100:.2f}%)"
+                )
+            )
+            severity_metric_tree.add(
+                (
+                    f"high: "
+                    f"{output.severities.high_count[metric]} "
+                    f"({output.severities.high_count[metric]/tot_bottlenecks*100:.2f}% "
+                    f"{output.severities.high_count[metric]/num_bottlenecks*100:.2f}%)"
+                )
+            )
+            severity_metric_tree.add(
+                (
+                    f"medium: "
+                    f"{output.severities.medium_count[metric]} "
+                    f"({output.severities.medium_count[metric]/tot_bottlenecks*100:.2f}% "
+                    f"{output.severities.medium_count[metric]/num_bottlenecks*100:.2f}%)"
+                )
+            )
+            severity_metric_tree.add(
+                (
+                    f"low: "
+                    f"{output.severities.low_count[metric]} "
+                    f"({output.severities.low_count[metric]/tot_bottlenecks*100:.2f}% "
+                    f"{output.severities.low_count[metric]/num_bottlenecks*100:.2f}%)"
+                )
+            )
+            severity_metric_tree.add(
+                (
+                    f"very low: "
+                    f"{output.severities.very_low_count[metric]} "
+                    f"({output.severities.very_low_count[metric]/tot_bottlenecks*100:.2f}% "
+                    f"{output.severities.very_low_count[metric]/num_bottlenecks*100:.2f}%)"
+                )
+            )
+            severity_metric_tree.add(
+                (
+                    f"trivial: "
+                    f"{output.severities.trivial_count[metric]} "
+                    f"({output.severities.trivial_count[metric]/tot_bottlenecks*100:.2f}% "
+                    f"{output.severities.trivial_count[metric]/num_bottlenecks*100:.2f}%)"
+                )
+            )
+            severity_metric_tree.add(
+                (
+                    f"none: "
+                    f"{output.severities.none_count[metric]} "
+                    f"({output.severities.none_count[metric]/tot_bottlenecks*100:.2f}% "
+                    f"{output.severities.none_count[metric]/num_bottlenecks*100:.2f}%)"
+                )
+            )
+
+        debug_table.add_row('Severities', severity_tree)
+
+        return debug_table
 
     @staticmethod
     def _colored_description(description: str, score: str = None):
