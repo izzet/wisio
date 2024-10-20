@@ -6,42 +6,41 @@ import json
 import logging
 import math
 import os
-from dask.base import compute, unpack_collections
+from dask import compute, persist
+from dask.base import unpack_collections
 from dask.delayed import Delayed
 from dask.distributed import fire_and_forget, get_client, wait
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
-from .analysis import THRESHOLD_FUNCTIONS, set_metric_slope
+from .analysis import THRESHOLD_FUNCTIONS, set_metrics, set_metric_scores
 from .analysis_utils import set_file_dir, set_file_pattern, set_proc_name_parts
 from .constants import (
     ACC_PAT_SUFFIXES,
+    COL_CATEGORY,
     COL_FILE_NAME,
     COL_PROC_NAME,
     DERIVED_MD_OPS,
-    EVENT_ATT_REASONS,
-    EVENT_COMP_HLM,
-    EVENT_COMP_MAIN_VIEW,
-    EVENT_COMP_METBD,
-    EVENT_COMP_PERS,
-    EVENT_DET_BOT,
-    EVENT_SAVE_BOT,
-    EVENT_SAVE_VIEWS,
     LOGICAL_VIEW_TYPES,
     AccessPattern,
+    EventType,
     IOCategory,
+    Layer,
 )
-from .rule_engine import RuleEngine
-from .scoring import ViewEvaluator
+from .rule_engine import RuleEngine, compute_characteristics
 from .types import (
     AnalysisAccuracy,
     AnalyzerResultType,
+    BottleneckResults,
+    Characteristics,
     Metric,
     RawStats,
     ViewKey,
     ViewResult,
+    ViewResults,
+    ViewResultsPerMetricPerView,
     ViewType,
 )
-from .utils.dask_utils import EventLogger, flatten_column_names
+from .utils.dask_utils import EventLogger, event_logger, flatten_column_names
 from .utils.file_utils import ensure_dir
 from .utils.json_encoders import NpEncoder
 
@@ -122,147 +121,98 @@ class Analyzer(abc.ABC):
         traces = self.read_trace(trace_path=trace_path)
         raw_stats = self.read_stats(traces=traces)
         traces = self.postread_trace(traces=traces)
+        layers = self.compute_layers(traces=traces)
 
-        # Create checkpoint names
-        main_view_name = self.get_checkpoint_name(
-            CHECKPOINT_MAIN_VIEW, *sorted(view_types)
-        )
-
-        # Check there is a checkpointed main view
-        if not self.checkpoint or not self.has_checkpoint(name=main_view_name):
-            # Compute high-level metrics
-            with EventLogger(key=EVENT_COMP_HLM, message='Compute high-level metrics'):
-                hlm = self.restore_view(
-                    name=self.get_checkpoint_name(CHECKPOINT_HLM, *sorted(view_types)),
-                    fallback=lambda: self.compute_high_level_metrics(
-                        traces=traces,
-                        view_types=view_types,
-                    ),
-                )
-                hlm = hlm.persist()
-                self._wait_all(tasks=hlm)
-
-        # Compute main view
-        with EventLogger(key=EVENT_COMP_MAIN_VIEW, message='Compute main view'):
-            main_view = self.restore_view(
-                name=main_view_name,
-                fallback=lambda: self.compute_main_view(
-                    hlm=hlm,
-                    view_types=view_types,
-                ),
+        # Compute layers & views
+        layer_traces = {}
+        hlms = {}
+        main_views = {}
+        characteristics = {}
+        metric_boundaries = {}
+        views = {}
+        bottlenecks = {}
+        for layer, categories in self.arrange_layers(layers).items():
+            l_traces = traces[traces[COL_CATEGORY].isin(list(categories))]
+            l_hlm = self.compute_high_level_metrics(
+                layer=layer,
+                traces=l_traces,
+                view_types=view_types,
             )
-            # TODO remove dropped columns
-            main_view = main_view.drop(
-                columns=['bw', 'intensity', 'iops', 'att_perf'], errors='ignore'
-            ).persist()
-            self._wait_all(tasks=main_view)
-
-        # return traces, main_view
-
-        # Compute upper bounds
-        with EventLogger(key=EVENT_COMP_METBD, message='Compute metric boundaries'):
-            metric_boundaries = self.restore_extra_data(
-                name=self.get_checkpoint_name(
-                    CHECKPOINT_METRIC_BOUNDARIES,
-                    *sorted(metrics),
-                    *sorted(view_types),
-                ),
-                fallback=lambda: self.compute_metric_boundaries(
-                    main_view=main_view,
-                    metrics=metrics,
-                    view_types=view_types,
-                ),
+            l_main_view = self.compute_main_view(
+                layer=layer,
+                hlm=l_hlm,
+                view_types=view_types,
             )
-            self._wait_all(tasks=metric_boundaries)
-
-        # Compute views
-        with EventLogger(key=EVENT_COMP_PERS, message='Compute perspectives'):
-            view_results = self.compute_views(
-                main_view=main_view,
-                metric_boundaries=metric_boundaries,
+            # l_characteristics = compute_characteristics(
+            #     main_view=l_main_view,
+            #     raw_stats=raw_stats,
+            #     exclude_characteristics=exclude_characteristics,
+            # )
+            l_metric_boundaries = self.compute_metric_boundaries(
+                layer=layer,
+                main_view=l_main_view,
+                metrics=metrics,
+                view_types=view_types,
+            )
+            l_views = self.compute_views(
+                layer=layer,
+                main_view=l_main_view,
+                view_types=view_types,
+                metric_boundaries=l_metric_boundaries,
                 metrics=metrics,
                 percentile=percentile,
                 threshold=threshold,
-                view_types=view_types,
-            )
-            if logical_view_types:
-                logical_view_results = self.compute_logical_views(
-                    main_view=main_view,
-                    metric_boundaries=metric_boundaries,
-                    metrics=metrics,
-                    percentile=percentile,
-                    threshold=threshold,
-                    view_results=view_results,
-                    view_types=view_types,
-                )
-                view_results.update(logical_view_results)
-            self._wait_all(tasks=view_results)
-
-        if self.checkpoint:
-            with EventLogger(
-                key=EVENT_SAVE_VIEWS, message='Checkpoint views', level=logging.DEBUG
-            ):
-                view_checkpoint_tasks = []
-                for metric, views in view_results.items():
-                    for view_key, view_result in views.items():
-                        view_checkpoint_name = self.get_checkpoint_name(
-                            CHECKPOINT_VIEW, metric, *list(view_key)
-                        )
-                        if not self.has_checkpoint(name=view_checkpoint_name):
-                            view_checkpoint_tasks.append(
-                                self.store_view(
-                                    name=view_checkpoint_name,
-                                    view=view_result.view,
-                                    compute=True,
-                                )
-                            )
-                self._wait_all(tasks=view_checkpoint_tasks)
-
-        # Evaluate views
-        view_evaluator = ViewEvaluator()
-        with EventLogger(key=EVENT_DET_BOT, message='Detect I/O bottlenecks'):
-            evaluated_views = view_evaluator.evaluate_views(
-                metric_boundaries=metric_boundaries,
-                metrics=metrics,
-                view_results=view_results,
                 is_slope_based=is_slope_based,
             )
-            self._wait_all(tasks=evaluated_views)
-
-        # Execute rules
-        rule_engine = RuleEngine(rules=[], raw_stats=raw_stats, verbose=self.verbose)
-        with EventLogger(
-            key=EVENT_ATT_REASONS, message='Attach reasons to I/O bottlenecks'
-        ):
-            characteristics = rule_engine.process_characteristics(
-                exclude_characteristics=exclude_characteristics,
-                main_view=main_view,
-                view_results=view_results,
+            l_bottlenecks = self.detect_bottlenecks(
+                views=l_views,
+                metrics=metrics,
+                metric_boundaries=l_metric_boundaries,
+                is_slope_based=is_slope_based,
+                percentile=percentile,
+                threshold=threshold,
             )
-            bottlenecks, bottleneck_rules = rule_engine.process_bottlenecks(
-                evaluated_views=evaluated_views,
-                exclude_bottlenecks=exclude_bottlenecks,
-                group_behavior=False,
-                metric_boundaries=metric_boundaries,
-            )
-            self._wait_all(tasks=bottlenecks)
+            layer_traces[layer] = l_traces
+            hlms[layer] = l_hlm
+            main_views[layer] = l_main_view
+            # characteristics[layer] = l_characteristics
+            metric_boundaries[layer] = l_metric_boundaries
+            views[layer] = l_views
+            bottlenecks[layer] = l_bottlenecks
+            # break
 
-        with EventLogger(
-            key=EVENT_SAVE_BOT, message='Save I/O bottlenecks', level=logging.DEBUG
-        ):
-            self.save_bottlenecks(bottlenecks=bottlenecks)
+        return layer_traces, hlms, main_views, metric_boundaries, views, bottlenecks
 
         # Return result
-        return AnalyzerResultType(
-            bottleneck_dir=self.bottleneck_dir,
-            bottleneck_rules=bottleneck_rules,
-            characteristics=characteristics,
-            evaluated_views=evaluated_views,
-            main_view=main_view,
-            metric_boundaries=metric_boundaries,
-            raw_stats=raw_stats,
-            view_results=view_results,
+        # return AnalyzerResultType(
+        #     bottleneck_dir=self.bottleneck_dir,
+        #     bottleneck_rules=bottleneck_rules,
+        #     characteristics=characteristics,
+        #     evaluated_views=evaluated_views,
+        #     main_view=main_view,
+        #     metric_boundaries=metric_boundaries,
+        #     raw_stats=raw_stats,
+        #     view_results=view_results,
+        # )
+
+    def arrange_layers(self, layers: List[str]) -> Dict[str, str]:
+        arranged_layers = {}
+        arranged_layers[Layer.POSIX] = filter(
+            lambda x: x == 'POSIX' or x == 'STDIO', layers
         )
+        arranged_layers[Layer.MPI] = filter(
+            lambda x: x == 'MPI' or x == 'MPIIO', layers
+        )
+        arranged_layers[Layer.HDF5] = filter(lambda x: x == 'HDF5', layers)
+        arranged_layers[Layer.APP] = filter(
+            lambda x: x != 'POSIX'
+            and x != 'STDIO'
+            and x != 'MPI'
+            and x != 'MPIIO'
+            and x != 'HDF5',
+            layers,
+        )
+        return arranged_layers
 
     def read_stats(self, traces: dd.DataFrame) -> RawStats:
         job_time = self.compute_job_time(traces=traces)
@@ -286,133 +236,109 @@ class Analyzer(abc.ABC):
     def compute_job_time(self, traces: dd.DataFrame) -> float:
         return traces['tend'].max() - traces['tstart'].min()
 
+    def compute_layers(self, traces: dd.DataFrame) -> List[str]:
+        return list(traces[COL_CATEGORY].unique().compute())
+
     def compute_total_count(self, traces: dd.DataFrame) -> int:
         return traces.index.count().persist()
 
+    @event_logger(key=EventType.COMPUTE_HLM, message='Compute high-level metrics')
     def compute_high_level_metrics(
         self,
+        layer: Layer,
         traces: dd.DataFrame,
         view_types: list,
         partition_size: str = '256MB',
     ) -> dd.DataFrame:
-        # Add `io_cat`, `acc_pat`, and `func_id` to groupby
-        groupby = list(view_types)
-        groupby.extend(EXTRA_COLS)
-
-        # Compute high-level metrics
-        # hlm = traces \
-        #     .groupby(groupby) \
-        #     .agg(HLM_AGG, split_out=traces.npartitions) \
-        #     .persist() \
-        #     .reset_index() \
-        #     .repartition(partition_size) \
-        #     .persist()
-        # hlm = traces \
-        #     .groupby(groupby) \
-        #     .agg(HLM_AGG, split_out=8) \
-        #     .reset_index() \
-        #     .persist()
-        hlm = (
-            traces.groupby(groupby)
-            .agg(HLM_AGG, split_out=math.ceil(math.sqrt(traces.npartitions)))
-            .persist()
-            .reset_index()
-            .repartition(partition_size=partition_size)
+        return self.restore_view(
+            name=self.get_checkpoint_name(
+                CHECKPOINT_HLM, str(layer), *sorted(view_types)
+            ),
+            fallback=lambda: self._compute_high_level_metrics(
+                layer=layer,
+                traces=traces,
+                view_types=view_types,
+            ),
         )
-        hlm = flatten_column_names(hlm)
-        return hlm.rename(columns=HLM_COLS).persist()
 
+    @event_logger(key=EventType.COMPUTE_MAIN_VIEW, message='Compute main view')
     def compute_main_view(
         self,
+        layer: Layer,
         hlm: dd.DataFrame,
         view_types: List[ViewType],
         partition_size: str = '256MB',
     ) -> dd.DataFrame:
-        # Set derived columns
-        hlm = self._set_derived_columns(ddf=hlm)
-        # Compute agg_view
-        main_view = (
-            hlm.drop(columns=EXTRA_COLS)
-            .groupby(list(view_types))
-            .sum(split_out=hlm.npartitions)
+        return self.restore_view(
+            name=self.get_checkpoint_name(
+                CHECKPOINT_MAIN_VIEW, str(layer), *sorted(view_types)
+            ),
+            fallback=lambda: self._compute_main_view(
+                layer=layer,
+                hlm=hlm,
+                view_types=view_types,
+            ),
         )
-        # main_view = hlm \
-        #     .drop(columns=EXTRA_COLS) \
-        #     .groupby(view_types) \
-        #     .sum() \
-        #     .persist() \
-        #     .repartition(partition_size)
-        # Set hashed ids
-        # main_view['id'] = main_view.index.map(set_id)
-        main_view['id'] = main_view.index.map(hash)
-        # Return main_view
-        return main_view.persist()
 
+    @event_logger(
+        key=EventType.COMPUTE_METRIC_BOUNDARIES, message='Compute metric boundaries'
+    )
     def compute_metric_boundaries(
         self,
+        layer: Layer,
         main_view: dd.DataFrame,
         metrics: List[Metric],
         view_types: List[ViewType],
     ) -> Dict[Metric, dd.core.Scalar]:
-        metric_boundaries = {}
-        for metric in metrics:
-            metric_boundary = None
-            if metric == 'iops' or metric == 'time':
-                if COL_PROC_NAME in view_types:
-                    metric_boundary = (
-                        main_view.groupby([COL_PROC_NAME]).sum()['time'].max().persist()
-                    )
-                else:
-                    metric_boundary = main_view['time'].sum().persist()
-            elif metric == 'bw':
-                pass
-            metric_boundaries[metric] = metric_boundary
-        return metric_boundaries
+        return self.restore_extra_data(
+            name=self.get_checkpoint_name(
+                CHECKPOINT_METRIC_BOUNDARIES,
+                str(layer),
+                *sorted(metrics),
+                *sorted(view_types),
+            ),
+            fallback=lambda: self._compute_metric_boundaries(
+                layer=layer,
+                main_view=main_view,
+                metrics=metrics,
+                view_types=view_types,
+            ),
+        )
 
     def compute_views(
         self,
+        layer: Layer,
         main_view: dd.DataFrame,
+        view_types: List[ViewType],
         metrics: List[Metric],
         metric_boundaries: Dict[Metric, dd.core.Scalar],
         percentile: Optional[float],
         threshold: Optional[int],
-        view_types: List[ViewType],
-    ):
-        # Keep view results
+        is_slope_based: bool,
+    ) -> ViewResults:
         view_results = {}
-
-        # Compute multifaceted views for each metric
-        for metric in metrics:
-            view_results[metric] = {}
-
-            for view_key in self.view_permutations(view_types=view_types):
-                view_type = view_key[-1]
-                parent_view_key = view_key[:-1]
-
-                parent_view_result = view_results[metric].get(parent_view_key, None)
-                parent_records = (
-                    main_view
-                    if parent_view_result is None
-                    else parent_view_result.records
+        for view_key in self.view_permutations(view_types=view_types):
+            view_type = view_key[-1]
+            parent_view_key = view_key[:-1]
+            parent_records = main_view
+            for parent_view_type in parent_view_key:
+                parent_records = parent_records.query(
+                    f"{parent_view_type} in @indices",
+                    local_dict={'indices': view_results[(parent_view_type,)].index},
                 )
-
-                view_result = self.compute_view(
-                    metrics=metrics,
-                    metric=metric,
-                    metric_boundary=metric_boundaries[metric],
-                    percentile=percentile,
-                    records=parent_records,
-                    threshold=threshold,
-                    view_key=view_key,
-                    view_type=view_type,
-                )
-
-                view_results[metric][view_key] = view_result
-
+            view_results[view_key] = self.compute_view(
+                layer=layer,
+                view_key=view_key,
+                view_type=view_type,
+                records=parent_records,
+                metrics=metrics,
+                metric_boundaries=metric_boundaries,
+            )
         return view_results
 
     def compute_logical_views(
         self,
+        layer: Layer,
         main_view: dd.DataFrame,
         metric_boundaries: Dict[Metric, dd.core.Scalar],
         metrics: List[Metric],
@@ -458,62 +384,90 @@ class Analyzer(abc.ABC):
 
         return view_results
 
+    @event_logger(key=EventType.COMPUTE_VIEW, message='Compute view')
     def compute_view(
         self,
-        metrics: List[Metric],
-        metric: Metric,
-        metric_boundary: dd.core.Scalar,
-        percentile: Optional[float],
-        records: dd.DataFrame,
-        threshold: Optional[int],
+        layer: Layer,
         view_key: ViewKey,
         view_type: str,
-    ) -> ViewResult:
-        # Restore view
-        view = self.restore_view(
-            name=self.get_checkpoint_name(CHECKPOINT_VIEW, metric, *list(view_key)),
+        records: dd.DataFrame,
+        metrics: List[Metric],
+        metric_boundaries: Dict[Metric, dd.core.Scalar],
+    ) -> dd.DataFrame:
+        return self.restore_view(
+            name=self.get_checkpoint_name(CHECKPOINT_VIEW, str(layer), *list(view_key)),
             fallback=lambda: self._compute_view(
-                records=records,
                 view_type=view_type,
+                records=records,
                 metrics=metrics,
-                metric=metric,
-                metric_boundary=metric_boundary,
+                metric_boundaries=metric_boundaries,
             ),
             write_to_disk=False,
         )
 
-        # Filter by slope
-        critical_view = view
-        if percentile is not None and percentile > 0:
-            critical_view = view.query(
-                f"{metric}_pth >= @percentile",
-                local_dict={'percentile': percentile},
-            ).persist()
-        elif threshold is not None and threshold > 0:
+    @event_logger(key=EventType.DETECT_BOTTLENECKS, message='Detect bottlenecks')
+    def detect_bottlenecks(
+        self,
+        views: ViewResults,
+        metrics: List[Metric],
+        metric_boundaries: Dict[Metric, dd.core.Scalar],
+        is_slope_based: bool,
+        percentile: Optional[float],
+        threshold: Optional[int],
+    ) -> BottleneckResults:
+        bottlenecks = {}
+        for view_key, view in views.items():
+            bottlenecks[view_key] = {}
+            view = view.map_partitions(
+                set_metric_scores,
+                metrics=metrics,
+                metric_boundaries=metric_boundaries,
+                is_slope_based=is_slope_based,
+            )
+            for metric in metrics:
+                bottlenecks[view_key][metric] = self.evaluate_view(
+                    view=view,
+                    metric=metric,
+                    percentile=percentile,
+                    threshold=threshold,
+                    is_slope_based=is_slope_based,
+                )
+        return bottlenecks
+
+    # @event_logger(key=EventType.EVALUATE_VIEW, message='Evaluate view')
+    def evaluate_view(
+        self,
+        view: dd.DataFrame,
+        metric: Metric,
+        percentile: Optional[float],
+        threshold: Optional[int],
+        is_slope_based: bool,
+    ):
+        if is_slope_based:
             corrected_threshold = THRESHOLD_FUNCTIONS[metric](threshold)
-            critical_view = view.query(
+            return view.query(
                 f"{metric}_slope <= @threshold",
                 local_dict={'threshold': corrected_threshold},
-            ).persist()
-
-        indices = critical_view.index.unique()
-
-        # Find filtered records
-        records = records.query(
-            f"{view_type} in @indices", local_dict={'indices': indices}
-        ).persist()
-
-        # Return views & normalization data
-        return ViewResult(
-            critical_view=critical_view,
-            metric=metric,
-            records=records,
-            view=view,
-            view_type=view_type,
+            )
+        return view.query(
+            f"{metric}_pth >= @percentile",
+            local_dict={'percentile': percentile},
         )
+        # indices = critical_view.index.unique()
+        # records = records.query(
+        #     f"{view_type} in @indices",
+        #     local_dict={'indices': indices},
+        # )
+        # return ViewResult(
+        #     critical_view=critical_view,
+        #     metric=metric,
+        #     records=records.persist(),
+        #     view=view,
+        #     view_type=view_type,
+        # )
 
     def get_checkpoint_name(self, *args):
-        checkpoint_name = "_".join(args)
+        checkpoint_name = "_".join(args).lower()
         if HASH_CHECKPOINT_NAMES:
             return hashlib.md5(checkpoint_name.encode("utf-8")).hexdigest()
         return checkpoint_name
@@ -588,13 +542,78 @@ class Analyzer(abc.ABC):
 
         return it.chain.from_iterable(map(_iter_permutations, range(len(view_types))))
 
+    def _compute_high_level_metrics(
+        self,
+        layer: Layer,
+        traces: dd.DataFrame,
+        view_types: list,
+        partition_size: str = '256MB',
+    ) -> dd.DataFrame:
+        # Add `io_cat`, `acc_pat`, and `func_id` to groupby
+        groupby = list(view_types)
+        groupby.extend(EXTRA_COLS)
+        if layer != Layer.POSIX:
+            groupby.remove('acc_pat')
+            groupby.remove('io_cat')
+        hlm = (
+            traces.groupby(groupby)
+            .agg(HLM_AGG, split_out=math.ceil(math.sqrt(traces.npartitions)))
+            .persist()
+            .reset_index()
+            .repartition(partition_size=partition_size)
+        )
+        hlm = flatten_column_names(hlm).rename(columns=HLM_COLS)
+        return hlm.persist()
+
+    def _compute_main_view(
+        self,
+        layer: Layer,
+        hlm: dd.DataFrame,
+        view_types: List[ViewType],
+        partition_size: str = '256MB',
+    ) -> dd.DataFrame:
+        # Set derived columns
+        if layer == Layer.POSIX:
+            hlm = self._set_posix_columns(ddf=hlm)
+        # Compute agg_view
+        main_view = (
+            hlm.drop(columns=EXTRA_COLS, errors='ignore')
+            .groupby(list(view_types))
+            .sum(split_out=hlm.npartitions)
+        )
+        # Set hashed ids
+        main_view['id'] = main_view.index.map(hash)
+        # Return main_view
+        return main_view.persist()
+
+    def _compute_metric_boundaries(
+        self,
+        layer: Layer,
+        main_view: dd.DataFrame,
+        metrics: List[Metric],
+        view_types: List[ViewType],
+    ) -> Dict[Metric, dd.core.Scalar]:
+        metric_boundaries = {}
+        for metric in metrics:
+            metric_boundary = None
+            if metric == 'iops' or metric == 'time':
+                if COL_PROC_NAME in view_types:
+                    metric_boundary = (
+                        main_view.groupby([COL_PROC_NAME]).sum()['time'].max().persist()
+                    )
+                else:
+                    metric_boundary = main_view['time'].sum().persist()
+            elif metric == 'bw':
+                pass
+            metric_boundaries[metric] = metric_boundary
+        return metric_boundaries
+
     def _compute_view(
         self,
         records: dd.DataFrame,
         view_type: str,
         metrics: List[Metric],
-        metric: Metric,
-        metric_boundary: dd.core.Scalar,
+        metric_boundaries: Dict[Metric, dd.core.Scalar],
     ) -> dd.DataFrame:
         view_types = records.index._meta.names
 
@@ -625,10 +644,9 @@ class Analyzer(abc.ABC):
 
         # Set metric slope
         view = view.map_partitions(
-            set_metric_slope,
+            set_metrics,
             metrics=metrics,
-            metric=metric,
-            metric_boundary=metric_boundary,
+            metric_boundaries=metric_boundaries,
         )
 
         # Return view
@@ -659,7 +677,7 @@ class Analyzer(abc.ABC):
 
         return agg_dict
 
-    def _set_derived_columns(self, ddf: dd.DataFrame):
+    def _set_posix_columns(self, ddf: dd.DataFrame):
         # Derive `io_cat` columns
         for col in ['time', 'size', 'count']:
             for io_cat in list(IOCategory):

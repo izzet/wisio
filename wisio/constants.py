@@ -1,10 +1,26 @@
 import numpy as np
-from enum import Enum
+from enum import Enum, auto
+from .utils.enum_utils import AutoStrEnum
 
 
 class AccessPattern(Enum):
     SEQUENTIAL = 0
     RANDOM = 1
+
+
+class EventType(AutoStrEnum):
+    ATTACH_REASONS = auto()
+    COMPUTE_HLM = auto()
+    COMPUTE_MAIN_VIEW = auto()
+    COMPUTE_METRIC_BOUNDARIES = auto()
+    COMPUTE_PERSPECTIVES = auto()
+    COMPUTE_VIEW = auto()
+    DETECT_BOTTLENECKS = auto()
+    DETECT_CHARACTERISTICS = auto()
+    EVALUATE_VIEW = auto()
+    READ_TRACES = auto()
+    SAVE_BOTTLENECKS = auto()
+    SAVE_VIEWS = auto()
 
 
 class IOCategory(Enum):
@@ -13,10 +29,17 @@ class IOCategory(Enum):
     METADATA = 3
 
 
+class Layer(AutoStrEnum):
+    APP = auto()
+    HDF5 = auto()
+    MPI = auto()
+    POSIX = auto()
+
+
 COL_ACC_PAT = 'acc_pat'
 COL_APP_NAME = 'app_name'
 COL_BEHAVIOR = 'behavior'
-COL_CAT = 'cat'
+COL_CATEGORY = 'cat'
 COL_COUNT = 'count'
 COL_FILE_DIR = 'file_dir'
 COL_FILE_NAME = 'file_name'
@@ -31,6 +54,7 @@ COL_SIZE = 'size'
 COL_TIME = 'time'
 COL_TIME_OVERALL = 'time_overall'
 COL_TIME_RANGE = 'time_range'
+
 
 VIEW_TYPES = ['time_range', 'file_name', 'proc_name']  # Order matters!
 LOGICAL_VIEW_TYPES = [
@@ -108,6 +132,8 @@ EVENT_COMP_HLM = 'compute_hlm'
 EVENT_COMP_MAIN_VIEW = 'compute_main_view'
 EVENT_COMP_METBD = 'compute_metric_boundaries'
 EVENT_COMP_PERS = 'compute_perspectives'
+EVENT_COMP_ROOT_VIEWS = 'compute_root_views'
+EVENT_COMP_VIEW = 'compute_view'
 EVENT_DET_BOT = 'detect_bottlenecks'
 EVENT_DET_CHAR = 'detect_characteristics'
 EVENT_READ_TRACES = 'read_traces'

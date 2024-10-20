@@ -46,6 +46,40 @@ from .types import (
 )
 
 
+def compute_characteristics(
+    main_view: dd.DataFrame,
+    raw_stats: RawStats,
+    exclude_characteristics: List[str] = [],
+) -> Characteristics:
+    rules = [
+        CharacteristicIOTimeRule(),
+        CharacteristicIOOpsRule(),
+        CharacteristicIOSizeRule(),
+        CharacteristicXferSizeRule(rule_key=kc.READ_XFER_SIZE.value),
+        CharacteristicXferSizeRule(rule_key=kc.WRITE_XFER_SIZE.value),
+        CharacteristicProcessCount(rule_key=kc.NODE_COUNT.value),
+        CharacteristicProcessCount(rule_key=kc.APP_COUNT.value),
+        CharacteristicProcessCount(rule_key=kc.PROC_COUNT.value),
+        CharacteristicFileCountRule(),
+        CharacteristicTimePeriodCountRule(),
+        CharacteristicAccessPatternRule(),
+    ]
+    rule_dict = {rule.rule_key: rule for rule in rules}
+    for excluded_char in exclude_characteristics:
+        if excluded_char in rule_dict:
+            rule_dict.pop(excluded_char)
+    tasks = {}
+    for rule, impl in rule_dict.items():
+        tasks[rule] = delayed(impl.handle_task_results)(
+            characteristics={dep: tasks[dep] for dep in impl.deps},
+            dask_key_name=f"characteristics-{rule}",
+            raw_stats=raw_stats,
+            result=impl.define_tasks(main_view=main_view),
+        )
+    (characteristics,) = persist(tasks)
+    return characteristics
+
+
 def _assign_behavior(bottlenecks: pd.DataFrame, metric: str):
     view_name_col, score_col = 'view_name', f"{metric}_score"
 
@@ -97,46 +131,6 @@ class RuleEngine(object):
         self.raw_stats = raw_stats
         self.rules = rules
         self.verbose = verbose
-
-    def process_characteristics(
-        self,
-        main_view: dd.DataFrame,
-        view_results: Dict[Metric, Dict[ViewKey, ViewResult]],
-        exclude_characteristics: List[str] = [],
-    ) -> Characteristics:
-        rules = [
-            CharacteristicIOTimeRule(),
-            CharacteristicIOOpsRule(),
-            CharacteristicIOSizeRule(),
-            CharacteristicXferSizeRule(rule_key=kc.READ_XFER_SIZE.value),
-            CharacteristicXferSizeRule(rule_key=kc.WRITE_XFER_SIZE.value),
-            CharacteristicProcessCount(rule_key=kc.NODE_COUNT.value),
-            CharacteristicProcessCount(rule_key=kc.APP_COUNT.value),
-            CharacteristicProcessCount(rule_key=kc.PROC_COUNT.value),
-            CharacteristicFileCountRule(),
-            CharacteristicTimePeriodCountRule(),
-            CharacteristicAccessPatternRule(),
-        ]
-
-        rule_dict = {rule.rule_key: rule for rule in rules}
-        for excluded_char in exclude_characteristics:
-            if excluded_char in rule_dict:
-                rule_dict.pop(excluded_char)
-
-        tasks = {}
-        for rule, impl in rule_dict.items():
-            tasks[rule] = delayed(impl.handle_task_results)(
-                characteristics={dep: tasks[dep] for dep in impl.deps},
-                dask_key_name=f"characteristics-{rule}",
-                raw_stats=self.raw_stats,
-                result=impl.define_tasks(
-                    main_view=main_view, view_results=view_results
-                ),
-            )
-
-        (characteristics,) = persist(tasks)
-
-        return characteristics
 
     def process_bottlenecks(
         self,

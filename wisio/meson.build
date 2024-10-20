@@ -13,7 +13,6 @@ py.install_sources(
         'recorder.py',
         'rule_engine.py',
         'rules.py',
-        'scoring.py',
         'types.py',
     ],
     subdir: 'wisio',

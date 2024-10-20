@@ -32,7 +32,6 @@ from .constants import (
     XFER_SIZE_BIN_NAMES,
     AccessPattern,
 )
-from .scoring import SCORING_ORDER
 from .types import (
     BottleneckResult,
     Metric,
@@ -51,6 +50,16 @@ from .utils.common_utils import format_number, numerize
 
 MAX_REASONS = 5
 METADATA_ACCESS_RATIO_THRESHOLD = 0.5
+SCORING_ORDER = dict(
+    app_name=('app_name', 'time_range', 'file_name'),
+    file_dir=('file_dir', 'proc_name', 'time_range'),
+    file_name=('file_name', 'proc_name', 'time_range'),
+    file_pattern=('file_pattern', 'proc_name', 'time_range'),
+    node_name=('node_name', 'time_range', 'file_name'),
+    proc_name=('proc_name', 'time_range', 'file_name'),
+    rank=('rank', 'time_range', 'file_name'),
+    time_range=('time_range', 'proc_name', 'file_name'),
+)
 
 
 jinja_env = Environment()
@@ -552,11 +561,7 @@ class CharacteristicRule(RuleHandler):
     deps: List[str] = []
 
     @abc.abstractmethod
-    def define_tasks(
-        self,
-        main_view: dd.DataFrame,
-        view_results: Dict[Metric, Dict[ViewKey, ViewResult]],
-    ) -> Dict[str, Delayed]:
+    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
         raise NotImplementedError
 
     @abc.abstractmethod
@@ -573,11 +578,7 @@ class CharacteristicAccessPatternRule(CharacteristicRule):
     def __init__(self) -> None:
         super().__init__(rule_key=KnownCharacteristics.ACCESS_PATTERN.value)
 
-    def define_tasks(
-        self,
-        main_view: dd.DataFrame,
-        view_results: Dict[Metric, Dict[ViewKey, ViewResult]],
-    ) -> Dict[str, Delayed]:
+    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
         acc_pat_cols = []
         for acc_pat in list(AccessPattern):
             for col_suffix in ACC_PAT_SUFFIXES:
@@ -642,11 +643,7 @@ class CharacteristicComplexityRule(CharacteristicRule):
             KnownCharacteristics.TIME_PERIOD.value,
         ]
 
-    def define_tasks(
-        self,
-        main_view: dd.DataFrame,
-        view_results: Dict[Metric, Dict[ViewKey, ViewResult]],
-    ) -> Dict[str, Delayed]:
+    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
         tasks = {}
 
         return tasks
@@ -680,11 +677,7 @@ class CharacteristicFileCountRule(CharacteristicRule):
     def __init__(self) -> None:
         super().__init__(rule_key=KnownCharacteristics.FILE_COUNT.value)
 
-    def define_tasks(
-        self,
-        main_view: dd.DataFrame,
-        view_results: Dict[Metric, Dict[ViewKey, ViewResult]],
-    ) -> Dict[str, Delayed]:
+    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
         x = main_view.reset_index()
 
         tasks = {}
@@ -760,11 +753,7 @@ class CharacteristicIOOpsRule(CharacteristicRule):
     def __init__(self) -> None:
         super().__init__(rule_key=KnownCharacteristics.IO_COUNT.value)
 
-    def define_tasks(
-        self,
-        main_view: dd.DataFrame,
-        view_results: Dict[Metric, Dict[ViewKey, ViewResult]],
-    ) -> Dict[str, Delayed]:
+    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
         tasks = {}
         tasks['total_count'] = main_view['count'].sum()
         for io_type in IO_TYPES:
@@ -806,11 +795,7 @@ class CharacteristicIOSizeRule(CharacteristicRule):
     def __init__(self) -> None:
         super().__init__(rule_key=KnownCharacteristics.IO_SIZE.value)
 
-    def define_tasks(
-        self,
-        main_view: dd.DataFrame,
-        view_results: Dict[Metric, Dict[ViewKey, ViewResult]],
-    ) -> Dict[str, Delayed]:
+    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
         tasks = {}
         tasks['total_size'] = main_view['data_size'].sum()
         for io_type in IO_TYPES:
@@ -867,11 +852,7 @@ class CharacteristicIOTimeRule(CharacteristicRule):
     def __init__(self) -> None:
         super().__init__(rule_key=KnownCharacteristics.IO_TIME.value)
 
-    def define_tasks(
-        self,
-        main_view: dd.DataFrame,
-        view_results: Dict[Metric, Dict[ViewKey, ViewResult]],
-    ) -> Dict[str, Delayed]:
+    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
         view_types = main_view.index._meta.names
 
         tasks = {}
@@ -947,11 +928,7 @@ class CharacteristicProcessCount(CharacteristicRule):
                 KnownCharacteristics.IO_TIME.value,
             ]
 
-    def define_tasks(
-        self,
-        main_view: dd.DataFrame,
-        view_results: Dict[Metric, Dict[ViewKey, ViewResult]],
-    ) -> Dict[str, Delayed]:
+    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
         view_types = main_view.index._meta.names
 
         tasks = {}
@@ -1070,11 +1047,7 @@ class CharacteristicTimePeriodCountRule(CharacteristicRule):
     def __init__(self) -> None:
         super().__init__(rule_key=KnownCharacteristics.TIME_PERIOD.value)
 
-    def define_tasks(
-        self,
-        main_view: dd.DataFrame,
-        view_results: Dict[Metric, Dict[ViewKey, ViewResult]],
-    ) -> Dict[str, Delayed]:
+    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
         x = main_view.reset_index()
 
         tasks = {}
@@ -1116,11 +1089,7 @@ class CharacteristicXferSizeRule(CharacteristicRule):
             else 'read'
         )
 
-    def define_tasks(
-        self,
-        main_view: dd.DataFrame,
-        view_results: Dict[Metric, Dict[ViewKey, ViewResult]],
-    ) -> Dict[str, Delayed]:
+    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
         tasks = {}
 
         count_col, min_col, max_col, per_col, xfer_col = (

@@ -129,8 +129,12 @@ Characteristics = Dict[str, RuleResult]
 ScoringPerView = Dict[ViewKey, ScoringResult]
 ScoringPerViewPerMetric = Dict[Metric, ScoringPerView]
 
-ViewResultsPerView = Dict[ViewKey, ViewResult]
-ViewResultsPerViewPerMetric = Dict[Metric, ViewResultsPerView]
+ViewResults = Dict[ViewKey, dd.DataFrame]
+
+BottleneckResults = Dict[ViewKey, Dict[Metric, dd.DataFrame]]
+
+ViewResultsPerMetric = Dict[Metric, ViewResult]
+ViewResultsPerMetricPerView = Dict[ViewKey, ViewResultsPerMetric]
 
 
 @dataclass
@@ -238,7 +242,7 @@ class AnalyzerResultType:
     main_view: MainView
     metric_boundaries: Dict[Metric, Union[int, float]]
     raw_stats: RawStats
-    view_results: ViewResultsPerViewPerMetric
+    # view_results: ViewResultsPerViewPerMetric
 
 
 def humanized_metric_name(metric: Metric):

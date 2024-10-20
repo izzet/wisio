@@ -26,6 +26,12 @@ from .constants import (
 
 CAT_POSIX = 'POSIX'
 DFTRACER_TIME_RESOLUTION = 1e6
+IGNORED_LAYERS = [
+    "ai_framework",
+    "config",
+    "dftracer",
+    "dlio_benchmark",
+]
 PFW_COL_MAPPING = {
     'name': COL_FUNC_ID,
     'dur': COL_TIME,
@@ -538,7 +544,7 @@ class DFTracerAnalyzer(Analyzer):
         # traces[COL_HOST_NAME] = traces['hostname']
         # traces[COL_FILE_NAME] = traces['filename']
         # traces = traces.rename(columns=PFW_COL_MAPPING)
-        traces = traces[(traces['cat'] == CAT_POSIX) & (traces['ts'] > 0)]
+        # traces = traces[(traces['cat'] == CAT_POSIX) & (traces['ts'] > 0)]
         # traces[COL_TIME] = traces[COL_TIME] / DFTRACER_TIME_RESOLUTION
         # traces['ts'] = traces['ts'] - traces['ts'].min()
         # traces['ts'] = traces['ts'] / DFTRACER_TIME_RESOLUTION
@@ -585,6 +591,13 @@ class DFTracerAnalyzer(Analyzer):
 
     def compute_job_time(self, traces: dd.DataFrame) -> float:
         return (traces['te'].max() - traces['ts'].min()) / DFTRACER_TIME_RESOLUTION
+
+    def compute_layers(self, traces: dd.DataFrame) -> dd.DataFrame:
+        layers = super().compute_layers(traces)
+        for layer in IGNORED_LAYERS:
+            if layer in layers:
+                layers.remove(layer)
+        return layers
 
     def compute_total_count(self, traces: dd.DataFrame) -> int:
         return (

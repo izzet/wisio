@@ -7,6 +7,19 @@ from .config import ClusterConfig, ClusterType, get_working_dir
 from .utils.file_utils import ensure_dir
 
 
+class Cluster:
+    def __init__(self, ):
+        pass
+
+    def scale(self, n_workers):
+        pass
+
+    def close(self):
+        pass
+
+
+
+
 class ClusterManager(object):
     def __init__(self, config: ClusterConfig):
         self.config = config
