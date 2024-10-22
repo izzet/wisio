@@ -31,6 +31,8 @@ class IOCategory(Enum):
 
 class Layer(AutoStrEnum):
     APP = auto()
+    NETCDF = auto()
+    PNETCDF = auto()
     HDF5 = auto()
     MPI = auto()
     POSIX = auto()
@@ -56,7 +58,7 @@ COL_TIME_OVERALL = 'time_overall'
 COL_TIME_RANGE = 'time_range'
 
 
-VIEW_TYPES = ['time_range', 'file_name', 'proc_name']  # Order matters!
+APP_VIEW_TYPES = ['time_range', 'proc_name', 'step']
 LOGICAL_VIEW_TYPES = [
     ('proc_name', 'app_name'),
     ('proc_name', 'node_name'),
@@ -64,6 +66,7 @@ LOGICAL_VIEW_TYPES = [
     ('file_name', 'file_dir'),
     ('file_name', 'file_pattern'),
 ]
+POSIX_VIEW_TYPES = ['time_range', 'file_name', 'proc_name']  # Order matters!
 
 ACC_PAT_SUFFIXES = ['time', 'size', 'count']
 DERIVED_MD_OPS = ['close', 'open', 'seek', 'stat']

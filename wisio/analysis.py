@@ -3,7 +3,8 @@ import numpy as np
 import pandas as pd
 from typing import Callable, Dict, List, Union
 
-from .types import Metric, Score, ViewType
+from .metrics import KNOWN_METRICS
+from .types import Metric, Score
 
 
 BW_BINS = [  # bw_ranges = [0, 1, 128, 1024, 1024*64]
@@ -112,36 +113,15 @@ def set_metric_scores(
     is_slope_based: bool,
 ):
     for metric in metrics:
-        bin_col, score_col, slope_col, pth_col = (
-            f"{metric}_bin",
-            f"{metric}_score",
-            f"{metric}_slope",
-            f"{metric}_pth",
-        )
-
-        bins = SLOPE_BINS[metric] if is_slope_based else PERCENTILE_BINS
-        names = SCORE_NAMES
-
-        # if IS_NORMALIZED[metric]:
-        #     bins = np.multiply(bins, metric_boundary)
-
-        # if IS_REVERSED[metric]:
-        #     names = np.flip(names)
-        #     thresholds = np.flip(thresholds)
-
-        # if metric == 'bw':
-        #     bins = BW_BINS_PER_PROC if view_type == COL_PROC_NAME else BW_BINS
-
-        # if metric in ['bw', 'iops']:
-        #     df = df.query(f"{metric} > 0")
-
-        if is_slope_based:
-            df[bin_col] = np.digitize(df[slope_col], bins=bins, right=True)
+        if metric in KNOWN_METRICS:
+            known_metric = KNOWN_METRICS[metric]
+            df = known_metric.score(
+                df,
+                boundary=metric_boundaries[metric],
+                slope=is_slope_based,
+            )
         else:
-            df[bin_col] = np.digitize(df[pth_col], bins=bins, right=True)
-
-        df[score_col] = np.choose(df[bin_col] - 1, choices=names, mode='clip')
-
+            raise ValueError(f"Unknown metric: {metric}")
     return df
 
 
@@ -149,16 +129,18 @@ def set_metrics(
     df: pd.DataFrame,
     metrics: List[Metric],
     metric_boundaries: Dict[Metric, float],
+    is_slope_based: bool,
 ):
-    df['time_per'] = df['time'] / df['time'].sum()
-    df['count_per'] = df['count'] / df['count'].sum()
-    if 'iops' in metrics:
-        df['iops_slope'] = df['count_per'] / df['time_per']
-        df['iops_pth'] = (1 / df['iops_slope']).rank(pct=True)
-    if 'time' in metrics:
-        df['time_slope'] = df['time'] / metric_boundaries['time']
-        df['time_pth'] = df['time'] / metric_boundaries['time']
-        # df['time_pth'] = df['time_slope'].rank(pct=True)
+    for metric in metrics:
+        if metric in KNOWN_METRICS:
+            known_metric = KNOWN_METRICS[metric]
+            df = known_metric.calculate(
+                df,
+                boundary=metric_boundaries[metric],
+                slope=is_slope_based,
+            )
+        else:
+            raise ValueError(f"Unknown metric: {metric}")
 
     # 1. io_time == too trivial -- >50% threshold
     # 2. iops == slope analysis -- <45 degree roc (iops) as the main metric

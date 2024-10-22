@@ -21,16 +21,24 @@ from .constants import (
     COL_TIME,
     COL_TIME_RANGE,
     IOCategory,
+    Layer,
 )
 
 
 CAT_POSIX = 'POSIX'
+CAT_STDIO = 'STDIO'
 DFTRACER_TIME_RESOLUTION = 1e6
+IGNORED_CALLS = [
+    "DLIOBenchmark.__init__",
+    "DLIOBenchmark._train",
+    "DLIOBenchmark.initialize",
+    "DLIOBenchmark.run",
+]
 IGNORED_LAYERS = [
     "ai_framework",
     "config",
     "dftracer",
-    "dlio_benchmark",
+    # "dlio_benchmark",
 ]
 PFW_COL_MAPPING = {
     'name': COL_FUNC_ID,
@@ -225,6 +233,7 @@ def load_objects(line, fn, time_granularity, time_approximate, condition_fn, loa
                 d["pid"] = val["pid"]
             if "tid" in val:
                 d["tid"] = val["tid"]
+            d["step"] = 0
             if "args" in val:
                 if "hhash" in val["args"]:
                     if type(val["args"]["hhash"]) is str:
@@ -233,6 +242,8 @@ def load_objects(line, fn, time_granularity, time_approximate, condition_fn, loa
                         d["hhash"] = val["args"]["hhash"]
                 if "level" in val["args"]:
                     d["level"] = int(val["args"]["level"])
+                if "step" in val["args"]:
+                    d["step"] = int(val["args"]["step"])
             if "M" == val["ph"]:
                 if d["name"] == "FH":
                     d["type"] = 1  # 1-> file hash
@@ -436,6 +447,7 @@ class DFTracerAnalyzer(Analyzer):
                 else "uint64[pyarrow]",
                 'trange': "uint64[pyarrow]",
                 'level': "uint8[pyarrow]",
+                'step': "uint64[pyarrow]",
             }
             columns.update(io_columns())
             columns.update(load_cols)
@@ -554,6 +566,9 @@ class DFTracerAnalyzer(Analyzer):
         #     .round()
         #     .astype(int)
         # )
+        # ignore the ignored calls
+        traces = traces[~traces[COL_FUNC_ID].isin(IGNORED_CALLS)]
+
         traces[COL_PROC_NAME] = (
             'app#'
             + traces[COL_HOST_NAME].astype(str)
@@ -587,7 +602,23 @@ class DFTracerAnalyzer(Analyzer):
             & ~traces[COL_FUNC_ID].str.contains(metadata_cond),
             IOCategory.WRITE.value,
         )
+
         return traces
+
+    def set_layer_columns(self, layer: Layer, hlm: dd.DataFrame):
+        if layer == Layer.APP:
+            io_condition = (
+                hlm['cat'].isin([CAT_POSIX, CAT_STDIO])
+                | hlm['func_id'].str.contains('<module>.iter')
+                | hlm['func_id'].str.contains('parse_image')
+                | hlm['func_id'].str.contains('read_index')
+            )
+            hlm['compute_time'] = 0.0
+            hlm['io_time'] = 0.0
+            hlm['compute_time'] = hlm['compute_time'].mask(~io_condition, hlm['time'])
+            hlm['io_time'] = hlm['io_time'].mask(io_condition, hlm['time'])
+            return hlm
+        return super().set_layer_columns(layer, hlm)
 
     def compute_job_time(self, traces: dd.DataFrame) -> float:
         return (traces['te'].max() - traces['ts'].min()) / DFTRACER_TIME_RESOLUTION
@@ -598,10 +629,3 @@ class DFTracerAnalyzer(Analyzer):
             if layer in layers:
                 layers.remove(layer)
         return layers
-
-    def compute_total_count(self, traces: dd.DataFrame) -> int:
-        return (
-            traces[(traces['cat'] == CAT_POSIX) & (traces['ts'] > 0)]
-            .index.count()
-            .persist()
-        )

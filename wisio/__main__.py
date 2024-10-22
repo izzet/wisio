@@ -37,13 +37,15 @@ def main(cfg: Config) -> None:
     result = analyzer.analyze_trace(
         trace_path=cfg.trace_path,
         # accuracy=cfg.accuracy,
+        app_metrics=cfg.app_metrics,
+        app_view_types=cfg.app_view_types,
         exclude_bottlenecks=cfg.exclude_bottlenecks,
         exclude_characteristics=cfg.exclude_characteristics,
         logical_view_types=cfg.logical_view_types,
-        metrics=cfg.metrics,
         percentile=cfg.percentile,
         threshold=cfg.threshold,
-        view_types=cfg.view_types,
+        posix_metrics=cfg.posix_metrics,
+        posix_view_types=cfg.posix_view_types,
     )
     output: OutputType = instantiate(cfg.output)
     output.handle_result(metrics=cfg.metrics, result=result)

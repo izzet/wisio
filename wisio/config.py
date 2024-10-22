@@ -6,7 +6,7 @@ from hydra.conf import HelpConf, JobConf
 from omegaconf import MISSING
 from typing import Any, Dict, List, Optional
 
-from .constants import VIEW_TYPES
+from .constants import APP_VIEW_TYPES, POSIX_VIEW_TYPES
 
 
 @dataclass
@@ -193,19 +193,25 @@ class Config:
         ]
     )
     analyzer: AnalyzerConfig = MISSING
+    app_metrics: Optional[List[str]] = field(
+        default_factory=lambda: ["io_compute_ratio"]
+    )
+    app_view_types: Optional[List[str]] = field(default_factory=lambda: APP_VIEW_TYPES)
     cluster: ClusterConfig = MISSING
     debug: Optional[bool] = False
     exclude_bottlenecks: Optional[List[str]] = field(default_factory=list)
     exclude_characteristics: Optional[List[str]] = field(default_factory=list)
-    metrics: Optional[List[str]] = field(default_factory=lambda: ["iops"])
     logical_view_types: Optional[bool] = False
     output: OutputConfig = MISSING
     percentile: Optional[float] = None
+    posix_metrics: Optional[List[str]] = field(default_factory=lambda: ["iops"])
+    posix_view_types: Optional[List[str]] = field(
+        default_factory=lambda: POSIX_VIEW_TYPES
+    )
     threshold: Optional[int] = None
     time_granularity: Optional[float] = 1e6
     trace_path: str = MISSING
     verbose: Optional[bool] = False
-    view_types: Optional[List[str]] = field(default_factory=lambda: VIEW_TYPES)
 
 
 def init_hydra_config_store() -> None:

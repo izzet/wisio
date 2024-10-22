@@ -20,12 +20,14 @@ class Score(Enum):
 AnalysisAccuracy = Literal['accurate', 'optimistic', 'pessimistic']
 Metric = Literal[
     'att_perf',
+    'au',
     'bw',
     'intensity',
+    'io_compute_ratio',
     'iops',
     'time',
 ]
-ViewType = Literal['file_name', 'proc_name', 'time_range']
+ViewType = Literal['file_name', 'host_name', 'proc_name', 'step', 'time_range']
 ViewKey = Union[
     Tuple[ViewType], Tuple[ViewType, ViewType], Tuple[ViewType, ViewType, ViewType]
 ]

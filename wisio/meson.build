@@ -9,6 +9,7 @@ py.install_sources(
         'constants.py',
         'darshan.py',
         'dftracer.py',
+        'metrics.py',
         'output.py',
         'recorder.py',
         'rule_engine.py',
