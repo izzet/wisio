@@ -42,6 +42,12 @@ class ClusterConfig:
 
 
 @dataclass
+class ExternalClusterConfig(ClusterConfig):
+    _target_: str = "wisio.cluster.ExternalCluster"
+    scheduler_address: Optional[str] = MISSING
+
+
+@dataclass
 class JobQueueClusterSchedulerConfig:
     dashboard_address: Optional[str] = None
     host: Optional[str] = field(default_factory=socket.gethostname)
@@ -223,6 +229,7 @@ def init_hydra_config_store() -> None:
     cs.store(group="analyzer", name="darshan", node=DarshanAnalyzerConfig)
     cs.store(group="analyzer", name="dftracer", node=DFTracerAnalyzerConfig)
     cs.store(group="analyzer", name="recorder", node=RecorderAnalyzerConfig)
+    cs.store(group="cluster", name="external", node=ExternalClusterConfig)
     cs.store(group="cluster", name="local", node=LocalClusterConfig)
     cs.store(group="cluster", name="lsf", node=LSFClusterConfig)
     cs.store(group="cluster", name="pbs", node=PBSClusterConfig)
