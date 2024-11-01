@@ -125,9 +125,74 @@ class IOComputeRatioMetric(Metric):
         return "io_compute_ratio"
 
 
+class UnoverlappedCheckpointIOMetric(Metric):
+    def __init__(self):
+        super().__init__("unoverlapped_checkpoint_io_time")
+
+    def calculate(self, df: pd.DataFrame, boundary: float, slope=False) -> pd.DataFrame:
+        df["unoverlapped_checkpoint_io_time"] = 0.0
+        df["unoverlapped_checkpoint_io_time"] = df[
+            "unoverlapped_checkpoint_io_time"
+        ].mask(
+            df["checkpoint_io_time"] - df["compute_time"] > 0,
+            df["checkpoint_io_time"] - df["compute_time"],
+        )
+        df["unoverlapped_checkpoint_io_time_ratio"] = 0.0
+        df["unoverlapped_checkpoint_io_time_ratio"] = df[
+            "unoverlapped_checkpoint_io_time_ratio"
+        ].mask(
+            df["checkpoint_io_time"] > 0,
+            df["unoverlapped_checkpoint_io_time"] / boundary,
+        )
+        df["unoverlapped_checkpoint_io_time_pct"] = df[
+            "unoverlapped_checkpoint_io_time_ratio"
+        ].rank(pct=True)
+        # df["unoverlapped_checkpoint_io_time_normalized"] = (
+        #     df["unoverlapped_checkpoint_io_time"] / boundary
+        # )
+        return df
+
+    def score(self, df: pd.DataFrame, boundary: float, slope=False) -> pd.DataFrame:
+        return self.score_percentile(df, "unoverlapped_checkpoint_io_time_pct")
+
+    def query_column_name(self, slope=False) -> pd.Series:
+        return "unoverlapped_checkpoint_io_time_pct"
+
+
+class UnoverlappedReadIOMetric(Metric):
+    def __init__(self):
+        super().__init__("unoverlapped_read_io_time")
+
+    def calculate(self, df: pd.DataFrame, boundary: float, slope=False) -> pd.DataFrame:
+        df["unoverlapped_read_io_time"] = 0.0
+        df["unoverlapped_read_io_time"] = df["unoverlapped_read_io_time"].mask(
+            df["read_io_time"] - df["compute_time"] > 0,
+            df["read_io_time"] - df["compute_time"],
+        )
+        # df["unoverlapped_read_io_time_normalized"] = (
+        #     df["unoverlapped_read_io_time"] / boundary
+        # )
+        df['unoverlapped_read_io_time_ratio'] = 0.0
+        df['unoverlapped_read_io_time_ratio'] = df[
+            'unoverlapped_read_io_time_ratio'
+        ].mask(
+            df["read_io_time"] > 0, df["unoverlapped_read_io_time"] / df["read_io_time"]
+        )
+        return df
+
+    def score(self, df: pd.DataFrame, boundary: float, slope=False) -> pd.DataFrame:
+        return self.score_percentage(df, "unoverlapped_read_io_time_ratio")
+
+    def query_column_name(self, slope=False) -> pd.Series:
+        return "unoverlapped_read_io_time_ratio"
+
+
 KNOWN_METRICS: Dict[str, Metric] = {
     "io_compute_ratio": IOComputeRatioMetric(),
+    "io_time": TimeMetric(),
     "iops": OpsMetric(),
     "ops": OpsMetric(),
     "time": TimeMetric(),
+    "unoverlapped_checkpoint_io_time": UnoverlappedCheckpointIOMetric(),
+    "unoverlapped_read_io_time": UnoverlappedReadIOMetric(),
 }

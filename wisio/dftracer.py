@@ -8,6 +8,7 @@ import os
 import zindex_py as zindex
 from dask.distributed import wait
 from glob import glob
+from typing import Dict, List
 
 from .analyzer import Analyzer
 from .constants import (
@@ -23,6 +24,7 @@ from .constants import (
     IOCategory,
     Layer,
 )
+from .types import Metric, ViewType
 
 
 CAT_POSIX = 'POSIX'
@@ -106,6 +108,13 @@ def get_conditions_default(json_obj):
     return False, False, io_cond
 
 
+def get_conditions_deepspeed(json_obj):
+    app_cond = "__getitem__" in json_obj["name"] or "checkpoint" in json_obj["name"]
+    io_cond = "POSIX" == json_obj["cat"] or "STDIO" == json_obj["cat"]
+    compute_cond = "compute" in json_obj["name"]
+    return app_cond, compute_cond, io_cond
+
+
 def io_columns(time_approximate=True):
     return {
         # "compute_time": "string" if not time_approximate else np.float64,
@@ -133,7 +142,8 @@ def io_function(json_object, current_dict, time_approximate, condition_fn):
     d = {}
     d["phase"] = 0
     if not condition_fn:
-        condition_fn = get_conditions_default
+        # condition_fn = get_conditions_default
+        condition_fn = get_conditions_deepspeed
     app_io_cond, compute_cond, io_cond = condition_fn(json_object)
     if time_approximate:
         d["total_time"] = 0
@@ -327,6 +337,23 @@ def load_objects(line, fn, time_granularity, time_approximate, condition_fn, loa
 
 
 class DFTracerAnalyzer(Analyzer):
+    def additional_high_level_metrics(self):
+        columns = {
+            'app_io_time': [sum],
+            'checkpoint_io_time': [sum],
+            'compute_time': [sum],
+            'io_time': [sum],
+            'read_io_time': [sum],
+        }
+        column_names = {
+            'app_io_time_sum': 'app_io_time',
+            'checkpoint_io_time_sum': 'checkpoint_io_time',
+            'compute_time_sum': 'compute_time',
+            'io_time_sum': 'io_time',
+            'read_io_time_sum': 'read_io_time',
+        }
+        return columns, column_names
+
     def read_trace(self, trace_path: str) -> dd.DataFrame:
         conditions = None
         load_cols = {}
@@ -547,28 +574,23 @@ class DFTracerAnalyzer(Analyzer):
         return self.events.rename(columns=PFW_COL_MAPPING)
 
     def postread_trace(self, traces: dd.DataFrame) -> dd.DataFrame:
-        # 'name': COL_FUNC_ID,
-        # 'dur': COL_TIME,
-        # 'hostname': COL_HOST_NAME,
-        # 'filename': COL_FILE_NAME,
-        # traces[COL_FUNC_ID] = traces['name']
-        # traces[COL_TIME] = traces['dur']
-        # traces[COL_HOST_NAME] = traces['hostname']
-        # traces[COL_FILE_NAME] = traces['filename']
-        # traces = traces.rename(columns=PFW_COL_MAPPING)
-        # traces = traces[(traces['cat'] == CAT_POSIX) & (traces['ts'] > 0)]
-        # traces[COL_TIME] = traces[COL_TIME] / DFTRACER_TIME_RESOLUTION
-        # traces['ts'] = traces['ts'] - traces['ts'].min()
-        # traces['ts'] = traces['ts'] / DFTRACER_TIME_RESOLUTION
-        # traces['te'] = traces['ts'] + traces[COL_TIME]
-        # traces[COL_TIME_RANGE] = (
-        #     ((traces['te'] / self.time_granularity) * DFTRACER_TIME_RESOLUTION)
-        #     .round()
-        #     .astype(int)
-        # )
         # ignore the ignored calls
         traces = traces[~traces[COL_FUNC_ID].isin(IGNORED_CALLS)]
 
+        traces['app_io_time'] = traces['app_io_time'] / DFTRACER_TIME_RESOLUTION
+        traces['compute_time'] = traces['compute_time'] / DFTRACER_TIME_RESOLUTION
+        traces['io_time'] = traces['io_time'] / DFTRACER_TIME_RESOLUTION
+        traces['read_io_time'] = 0.0
+        traces['read_io_time'] = traces['read_io_time'].mask(
+            traces['func_id'].str.contains('__getitem__'), traces['time']
+        )
+        traces['checkpoint_io_time'] = 0.0
+        traces['checkpoint_io_time'] = traces['checkpoint_io_time'].mask(
+            traces['func_id'].str.contains('checkpoint'), traces['time']
+        )
+
+        traces[COL_ACC_PAT] = 0
+        traces[COL_COUNT] = 1
         traces[COL_PROC_NAME] = (
             'app#'
             + traces[COL_HOST_NAME].astype(str)
@@ -578,11 +600,10 @@ class DFTracerAnalyzer(Analyzer):
             + '#'
             + traces['tid'].astype(str)
         )
+
         read_cond = 'read'
         write_cond = 'write'
         metadata_cond = 'readlink'
-        traces[COL_ACC_PAT] = 0
-        traces[COL_COUNT] = 1
         traces[COL_IO_CAT] = 0
         traces[COL_IO_CAT] = traces[COL_IO_CAT].mask(
             (traces['cat'] == CAT_POSIX)
@@ -605,21 +626,6 @@ class DFTracerAnalyzer(Analyzer):
 
         return traces
 
-    def set_layer_columns(self, layer: Layer, hlm: dd.DataFrame):
-        if layer == Layer.APP:
-            io_condition = (
-                hlm['cat'].isin([CAT_POSIX, CAT_STDIO])
-                | hlm['func_id'].str.contains('<module>.iter')
-                | hlm['func_id'].str.contains('parse_image')
-                | hlm['func_id'].str.contains('read_index')
-            )
-            hlm['compute_time'] = 0.0
-            hlm['io_time'] = 0.0
-            hlm['compute_time'] = hlm['compute_time'].mask(~io_condition, hlm['time'])
-            hlm['io_time'] = hlm['io_time'].mask(io_condition, hlm['time'])
-            return hlm
-        return super().set_layer_columns(layer, hlm)
-
     def compute_job_time(self, traces: dd.DataFrame) -> float:
         return (traces['te'].max() - traces['ts'].min()) / DFTRACER_TIME_RESOLUTION
 
@@ -629,3 +635,38 @@ class DFTracerAnalyzer(Analyzer):
             if layer in layers:
                 layers.remove(layer)
         return layers
+
+    def _compute_metric_boundaries(
+        self,
+        layer: Layer,
+        main_view: dd.DataFrame,
+        metrics: List[Metric],
+        view_types: List[ViewType],
+    ) -> Dict[Metric, dd.core.Scalar]:
+        if layer == Layer.APP:
+            metric_boundaries = {}
+            for metric in metrics:
+                metric_boundary = None
+                if 'checkpoint_io_time' in metric:
+                    if COL_PROC_NAME in view_types:
+                        metric_boundary = (
+                            main_view.groupby([COL_PROC_NAME, COL_TIME_RANGE])
+                            .sum()
+                            .groupby([COL_TIME_RANGE])['checkpoint_io_time']
+                            .max()
+                            .sum()
+                            .persist()
+                        )
+                elif 'io_time' in metric:
+                    if COL_PROC_NAME in view_types:
+                        metric_boundary = (
+                            main_view.groupby([COL_PROC_NAME, COL_TIME_RANGE])
+                            .sum()
+                            .groupby([COL_TIME_RANGE])['io_time']
+                            .max()
+                            .sum()
+                            .persist()
+                        )
+                metric_boundaries[metric] = metric_boundary
+            return metric_boundaries
+        return super()._compute_metric_boundaries(layer, main_view, metrics, view_types)

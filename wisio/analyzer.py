@@ -10,7 +10,7 @@ from dask import compute, persist
 from dask.base import unpack_collections
 from dask.delayed import Delayed
 from dask.distributed import fire_and_forget, get_client, wait
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from .analysis import THRESHOLD_FUNCTIONS, set_metrics, set_metric_scores
 from .analysis_utils import set_file_dir, set_file_pattern, set_proc_name_parts
@@ -121,13 +121,9 @@ class Analyzer(abc.ABC):
         is_slope_based = threshold is not None
 
         # Read trace & stats
-        # traces = self.read_trace(trace_path=trace_path)
-        # raw_stats = self.read_stats(traces=traces)
-        # traces = self.postread_trace(traces=traces)
-
-        traces = dd.read_parquet(
-            '/workspaces/WisIO/notebooks/.wisio/dftracer/bert-v100-node-4-v1/traces/'
-        )
+        traces = self.read_trace(trace_path=trace_path)
+        raw_stats = self.read_stats(traces=traces)
+        traces = self.postread_trace(traces=traces)
 
         layers = self.compute_layers(traces=traces)
 
@@ -144,11 +140,11 @@ class Analyzer(abc.ABC):
         views = {}
         bottlenecks = {}
         for layer, categories in self.arrange_layers(layers).items():
-            print(f'Processing layer: {layer}')
-            print(f'Categories: {categories}')
+            # print(f'Processing layer: {layer}')
+            # print(f'Categories: {categories}')
             metrics = posix_metrics if layer == Layer.POSIX else app_metrics
             view_types = posix_view_types if layer == Layer.POSIX else app_view_types
-            l_hlm = hlm[hlm[COL_CATEGORY].isin(categories)]
+            l_hlm = hlm  # [hlm[COL_CATEGORY].isin(categories)]
             l_main_view = self.compute_main_view(
                 layer=layer,
                 hlm=l_hlm,
@@ -189,7 +185,7 @@ class Analyzer(abc.ABC):
             metric_boundaries[layer] = l_metric_boundaries
             views[layer] = l_views
             bottlenecks[layer] = l_bottlenecks
-            # break
+            break
 
         return (
             traces,
@@ -279,6 +275,9 @@ class Analyzer(abc.ABC):
 
     def postread_trace(self, traces: dd.DataFrame) -> dd.DataFrame:
         return traces
+
+    def additional_high_level_metrics(self) -> Tuple[Dict[str, Any], Dict[str, str]]:
+        return {}, {}
 
     def compute_job_time(self, traces: dd.DataFrame) -> float:
         return traces['tend'].max() - traces['tstart'].min()
@@ -605,14 +604,18 @@ class Analyzer(abc.ABC):
     ) -> dd.DataFrame:
         # Add layer columns
         groupby = list(set(view_types).union(HLM_EXTRA_COLS))
+        agg_columns, column_names = self.additional_high_level_metrics()
+        assert len(agg_columns) == len(column_names), 'Additional columns mismatch'
+        agg_columns.update(HLM_AGG)
         hlm = (
             traces.groupby(groupby)
-            .agg(HLM_AGG, split_out=math.ceil(math.sqrt(traces.npartitions)))
+            .agg(agg_columns, split_out=math.ceil(math.sqrt(traces.npartitions)))
             .persist()
             .reset_index()
             .repartition(partition_size=partition_size)
         )
-        hlm = flatten_column_names(hlm).rename(columns=HLM_COLS)
+        column_names.update(HLM_COLS)
+        hlm = flatten_column_names(hlm).rename(columns=column_names)
         return hlm.persist()
 
     def _compute_main_view(
