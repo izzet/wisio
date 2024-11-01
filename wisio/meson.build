@@ -5,6 +5,7 @@ py.install_sources(
         'analysis.py',
         'analysis_utils.py',
         'analyzer.py',
+        'cluster.py',
         'config.py',
         'constants.py',
         'darshan.py',
