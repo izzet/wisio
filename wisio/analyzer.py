@@ -36,7 +36,6 @@ from .constants import (
 from .metrics import KNOWN_METRICS
 from .rule_engine import RuleEngine, compute_characteristics
 from .types import (
-    AnalysisAccuracy,
     AnalyzerResultType,
     BottleneckResults,
     Characteristics,
@@ -107,7 +106,6 @@ class Analyzer(abc.ABC):
     def analyze_trace(
         self,
         trace_path: str,
-        accuracy: AnalysisAccuracy = 'pessimistic',
         app_metrics: List[Metric] = ['io_compute_ratio'],
         app_view_types: List[ViewType] = ['time_range', 'proc_name'],
         exclude_bottlenecks: List[str] = [],

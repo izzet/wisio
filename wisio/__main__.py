@@ -41,7 +41,6 @@ def main(cfg: Config) -> None:
         verbose=cfg.verbose,
     )
     result = analyzer.analyze_trace(
-        # accuracy=cfg.accuracy,
         app_metrics=cfg.app_metrics,
         app_view_types=cfg.app_view_types,
         exclude_bottlenecks=cfg.exclude_bottlenecks,

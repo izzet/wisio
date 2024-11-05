@@ -17,7 +17,6 @@ class Score(Enum):
     CRITICAL = 'critical'
 
 
-AnalysisAccuracy = Literal['accurate', 'optimistic', 'pessimistic']
 Metric = Literal[
     'att_perf',
     'au',
@@ -35,7 +34,6 @@ ViewKey = Union[
 
 @dataclass
 class AnalysisRuntimeConfig:
-    accuracy: AnalysisAccuracy
     checkpoint: bool
     cluster_type: str
     debug: bool
