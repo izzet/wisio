@@ -31,6 +31,8 @@ def main(cfg: Config) -> None:
     cluster: ClusterType = instantiate(cfg.cluster)
     if isinstance(cluster, ExternalCluster):
         client = Client(cluster.scheduler_address)
+        if cluster.restart_on_connect:
+            client.restart()
     else:
         client = Client(cluster)
     analyzer: AnalyzerType = instantiate(
@@ -39,7 +41,6 @@ def main(cfg: Config) -> None:
         verbose=cfg.verbose,
     )
     result = analyzer.analyze_trace(
-        trace_path=cfg.trace_path,
         # accuracy=cfg.accuracy,
         app_metrics=cfg.app_metrics,
         app_view_types=cfg.app_view_types,
@@ -47,12 +48,15 @@ def main(cfg: Config) -> None:
         exclude_characteristics=cfg.exclude_characteristics,
         logical_view_types=cfg.logical_view_types,
         percentile=cfg.percentile,
-        threshold=cfg.threshold,
         posix_metrics=cfg.posix_metrics,
         posix_view_types=cfg.posix_view_types,
+        threshold=cfg.threshold,
+        time_view_type=cfg.time_view_type,
+        trace_path=cfg.trace_path,
+        unoverlapped_posix_only=cfg.unoverlapped_posix_only,
     )
     output: OutputType = instantiate(cfg.output)
-    output.handle_result(metrics=cfg.metrics, result=result)
+    output.handle_result(metrics=cfg.posix_metrics, result=result)
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Literal, Optional, Union, Tuple
 
-from .constants import HUMANIZED_METRICS, HUMANIZED_VIEW_TYPES
+from .constants import HUMANIZED_METRICS, HUMANIZED_VIEW_TYPES, Layer
 
 
 class Score(Enum):
@@ -72,7 +72,7 @@ class RuleReason:
 class Rule:
     name: str
     condition: str
-    reasons: Optional[List[RuleReason]]
+    reasons: Optional[List[RuleReason]] = None
     # source: Optional[str]
 
 
@@ -84,14 +84,14 @@ class RuleResultReason:
 
 @dataclass
 class RuleResult:
-    compact_desc: Optional[str]
     description: str
-    detail_list: Optional[List[str]]
-    extra_data: Optional[dict]
-    object_hash: Optional[int]
-    reasons: Optional[List[RuleResultReason]]
-    value: Optional[Union[float, int, tuple]]
-    value_fmt: Optional[str]
+    compact_desc: Optional[str] = None
+    detail_list: Optional[List[str]] = None
+    extra_data: Optional[dict] = None
+    object_hash: Optional[int] = None
+    reasons: Optional[List[RuleResultReason]] = None
+    value: Optional[Union[float, int, tuple]] = None
+    value_fmt: Optional[str] = None
 
 
 @dataclass
@@ -239,11 +239,13 @@ class OutputType:
 class AnalyzerResultType:
     bottleneck_dir: str
     bottleneck_rules: dict
-    characteristics: Characteristics
-    evaluated_views: ScoringPerViewPerMetric
-    main_view: MainView
-    metric_boundaries: Dict[Metric, Union[int, float]]
+    characteristics: Dict[Layer, Characteristics]
+    evaluated_views: Dict[Layer, ScoringPerViewPerMetric]
+    layers: List[Layer]
+    main_views: Dict[Layer, MainView]
+    metric_boundaries: Dict[Layer, Dict[Metric, Union[int, float]]]
     raw_stats: RawStats
+    view_types: List[ViewType]
     # view_results: ViewResultsPerViewPerMetric
 
 

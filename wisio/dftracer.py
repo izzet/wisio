@@ -8,8 +8,9 @@ import os
 import zindex_py as zindex
 from dask.distributed import wait
 from glob import glob
-from typing import Dict, List
+from typing import List
 
+from .analysis import set_unoverlapped_times
 from .analyzer import Analyzer
 from .constants import (
     COL_ACC_PAT,
@@ -36,8 +37,8 @@ IGNORED_CALLS = [
     "DLIOBenchmark.initialize",
     "DLIOBenchmark.run",
 ]
-IGNORED_LAYERS = [
-    "ai_framework",
+IGNORED_CATEGORIES = [
+    # "ai_framework",
     "config",
     "dftracer",
     # "dlio_benchmark",
@@ -45,8 +46,6 @@ IGNORED_LAYERS = [
 PFW_COL_MAPPING = {
     'name': COL_FUNC_ID,
     'dur': COL_TIME,
-    'hhash': COL_HOST_NAME,
-    'fhash': COL_FILE_NAME,
     'trange': COL_TIME_RANGE,
 }
 
@@ -159,7 +158,6 @@ def io_function(json_object, current_dict, time_approximate, condition_fn):
             d["total_time"] = current_dict["dur"]
             d["app_io_time"] = current_dict["dur"]
             d["phase"] = 3
-
     else:
         if compute_cond:
             d["compute_time"] = current_dict["tinterval"]
@@ -352,6 +350,7 @@ class DFTracerAnalyzer(Analyzer):
             'io_time_sum': 'io_time',
             'read_io_time_sum': 'read_io_time',
         }
+        # print("Additional high level metrics:", list(columns.keys()))
         return columns, column_names
 
     def read_trace(self, trace_path: str) -> dd.DataFrame:
@@ -568,12 +567,28 @@ class DFTracerAnalyzer(Analyzer):
         else:
             logging.error("Unable to load traces")
             exit(1)
-
+        # ===============================================
         self.events['dur'] = self.events['dur'] / DFTRACER_TIME_RESOLUTION
+
+        file_hashes = self.file_hash[['name']].rename(columns={'name': COL_FILE_NAME})
+        host_hashes = self.host_hash.set_index('hhash')[['name']].rename(
+            columns={'name': COL_HOST_NAME}
+        )
+
+        self.events = self.events.merge(
+            file_hashes, how='left', left_on='fhash', right_index=True
+        ).drop(columns=['fhash'])
+        self.events = self.events.merge(
+            host_hashes, how='left', left_on='hhash', right_index=True
+        ).drop(columns=['hhash'])
 
         return self.events.rename(columns=PFW_COL_MAPPING)
 
-    def postread_trace(self, traces: dd.DataFrame) -> dd.DataFrame:
+    def postread_trace(
+        self,
+        traces: dd.DataFrame,
+        view_types: List[ViewType],
+    ) -> dd.DataFrame:
         # ignore the ignored calls
         traces = traces[~traces[COL_FUNC_ID].isin(IGNORED_CALLS)]
 
@@ -591,15 +606,16 @@ class DFTracerAnalyzer(Analyzer):
 
         traces[COL_ACC_PAT] = 0
         traces[COL_COUNT] = 1
-        traces[COL_PROC_NAME] = (
-            'app#'
-            + traces[COL_HOST_NAME].astype(str)
-            + '#'
-            # + 'host#'
-            + traces['pid'].astype(str)
-            + '#'
-            + traces['tid'].astype(str)
-        )
+
+        if COL_PROC_NAME in view_types:
+            traces[COL_PROC_NAME] = (
+                'app#'
+                + traces[COL_HOST_NAME].astype(str)
+                + '#'
+                + traces['pid'].astype(str)
+                + '#'
+                + traces['tid'].astype(str)
+            )
 
         read_cond = 'read'
         write_cond = 'write'
@@ -624,49 +640,25 @@ class DFTracerAnalyzer(Analyzer):
             IOCategory.WRITE.value,
         )
 
+        # drop columns that are not needed
+        if COL_FILE_NAME not in view_types:
+            traces = traces.drop(columns=[COL_FILE_NAME], errors='ignore')
+        if COL_HOST_NAME not in view_types:
+            traces = traces.drop(columns=[COL_HOST_NAME], errors='ignore')
+
         return traces
 
     def compute_job_time(self, traces: dd.DataFrame) -> float:
         return (traces['te'].max() - traces['ts'].min()) / DFTRACER_TIME_RESOLUTION
 
-    def compute_layers(self, traces: dd.DataFrame) -> dd.DataFrame:
-        layers = super().compute_layers(traces)
-        for layer in IGNORED_LAYERS:
-            if layer in layers:
-                layers.remove(layer)
-        return layers
+    def compute_categories(self, hlm: dd.DataFrame) -> dd.DataFrame:
+        categories = super().compute_categories(hlm)
+        for category in IGNORED_CATEGORIES:
+            if category in categories:
+                categories.remove(category)
+        return categories
 
-    def _compute_metric_boundaries(
-        self,
-        layer: Layer,
-        main_view: dd.DataFrame,
-        metrics: List[Metric],
-        view_types: List[ViewType],
-    ) -> Dict[Metric, dd.core.Scalar]:
-        if layer == Layer.APP:
-            metric_boundaries = {}
-            for metric in metrics:
-                metric_boundary = None
-                if 'checkpoint_io_time' in metric:
-                    if COL_PROC_NAME in view_types:
-                        metric_boundary = (
-                            main_view.groupby([COL_PROC_NAME, COL_TIME_RANGE])
-                            .sum()
-                            .groupby([COL_TIME_RANGE])['checkpoint_io_time']
-                            .max()
-                            .sum()
-                            .persist()
-                        )
-                elif 'io_time' in metric:
-                    if COL_PROC_NAME in view_types:
-                        metric_boundary = (
-                            main_view.groupby([COL_PROC_NAME, COL_TIME_RANGE])
-                            .sum()
-                            .groupby([COL_TIME_RANGE])['io_time']
-                            .max()
-                            .sum()
-                            .persist()
-                        )
-                metric_boundaries[metric] = metric_boundary
-            return metric_boundaries
-        return super()._compute_metric_boundaries(layer, main_view, metrics, view_types)
+    def set_layer_columns(self, layer: Layer, hlm: dd.DataFrame) -> dd.DataFrame:
+        hlm = super().set_layer_columns(layer, hlm)
+        hlm = set_unoverlapped_times(hlm)
+        return hlm

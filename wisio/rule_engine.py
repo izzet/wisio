@@ -17,12 +17,14 @@ from .constants import (
     COL_NODE_NAME,
     COL_PROC_NAME,
     COL_RANK,
+    Layer,
 )
 from .rules import (
     KNOWN_RULES,
     MAX_REASONS,
     BottleneckRule,
     CharacteristicAccessPatternRule,
+    CharacteristicAppTimeRule,
     CharacteristicFileCountRule,
     CharacteristicIOOpsRule,
     CharacteristicIOSizeRule,
@@ -40,42 +42,61 @@ from .types import (
     ScoringPerViewPerMetric,
     ScoringResult,
     ViewKey,
-    ViewResult,
     ViewType,
     view_name as format_view_name,
 )
 
 
 def compute_characteristics(
-    main_view: dd.DataFrame,
+    layer: Layer,
+    view: dd.DataFrame,
     raw_stats: RawStats,
+    app_characteristics: Characteristics = None,
     exclude_characteristics: List[str] = [],
+    unoverlapped_posix_only: bool = False,
 ) -> Characteristics:
-    rules = [
-        CharacteristicIOTimeRule(),
-        CharacteristicIOOpsRule(),
-        CharacteristicIOSizeRule(),
-        CharacteristicXferSizeRule(rule_key=kc.READ_XFER_SIZE.value),
-        CharacteristicXferSizeRule(rule_key=kc.WRITE_XFER_SIZE.value),
-        CharacteristicProcessCount(rule_key=kc.NODE_COUNT.value),
-        CharacteristicProcessCount(rule_key=kc.APP_COUNT.value),
-        CharacteristicProcessCount(rule_key=kc.PROC_COUNT.value),
-        CharacteristicFileCountRule(),
-        CharacteristicTimePeriodCountRule(),
-        CharacteristicAccessPatternRule(),
-    ]
-    rule_dict = {rule.rule_key: rule for rule in rules}
+    rules = {
+        Layer.APP: [
+            CharacteristicAppTimeRule(),
+        ],
+        Layer.POSIX: [
+            CharacteristicIOTimeRule(is_unoverlapped=unoverlapped_posix_only),
+            CharacteristicIOOpsRule(is_unoverlapped=unoverlapped_posix_only),
+            CharacteristicIOSizeRule(is_unoverlapped=unoverlapped_posix_only),
+            CharacteristicXferSizeRule(rule_key=kc.READ_XFER_SIZE.value),
+            CharacteristicXferSizeRule(rule_key=kc.WRITE_XFER_SIZE.value),
+            CharacteristicProcessCount(rule_key=kc.NODE_COUNT.value),
+            CharacteristicProcessCount(rule_key=kc.APP_COUNT.value),
+            CharacteristicProcessCount(rule_key=kc.PROC_COUNT.value),
+            CharacteristicFileCountRule(),
+            CharacteristicTimePeriodCountRule(),
+            CharacteristicAccessPatternRule(),
+        ],
+    }
+    rule_dict = {rule.rule_key: rule for rule in rules[layer]}
     for excluded_char in exclude_characteristics:
         if excluded_char in rule_dict:
             rule_dict.pop(excluded_char)
     tasks = {}
     for rule, impl in rule_dict.items():
-        tasks[rule] = delayed(impl.handle_task_results)(
-            characteristics={dep: tasks[dep] for dep in impl.deps},
-            dask_key_name=f"characteristics-{rule}",
-            raw_stats=raw_stats,
-            result=impl.define_tasks(main_view=main_view),
-        )
+        if impl.prefer_app_characteristics:
+            if app_characteristics is None:
+                raise ValueError(
+                    f"App characteristics are required for rule {rule} but not provided"
+                )
+            tasks[rule] = delayed(impl.handle_task_results)(
+                characteristics={dep: app_characteristics[dep] for dep in impl.deps},
+                dask_key_name=f"characteristics-{rule}",
+                raw_stats=raw_stats,
+                result=impl.define_tasks(view),
+            )
+        else:
+            tasks[rule] = delayed(impl.handle_task_results)(
+                characteristics={dep: tasks[dep] for dep in impl.deps},
+                dask_key_name=f"characteristics-{rule}",
+                raw_stats=raw_stats,
+                result=impl.define_tasks(view),
+            )
     (characteristics,) = persist(tasks)
     return characteristics
 
@@ -91,7 +112,7 @@ def _assign_behavior(bottlenecks: pd.DataFrame, metric: str):
     for view_name, score in it.product(view_names, scores):
         behavior_key = (view_name, score)
 
-        if not behavior_key in bottlenecks.index:
+        if behavior_key not in bottlenecks.index:
             continue
 
         behaviors = bottlenecks.loc[[behavior_key]]

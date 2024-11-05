@@ -6,7 +6,12 @@ from hydra.conf import HelpConf, JobConf
 from omegaconf import MISSING
 from typing import Any, Dict, List, Optional
 
-from .constants import APP_VIEW_TYPES, POSIX_VIEW_TYPES
+from .constants import VIEW_TYPES
+from .utils.env_utils import get_bool_env_var
+
+
+CHECKPOINT_VIEWS = get_bool_env_var("WISIO_CHECKPOINT_VIEWS", False)
+HASH_CHECKPOINT_NAMES = get_bool_env_var("WISIO_HASH_CHECKPOINT_NAMES", True)
 
 
 @dataclass
@@ -44,6 +49,7 @@ class ClusterConfig:
 @dataclass
 class ExternalClusterConfig(ClusterConfig):
     _target_: str = "wisio.cluster.ExternalCluster"
+    restart_on_connect: Optional[bool] = False
     scheduler_address: Optional[str] = MISSING
 
 
@@ -199,10 +205,8 @@ class Config:
         ]
     )
     analyzer: AnalyzerConfig = MISSING
-    app_metrics: Optional[List[str]] = field(
-        default_factory=lambda: ["io_compute_ratio"]
-    )
-    app_view_types: Optional[List[str]] = field(default_factory=lambda: APP_VIEW_TYPES)
+    app_metrics: Optional[List[str]] = field(default_factory=list)
+    app_view_types: Optional[List[str]] = field(default_factory=lambda: VIEW_TYPES)
     cluster: ClusterConfig = MISSING
     debug: Optional[bool] = False
     exclude_bottlenecks: Optional[List[str]] = field(default_factory=list)
@@ -210,14 +214,14 @@ class Config:
     logical_view_types: Optional[bool] = False
     output: OutputConfig = MISSING
     percentile: Optional[float] = None
-    posix_metrics: Optional[List[str]] = field(default_factory=lambda: ["iops"])
-    posix_view_types: Optional[List[str]] = field(
-        default_factory=lambda: POSIX_VIEW_TYPES
-    )
+    posix_metrics: Optional[List[str]] = field(default_factory=list)
+    posix_view_types: Optional[List[str]] = field(default_factory=lambda: VIEW_TYPES)
     threshold: Optional[int] = None
     time_granularity: Optional[float] = 1e6
+    time_view_type: Optional[str] = None
     trace_path: str = MISSING
     verbose: Optional[bool] = False
+    unoverlapped_posix_only: Optional[bool] = False
 
 
 def init_hydra_config_store() -> None:

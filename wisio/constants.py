@@ -58,7 +58,6 @@ COL_TIME_OVERALL = 'time_overall'
 COL_TIME_RANGE = 'time_range'
 
 
-APP_VIEW_TYPES = ['time_range', 'proc_name', 'step']
 LOGICAL_VIEW_TYPES = [
     ('proc_name', 'app_name'),
     ('proc_name', 'node_name'),
@@ -66,7 +65,11 @@ LOGICAL_VIEW_TYPES = [
     ('file_name', 'file_dir'),
     ('file_name', 'file_pattern'),
 ]
-POSIX_VIEW_TYPES = ['time_range', 'file_name', 'proc_name']  # Order matters!
+VIEW_TYPES = [
+    'file_name',
+    'proc_name',
+    'time_range',
+]
 
 ACC_PAT_SUFFIXES = ['time', 'size', 'count']
 DERIVED_MD_OPS = ['close', 'open', 'seek', 'stat']
@@ -77,6 +80,36 @@ COMPACT_IO_TYPES = ['R', 'W', 'M']
 FILE_PATTERN_PLACEHOLDER = '[0-9]'
 PROC_NAME_SEPARATOR = '#'
 
+HUMANIZED_COLS = dict(
+    acc_pat='Access Pattern',
+    app_io_time='Application I/O Time',
+    app_name='Application',
+    behavior='Behavior',
+    cat='Category',
+    checkpoint_io_time='Checkpoint I/O Time',
+    compute_time='Compute Time',
+    count='Count',
+    file_dir='File Directory',
+    file_name='File',
+    file_pattern='File Pattern',
+    func_id='Function ID',
+    host_name='Host',
+    io_cat='I/O Category',
+    io_time='I/O Time',
+    node_name='Node',
+    proc_name='Process',
+    rank='Rank',
+    read_io_time='Read I/O Time',
+    size='Size',
+    time='Time',
+    time_range='Time Period',
+    u_app_compute_time='Unoverlapped Application Compute Time',
+    u_app_io_time='Unoverlapped Application I/O Time',
+    u_checkpoint_io_time='Unoverlapped Checkpoint I/O Time',
+    u_compute_time='Unoverlapped Compute Time',
+    u_io_time='Unoverlapped I/O Time',
+    u_read_io_time='Unoverlapped Read I/O Time',
+)
 HUMANIZED_METRICS = dict(
     bw='I/O Bandwidth',
     intensity='I/O Intensity',

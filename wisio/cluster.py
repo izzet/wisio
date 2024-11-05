@@ -22,6 +22,7 @@ from .config import (
 
 @dataclass
 class ExternalCluster:
+    restart_on_connect: Optional[bool]
     scheduler_address: str
     local_directory: Optional[str]
 

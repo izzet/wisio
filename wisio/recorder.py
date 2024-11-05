@@ -3,10 +3,11 @@ import json
 import numpy as np
 import pandas as pd
 from dask.distributed import Future, get_client
-from typing import Union
+from typing import List, Union
 
 from .analyzer import Analyzer
 from .constants import IO_CATS
+from .types import ViewType
 
 
 CAT_POSIX = 0
@@ -33,7 +34,11 @@ class RecorderAnalyzer(Analyzer):
         self.global_min_max = self._load_global_min_max(trace_path=trace_path)
         return dd.read_parquet(trace_path)
 
-    def postread_trace(self, traces: dd.DataFrame) -> dd.DataFrame:
+    def postread_trace(
+        self,
+        traces: dd.DataFrame,
+        view_types: List[ViewType],
+    ) -> dd.DataFrame:
         traces['acc_pat'] = traces['acc_pat'].astype(np.uint8)
         traces['count'] = 1
         traces['duration'] = traces['duration'].astype(np.float64)

@@ -25,6 +25,7 @@ from .constants import (
     COL_RANK,
     COL_TIME_RANGE,
     COMPACT_IO_TYPES,
+    HUMANIZED_COLS,
     HUMANIZED_VIEW_TYPES,
     IO_TYPES,
     XFER_SIZE_BINS,
@@ -33,7 +34,6 @@ from .constants import (
     AccessPattern,
 )
 from .types import (
-    BottleneckResult,
     Metric,
     RawStats,
     Rule,
@@ -42,7 +42,6 @@ from .types import (
     RuleResultReason,
     ScoringResult,
     ViewKey,
-    ViewResult,
 )
 from .utils.collection_utils import get_intervals, join_with_and
 from .utils.common_utils import format_number, numerize
@@ -70,6 +69,7 @@ jinja_env.filters['format_number'] = format_number
 class KnownCharacteristics(Enum):
     ACCESS_PATTERN = 'access_pattern'
     APP_COUNT = 'app_count'
+    APP_TIME = 'app_time'
     COMPLEXITY = 'complexity'
     FILE_COUNT = 'file_count'
     IO_COUNT = 'io_count'
@@ -89,6 +89,7 @@ class KnownRules(Enum):
     SIZE_IMBALANCE = 'size_imbalance'
     SMALL_READS = 'small_reads'
     SMALL_WRITES = 'small_writes'
+    UNOVERLAPPED_IO = 'unoverlapped_io'
 
 
 KNOWN_RULES = {
@@ -201,6 +202,18 @@ Average 'read's are {{ (read_size / count) | format_bytes }}, which is smaller t
                 message='''
 Average 'write's are {{ (write_size / count) | format_bytes }}, which is smaller than {{ 1048576 | format_bytes }}.
                 ''',
+            ),
+        ],
+    ),
+    KnownRules.UNOVERLAPPED_IO.value: Rule(
+        name='Unoverlapped I/O',
+        condition='(u_io_time / time) > 0.3',
+        reasons=[
+            RuleReason(
+                condition='(u_io_time / time) > 0.3',
+                message='''
+Unoverlapped I/O time is {{ "%.2f" | format((u_io_time / time) * 100) }}% ({{ "%.2f" | format(u_io_time) }} seconds) of I/O time.
+''',
             ),
         ],
     ),
@@ -559,9 +572,10 @@ class BottleneckRule(RuleHandler):
 
 class CharacteristicRule(RuleHandler):
     deps: List[str] = []
+    prefer_app_characteristics: bool = False
 
     @abc.abstractmethod
-    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
+    def define_tasks(self, view: dd.DataFrame) -> Dict[str, Delayed]:
         raise NotImplementedError
 
     @abc.abstractmethod
@@ -578,14 +592,14 @@ class CharacteristicAccessPatternRule(CharacteristicRule):
     def __init__(self) -> None:
         super().__init__(rule_key=KnownCharacteristics.ACCESS_PATTERN.value)
 
-    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
+    def define_tasks(self, view: dd.DataFrame) -> Dict[str, Delayed]:
         acc_pat_cols = []
         for acc_pat in list(AccessPattern):
             for col_suffix in ACC_PAT_SUFFIXES:
                 col_name = f"{acc_pat.name.lower()}_{col_suffix}"
                 acc_pat_cols.append(col_name)
 
-        return {'acc_pat_sum': main_view[acc_pat_cols].sum()}
+        return {'acc_pat_sum': view[acc_pat_cols].sum()}
 
     def handle_task_results(
         self,
@@ -634,6 +648,43 @@ class CharacteristicAccessPatternRule(CharacteristicRule):
         )
 
 
+class CharacteristicAppTimeRule(CharacteristicRule):
+    def __init__(self) -> None:
+        super().__init__(rule_key=KnownCharacteristics.APP_TIME.value)
+
+    def define_tasks(self, view: dd.DataFrame) -> Dict[str, Delayed]:
+        time_cols = [col for col in view.columns if 'time' in col]
+        view_types = view.index._meta.names
+        tasks = {}
+        if COL_PROC_NAME in view_types:
+            tasks['times'] = view.max()[time_cols]
+        else:
+            tasks['times'] = view.sum()[time_cols]
+        return tasks
+
+    def handle_task_results(
+        self,
+        result: Dict[str, Union[str, int, pd.DataFrame, pd.Series]],
+        characteristics: Dict[str, RuleResult] = None,
+        raw_stats: RawStats = None,
+    ) -> RuleResult:
+        app_time = result['times']
+        job_time = raw_stats['job_time']
+        detail_list = []
+        for time_col, time_value in app_time.items():
+            time_per = f"{time_value/job_time*100:.2f}%"
+            if time_col in HUMANIZED_COLS:
+                time_name = HUMANIZED_COLS[time_col]
+                detail = f"{time_name}: {time_value:.2f} seconds ({time_per})"
+                detail_list.append(detail)
+        return RuleResult(
+            description='App Time',
+            detail_list=detail_list,
+            extra_data=app_time.to_dict(),
+            value_fmt=f"Runtime: {job_time:.2f} seconds (100%)",
+        )
+
+
 class CharacteristicComplexityRule(CharacteristicRule):
     def __init__(self) -> None:
         super().__init__(rule_key=KnownCharacteristics.COMPLEXITY.value)
@@ -643,7 +694,7 @@ class CharacteristicComplexityRule(CharacteristicRule):
             KnownCharacteristics.TIME_PERIOD.value,
         ]
 
-    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
+    def define_tasks(self, view: dd.DataFrame) -> Dict[str, Delayed]:
         tasks = {}
 
         return tasks
@@ -677,8 +728,8 @@ class CharacteristicFileCountRule(CharacteristicRule):
     def __init__(self) -> None:
         super().__init__(rule_key=KnownCharacteristics.FILE_COUNT.value)
 
-    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
-        x = main_view.reset_index()
+    def define_tasks(self, view: dd.DataFrame) -> Dict[str, Delayed]:
+        x = view.reset_index()
 
         tasks = {}
 
@@ -750,15 +801,16 @@ class CharacteristicFileCountRule(CharacteristicRule):
 
 
 class CharacteristicIOOpsRule(CharacteristicRule):
-    def __init__(self) -> None:
+    def __init__(self, is_unoverlapped: bool) -> None:
         super().__init__(rule_key=KnownCharacteristics.IO_COUNT.value)
+        self.is_unoverlapped = is_unoverlapped
 
-    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
+    def define_tasks(self, view: dd.DataFrame) -> Dict[str, Delayed]:
         tasks = {}
-        tasks['total_count'] = main_view['count'].sum()
+        tasks['total_count'] = view['count'].sum()
         for io_type in IO_TYPES:
             count_col = f"{io_type}_count"
-            tasks[count_col] = main_view[count_col].sum()
+            tasks[count_col] = view[count_col].sum()
         return tasks
 
     def handle_task_results(
@@ -781,7 +833,7 @@ class CharacteristicIOOpsRule(CharacteristicRule):
 
         return RuleResult(
             compact_desc=' - '.join(compact_desc),
-            description='I/O Operations',
+            description='Unoverlapped I/O Ops.' if self.is_unoverlapped else 'I/O Ops.',
             detail_list=detail_list,
             extra_data=None,
             object_hash=None,
@@ -792,16 +844,17 @@ class CharacteristicIOOpsRule(CharacteristicRule):
 
 
 class CharacteristicIOSizeRule(CharacteristicRule):
-    def __init__(self) -> None:
+    def __init__(self, is_unoverlapped: bool) -> None:
         super().__init__(rule_key=KnownCharacteristics.IO_SIZE.value)
+        self.is_unoverlapped = is_unoverlapped
 
-    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
+    def define_tasks(self, view: dd.DataFrame) -> Dict[str, Delayed]:
         tasks = {}
-        tasks['total_size'] = main_view['data_size'].sum()
+        tasks['total_size'] = view['data_size'].sum()
         for io_type in IO_TYPES:
             if io_type != 'metadata':
                 size_col = f"{io_type}_size"
-                tasks[size_col] = main_view[size_col].sum()
+                tasks[size_col] = view[size_col].sum()
         return tasks
 
     def handle_task_results(
@@ -838,7 +891,7 @@ class CharacteristicIOSizeRule(CharacteristicRule):
 
         return RuleResult(
             compact_desc=' - '.join(compact_desc),
-            description='I/O Size',
+            description='Unoverlapped I/O Size' if self.is_unoverlapped else 'I/O Size',
             detail_list=detail_list,
             extra_data=None,
             object_hash=None,
@@ -849,28 +902,20 @@ class CharacteristicIOSizeRule(CharacteristicRule):
 
 
 class CharacteristicIOTimeRule(CharacteristicRule):
-    def __init__(self) -> None:
+    def __init__(self, is_unoverlapped: bool) -> None:
         super().__init__(rule_key=KnownCharacteristics.IO_TIME.value)
+        self.deps = [KnownCharacteristics.APP_TIME.value]
+        self.is_unoverlapped = is_unoverlapped
+        self.prefer_app_characteristics = True
 
-    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
-        view_types = main_view.index._meta.names
-
+    def define_tasks(self, view: dd.DataFrame) -> Dict[str, Delayed]:
+        time_cols = [col for col in view.columns if 'time' in col]
+        view_types = view.index._meta.names
         tasks = {}
-
         if COL_PROC_NAME in view_types:
-            tasks['total_time'] = main_view.groupby(['proc_name']).sum()['time'].max()
-
-            for io_type in IO_TYPES:
-                time_col = f"{io_type}_time"
-                tasks[time_col] = main_view.groupby(['proc_name']).sum()[time_col].max()
-
+            tasks['times'] = view.max()[time_cols]
         else:
-            tasks['total_time'] = main_view['time'].sum()
-
-            for io_type in IO_TYPES:
-                time_col = f"{io_type}_time"
-                tasks[time_col] = main_view[time_col].sum()
-
+            tasks['times'] = view.sum()[time_cols]
         return tasks
 
     def handle_task_results(
@@ -879,30 +924,40 @@ class CharacteristicIOTimeRule(CharacteristicRule):
         characteristics: Dict[str, RuleResult] = None,
         raw_stats: RawStats = None,
     ) -> RuleResult:
-        total_time = result['total_time']
-
+        app_time = {}
+        total_unovlp_io_time = 0
+        if not self.is_unoverlapped:
+            # todo(izzet): introduce new config for this
+            # app_time = characteristics[KnownCharacteristics.APP_TIME.value].extra_data
+            # total_unovlp_io_time = app_time['u_io_time']
+            pass
+        total_time_col = 'u_io_time' if self.is_unoverlapped else 'time'
+        total_time = result['times'][total_time_col]
         compact_desc = [f"{total_time:.2f} s"]
         detail_list = []
-
         for i, io_type in enumerate(IO_TYPES):
-            time_col = f"{io_type}_time"
-            time = result[time_col]
+            time_col = (
+                f"u_{io_type}_time" if self.is_unoverlapped else f"{io_type}_time"
+            )
+            time = result['times'][time_col]
             time_per = f"{time/total_time*100:.2f}%"
             compact_desc.append(f"[bold]{COMPACT_IO_TYPES[i]}[/bold]: {time_per}")
-            detail_list.append(
-                f"{io_type.capitalize()} - {time:.2f} seconds ({time_per})"
-            )
-
+            detail = f"{io_type.capitalize()}: {time:.2f} seconds ({time_per})"
+            if f"u_{io_type}_time" in app_time and not self.is_unoverlapped:
+                unovlp_time = app_time[f"u_{io_type}_time"]
+                unovlp_time_per = f"{unovlp_time/time*100:.2f}%"
+                detail += f" - [slate_blue3]Unoverlapped: {unovlp_time:.2f} seconds ({unovlp_time_per})"
+            detail_list.append(detail)
+        value_fmt = f"{total_time:.2f} seconds (100%)"
+        if total_unovlp_io_time > 0 and not self.is_unoverlapped:
+            total_unovlp_io_time_per = f"{total_unovlp_io_time/total_time*100:.2f}%"
+            value_fmt += f" - [slate_blue3]Unoverlapped: {total_unovlp_io_time:.2f} seconds ({total_unovlp_io_time_per})"
         return RuleResult(
             compact_desc=' - '.join(compact_desc),
-            description='I/O Time',
+            description='Unoverlapped I/O Time' if self.is_unoverlapped else 'I/O Time',
             detail_list=detail_list,
-            extra_data=None,
-            object_hash=None,
-            reasons=None,
-            # rule=rule,
             value=total_time,
-            value_fmt=f"{total_time:.2f} seconds",
+            value_fmt=value_fmt,
         )
 
 
@@ -928,8 +983,8 @@ class CharacteristicProcessCount(CharacteristicRule):
                 KnownCharacteristics.IO_TIME.value,
             ]
 
-    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
-        view_types = main_view.index._meta.names
+    def define_tasks(self, view: dd.DataFrame) -> Dict[str, Delayed]:
+        view_types = view.index._meta.names
 
         tasks = {}
 
@@ -942,12 +997,12 @@ class CharacteristicProcessCount(CharacteristicRule):
                 return tasks
 
         if self.col == COL_PROC_NAME:
-            tasks[f"{self.col}s"] = main_view.map_partitions(
+            tasks[f"{self.col}s"] = view.map_partitions(
                 lambda df: df.index.get_level_values(COL_PROC_NAME)
             ).nunique()
         else:
             tasks[f"{self.col}s"] = (
-                main_view.map_partitions(set_proc_name_parts)
+                view.map_partitions(set_proc_name_parts)
                 .reset_index()
                 .groupby([self.col, COL_PROC_NAME])
                 .agg(
@@ -1047,8 +1102,8 @@ class CharacteristicTimePeriodCountRule(CharacteristicRule):
     def __init__(self) -> None:
         super().__init__(rule_key=KnownCharacteristics.TIME_PERIOD.value)
 
-    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
-        x = main_view.reset_index()
+    def define_tasks(self, view: dd.DataFrame) -> Dict[str, Delayed]:
+        x = view.reset_index()
 
         tasks = {}
 
@@ -1068,6 +1123,9 @@ class CharacteristicTimePeriodCountRule(CharacteristicRule):
         num_time_periods = int(result["total_count"])
         compact_desc = f"{num_time_periods:,} {self.pluralize.plural_noun('time period', num_time_periods)}"
         time_granularity = raw_stats["time_granularity"]
+        time_granularity_fmt = f"{time_granularity:,.2f}"
+        if time_granularity % 1e6 == 0:
+            time_granularity_fmt = f"{time_granularity/1e6:,.2f} seconds"
         return RuleResult(
             compact_desc=compact_desc,
             description='Time Periods',
@@ -1076,7 +1134,7 @@ class CharacteristicTimePeriodCountRule(CharacteristicRule):
             object_hash=None,
             reasons=None,
             value=num_time_periods,
-            value_fmt=f"{compact_desc} (Time Granularity: {time_granularity:,})",
+            value_fmt=f"{compact_desc} (Time Granularity: {time_granularity_fmt})",
         )
 
 
@@ -1089,7 +1147,7 @@ class CharacteristicXferSizeRule(CharacteristicRule):
             else 'read'
         )
 
-    def define_tasks(self, main_view: dd.DataFrame) -> Dict[str, Delayed]:
+    def define_tasks(self, view: dd.DataFrame) -> Dict[str, Delayed]:
         tasks = {}
 
         count_col, min_col, max_col, per_col, xfer_col = (
@@ -1100,8 +1158,8 @@ class CharacteristicXferSizeRule(CharacteristicRule):
             'xfer',
         )
 
-        min_view = main_view[main_view[min_col] > 0]
-        max_view = main_view[main_view[max_col] > 0]
+        min_view = view[view[min_col] > 0]
+        max_view = view[view[max_col] > 0]
 
         tasks['min_xfer_size'] = min_view[min_col].min()
         tasks['max_xfer_size'] = max_view[max_col].max()
@@ -1160,9 +1218,20 @@ class CharacteristicXferSizeRule(CharacteristicRule):
                 compact_desc = f"{self._get_xfer_size(min_xfer_size)}-{self._get_xfer_size(max_xfer_size)}"
 
         detail_list = []
+        others_count = 0
+        others_per = 0.0
         for xfer, row in xfer_bins.iterrows():
+            xfer_count = int(row[count_col])
+            xfer_per = row['per'] * 100
+            if xfer_per < 1:
+                others_count += xfer_count
+                others_per += xfer_per
+            else:
+                detail_list.append(f"{xfer}: {xfer_count:,} ops ({xfer_per:.2f}%)")
+
+        if others_count > 0:
             detail_list.append(
-                f"{xfer} - {int(row[count_col]):,} ops ({row['per'] * 100:.2f}%)"
+                f"[bright_black][Others: {others_count:,} ops ({others_per:.2f}%)]"
             )
 
         result = RuleResult(

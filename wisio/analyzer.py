@@ -12,13 +12,20 @@ from dask.delayed import Delayed
 from dask.distributed import fire_and_forget, get_client, wait
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-from .analysis import THRESHOLD_FUNCTIONS, set_metrics, set_metric_scores
+from .analysis import (
+    THRESHOLD_FUNCTIONS,
+    set_metrics,
+    set_metric_scores,
+    set_unoverlapped_times,
+)
 from .analysis_utils import set_file_dir, set_file_pattern, set_proc_name_parts
+from .config import CHECKPOINT_VIEWS, HASH_CHECKPOINT_NAMES
 from .constants import (
     ACC_PAT_SUFFIXES,
     COL_CATEGORY,
     COL_FILE_NAME,
     COL_PROC_NAME,
+    COL_TIME_RANGE,
     DERIVED_MD_OPS,
     LOGICAL_VIEW_TYPES,
     AccessPattern,
@@ -46,6 +53,7 @@ from .utils.file_utils import ensure_dir
 from .utils.json_encoders import NpEncoder
 
 
+CHECKPOINT_CATEGORIES = '_categories'
 CHECKPOINT_MAIN_VIEW = '_main_view'
 CHECKPOINT_METRIC_BOUNDARIES = '_metric_boundaries'
 CHECKPOINT_HLM = '_hlm'
@@ -62,16 +70,11 @@ HLM_COLS = {
     'time_sum': 'time',
 }
 HLM_EXTRA_COLS = ['cat', 'io_cat', 'acc_pat', 'func_id']
-VIEW_AGG = {
-    # 'bw': max,
-    'count': sum,
-    'data_count': sum,
-    # 'intensity': max,
-    # 'iops': max,
-    'size': sum,
-    'time': sum,
-}
-HASH_CHECKPOINT_NAMES = False
+VERSION_HLM = "v2"
+VERSION_LAYERS = "v1"
+VERSION_MAIN_VIEW = "v3"
+VERSION_METRIC_BOUNDARIES = "v4"
+VERSION_VIEWS = "v1"
 WAIT_ENABLED = True
 
 
@@ -106,154 +109,147 @@ class Analyzer(abc.ABC):
         trace_path: str,
         accuracy: AnalysisAccuracy = 'pessimistic',
         app_metrics: List[Metric] = ['io_compute_ratio'],
-        app_view_types: List[ViewType] = ['time_range', 'proc_name', 'step'],
+        app_view_types: List[ViewType] = ['time_range', 'proc_name'],
         exclude_bottlenecks: List[str] = [],
         exclude_characteristics: List[str] = [],
         logical_view_types: bool = False,
         percentile: Optional[float] = None,
         posix_metrics: List[Metric] = ['iops'],
-        posix_view_types: List[ViewType] = ['file_name', 'proc_name', 'time_range'],
+        posix_view_types: List[ViewType] = ['time_range', 'proc_name'],
         threshold: Optional[int] = None,
+        time_view_type: Optional[ViewType] = None,
+        unoverlapped_posix_only: Optional[bool] = False,
     ) -> AnalyzerResultType:
         # Check if both percentile and threshold are none
         if percentile is None and threshold is None:
             raise ValueError('Either percentile or threshold must be defined')
         is_slope_based = threshold is not None
 
-        # Read trace & stats
-        traces = self.read_trace(trace_path=trace_path)
-        raw_stats = self.read_stats(traces=traces)
-        traces = self.postread_trace(traces=traces)
-
-        layers = self.compute_layers(traces=traces)
+        # Check if high-level metrics are checkpointed
+        hlm_view_types = list(set(app_view_types).union(posix_view_types))
+        hlm_checkpoint_name = self.get_checkpoint_name(
+            CHECKPOINT_HLM, *sorted(hlm_view_types)
+        )
+        traces = None
+        raw_stats = None
+        if not self.checkpoint or not self.has_checkpoint(name=hlm_checkpoint_name):
+            # Read trace & stats
+            traces = self.read_trace(trace_path=trace_path)
+            raw_stats = self.read_stats(traces=traces)
+            traces = self.postread_trace(traces=traces, view_types=hlm_view_types)
+            # return traces
+        else:
+            # Restore stats
+            raw_stats = self.restore_extra_data(
+                name=self.get_checkpoint_name(CHECKPOINT_RAW_STATS),
+                fallback=lambda: None,
+            )
 
         # Compute high-level metrics
-        hlm_view_types = list(set(posix_view_types + app_view_types))
-        hlm = self.compute_high_level_metrics(traces=traces, view_types=hlm_view_types)
+        hlm = self.compute_high_level_metrics(
+            checkpoint_name=hlm_checkpoint_name,
+            traces=traces,
+            view_types=hlm_view_types,
+        )
         wait(hlm)
 
         # Compute layers & views
+        categories = self.compute_categories(hlm=hlm)
+        layer_categories = self.arrange_layer_categories(categories)
         hlms = {}
         main_views = {}
-        characteristics = {}
         metric_boundaries = {}
         views = {}
         bottlenecks = {}
-        for layer, categories in self.arrange_layers(layers).items():
+        for layer, categories in layer_categories.items():
             # print(f'Processing layer: {layer}')
             # print(f'Categories: {categories}')
             metrics = posix_metrics if layer == Layer.POSIX else app_metrics
             view_types = posix_view_types if layer == Layer.POSIX else app_view_types
-            l_hlm = hlm  # [hlm[COL_CATEGORY].isin(categories)]
-            l_main_view = self.compute_main_view(
+            layer_hlm = hlm[hlm[COL_CATEGORY].isin(categories)]
+            layer_main_view = self.compute_main_view(
                 layer=layer,
-                hlm=l_hlm,
+                hlm=layer_hlm,
                 view_types=view_types,
             )
-            # l_characteristics = compute_characteristics(
-            #     main_view=l_main_view,
-            #     raw_stats=raw_stats,
-            #     exclude_characteristics=exclude_characteristics,
-            # )
-            l_metric_boundaries = self.compute_metric_boundaries(
+            layer_metric_boundaries = self.compute_metric_boundaries(
                 layer=layer,
-                main_view=l_main_view,
+                main_view=layer_main_view,
                 metrics=metrics,
                 view_types=view_types,
             )
-            l_views = self.compute_views(
+            layer_views = self.compute_views(
                 layer=layer,
-                main_view=l_main_view,
+                main_view=layer_main_view,
                 view_types=view_types,
-                metric_boundaries=l_metric_boundaries,
+                metric_boundaries=layer_metric_boundaries,
                 metrics=metrics,
                 percentile=percentile,
                 threshold=threshold,
                 is_slope_based=is_slope_based,
             )
-            l_bottlenecks = self.detect_bottlenecks(
-                views=l_views,
+            layer_bottlenecks = self.detect_bottlenecks(
+                views=layer_views,
                 metrics=metrics,
-                metric_boundaries=l_metric_boundaries,
+                metric_boundaries=layer_metric_boundaries,
                 is_slope_based=is_slope_based,
                 percentile=percentile,
                 threshold=threshold,
             )
-            hlms[layer] = l_hlm
-            main_views[layer] = l_main_view
-            # characteristics[layer] = l_characteristics
-            metric_boundaries[layer] = l_metric_boundaries
-            views[layer] = l_views
-            bottlenecks[layer] = l_bottlenecks
-            break
+            hlms[layer] = layer_hlm
+            main_views[layer] = layer_main_view
+            metric_boundaries[layer] = layer_metric_boundaries
+            views[layer] = layer_views
+            bottlenecks[layer] = layer_bottlenecks
 
-        return (
-            traces,
-            hlm,
-            hlms,
-            main_views,
-            metric_boundaries,
-            views,
-            bottlenecks,
-        )
+        characteristics = {}
+        for layer in layer_categories:
+            characteristics_view = main_views[layer]
+            if time_view_type:
+                characteristics_view = views[layer][(time_view_type,)]
+            if layer != Layer.APP and unoverlapped_posix_only:
+                characteristics_view = main_views[Layer.APP]
+                if time_view_type:
+                    characteristics_view = views[Layer.APP][(time_view_type,)]
+                characteristics_view = characteristics_view.query('u_io_time > 0')
+            characteristics[layer] = compute_characteristics(
+                layer=layer,
+                view=characteristics_view,
+                raw_stats=raw_stats,
+                app_characteristics=characteristics.get(Layer.APP, None),
+                exclude_characteristics=exclude_characteristics,
+                unoverlapped_posix_only=unoverlapped_posix_only,
+            )
 
         # Return result
-        # return AnalyzerResultType(
-        #     bottleneck_dir=self.bottleneck_dir,
-        #     bottleneck_rules=bottleneck_rules,
-        #     characteristics=characteristics,
-        #     evaluated_views=evaluated_views,
-        #     main_view=main_view,
-        #     metric_boundaries=metric_boundaries,
-        #     raw_stats=raw_stats,
-        #     view_results=view_results,
-        # )
+        return AnalyzerResultType(
+            bottleneck_dir=self.bottleneck_dir,
+            bottleneck_rules={},  # bottleneck_rules,
+            characteristics=characteristics,
+            evaluated_views=views,
+            layers=layer_categories.keys(),
+            main_views=main_views,
+            metric_boundaries=metric_boundaries,
+            raw_stats=raw_stats,
+            view_types=hlm_view_types,
+        )
 
-    def arrange_layers(self, layers: List[str]) -> Dict[str, List[str]]:
+    def arrange_layer_categories(self, layers: List[str]) -> Dict[str, List[str]]:
+        layer_criteria = {
+            'NETCDF': ['NETCDF', 'HDF5', 'MPI', 'MPIIO', 'POSIX', 'STDIO'],
+            'PNETCDF': ['PNETCDF', 'MPI', 'MPIIO', 'POSIX', 'STDIO'],
+            'HDF5': ['HDF5', 'MPI', 'MPIIO', 'POSIX', 'STDIO'],
+            'MPI': ['MPI', 'MPIIO', 'POSIX', 'STDIO'],
+            'POSIX': ['POSIX', 'STDIO'],
+        }
+        uppercase_layers = [layer.upper() for layer in layers]
         arranged_layers = {}
-        # arranged_layers[Layer.POSIX] = filter(
-        #     lambda x: x == 'POSIX' or x == 'STDIO', layers
-        # )
-        # arranged_layers[Layer.MPI] = filter(
-        #     lambda x: x == 'MPI' or x == 'MPIIO', layers
-        # )
-        # arranged_layers[Layer.HDF5] = filter(lambda x: x == 'HDF5', layers)
-        # arranged_layers[Layer.APP] = filter(
-        #     lambda x: x != 'POSIX'
-        #     and x != 'STDIO'
-        #     and x != 'MPI'
-        #     and x != 'MPIIO'
-        #     and x != 'HDF5',
-        #     layers,
-        # )
-        arranged_layers[Layer.APP] = layers
-        upper_layers = [layer.upper() for layer in layers]
-        if 'NETCDF' in upper_layers:
-            arranged_layers[Layer.NETCDF] = filter(
-                lambda x: x.upper()
-                in ['NETCDF', 'HDF5', 'MPI', 'MPIIO', 'POSIX', 'STDIO'],
-                layers,
-            )
-        if 'PNETCDF' in upper_layers:
-            arranged_layers[Layer.PNETCDF] = filter(
-                lambda x: x.upper() in ['PNETCDF', 'MPI', 'MPIIO', 'POSIX', 'STDIO'],
-                layers,
-            )
-        if 'HDF5' in upper_layers:
-            arranged_layers[Layer.HDF5] = filter(
-                lambda x: x.upper() in ['HDF5', 'MPI', 'MPIIO', 'POSIX', 'STDIO'],
-                layers,
-            )
-        if 'MPI' in upper_layers:
-            arranged_layers[Layer.MPI] = filter(
-                lambda x: x.upper() in ['MPI', 'MPIIO', 'POSIX', 'STDIO'], layers
-            )
-        if 'POSIX' in upper_layers:
-            arranged_layers[Layer.POSIX] = filter(
-                lambda x: x.upper() in ['POSIX', 'STDIO'], layers
-            )
-        for layer, categories in arranged_layers.items():
-            arranged_layers[layer] = list(categories)
+        arranged_layers[Layer.APP] = list(layers)
+        for layer, criteria in layer_criteria.items():
+            if layer in uppercase_layers:
+                arranged_layers[getattr(Layer, layer)] = list(
+                    filter(lambda x: x.upper() in criteria, layers)
+                )
         return arranged_layers
 
     def read_stats(self, traces: dd.DataFrame) -> RawStats:
@@ -273,7 +269,11 @@ class Analyzer(abc.ABC):
     def read_trace(self, trace_path: str) -> dd.DataFrame:
         raise NotImplementedError
 
-    def postread_trace(self, traces: dd.DataFrame) -> dd.DataFrame:
+    def postread_trace(
+        self,
+        traces: dd.DataFrame,
+        view_types: List[ViewType],
+    ) -> dd.DataFrame:
         return traces
 
     def additional_high_level_metrics(self) -> Tuple[Dict[str, Any], Dict[str, str]]:
@@ -282,8 +282,11 @@ class Analyzer(abc.ABC):
     def compute_job_time(self, traces: dd.DataFrame) -> float:
         return traces['tend'].max() - traces['tstart'].min()
 
-    def compute_layers(self, traces: dd.DataFrame) -> List[str]:
-        return list(traces[COL_CATEGORY].unique().compute())
+    def compute_categories(self, hlm: dd.DataFrame) -> List[str]:
+        return self.restore_extra_data(
+            self.get_checkpoint_name(CHECKPOINT_CATEGORIES),
+            lambda: self._compute_categories(hlm),
+        )
 
     def compute_total_count(self, traces: dd.DataFrame) -> int:
         return traces.index.count().persist()
@@ -294,9 +297,13 @@ class Analyzer(abc.ABC):
         traces: dd.DataFrame,
         view_types: List[ViewType],
         partition_size: str = '128MB',
+        checkpoint_name: Optional[str] = None,
     ) -> dd.DataFrame:
+        checkpoint_name = checkpoint_name or self.get_checkpoint_name(
+            CHECKPOINT_HLM, *sorted(view_types), VERSION_HLM
+        )
         return self.restore_view(
-            name=self.get_checkpoint_name(CHECKPOINT_HLM, *sorted(view_types)),
+            name=checkpoint_name,
             fallback=lambda: self._compute_high_level_metrics(
                 partition_size=partition_size,
                 traces=traces,
@@ -314,7 +321,7 @@ class Analyzer(abc.ABC):
     ) -> dd.DataFrame:
         return self.restore_view(
             name=self.get_checkpoint_name(
-                CHECKPOINT_MAIN_VIEW, str(layer), *sorted(view_types)
+                CHECKPOINT_MAIN_VIEW, str(layer), *sorted(view_types), VERSION_MAIN_VIEW
             ),
             fallback=lambda: self._compute_main_view(
                 hlm=hlm,
@@ -340,6 +347,7 @@ class Analyzer(abc.ABC):
                 str(layer),
                 *sorted(metrics),
                 *sorted(view_types),
+                VERSION_METRIC_BOUNDARIES,
             ),
             fallback=lambda: self._compute_metric_boundaries(
                 layer=layer,
@@ -441,7 +449,9 @@ class Analyzer(abc.ABC):
         is_slope_based: bool,
     ) -> dd.DataFrame:
         return self.restore_view(
-            name=self.get_checkpoint_name(CHECKPOINT_VIEW, str(layer), *list(view_key)),
+            name=self.get_checkpoint_name(
+                CHECKPOINT_VIEW, str(layer), *list(view_key), VERSION_VIEWS
+            ),
             fallback=lambda: self._compute_view(
                 is_slope_based=is_slope_based,
                 layer=layer,
@@ -450,7 +460,8 @@ class Analyzer(abc.ABC):
                 records=records,
                 view_type=view_type,
             ),
-            write_to_disk=False,
+            read_from_disk=False,
+            write_to_disk=CHECKPOINT_VIEWS,
         )
 
     @event_logger(key=EventType.DETECT_BOTTLENECKS, message='Detect bottlenecks')
@@ -529,7 +540,10 @@ class Analyzer(abc.ABC):
         return os.path.exists(f"{checkpoint_path}/_metadata")
 
     def restore_extra_data(
-        self, name: str, fallback: Callable[[], dict], force=False, persist=False
+        self,
+        name: str,
+        fallback: Callable[[], dict],
+        force=False,
     ):
         if self.checkpoint:
             data_path = f"{self.get_checkpoint_path(name=name)}.json"
@@ -553,6 +567,7 @@ class Analyzer(abc.ABC):
         fallback: Callable[[], dd.DataFrame],
         force=False,
         write_to_disk=True,
+        read_from_disk=True,
     ):
         if self.checkpoint:
             view_path = self.get_checkpoint_path(name=name)
@@ -561,6 +576,8 @@ class Analyzer(abc.ABC):
                 if not write_to_disk:
                     return view
                 self.store_view(name=name, view=view)
+                if not read_from_disk:
+                    return view
                 get_client().cancel(view)
             return dd.read_parquet(view_path)
         return fallback()
@@ -571,8 +588,8 @@ class Analyzer(abc.ABC):
         )
 
     def set_layer_columns(self, layer: Layer, hlm: dd.DataFrame) -> dd.DataFrame:
-        if layer == Layer.POSIX:
-            return self._set_posix_columns(hlm=hlm)
+        # Set POSIX columns for every layer
+        hlm = self._set_posix_columns(hlm=hlm)
         return hlm
 
     @staticmethod
@@ -595,6 +612,9 @@ class Analyzer(abc.ABC):
             return it.permutations(view_types, r + 1)
 
         return it.chain.from_iterable(map(_iter_permutations, range(len(view_types))))
+
+    def _compute_categories(self, hlm: dd.DataFrame) -> List[str]:
+        return list(hlm[COL_CATEGORY].unique())
 
     def _compute_high_level_metrics(
         self,
@@ -650,15 +670,24 @@ class Analyzer(abc.ABC):
         metric_boundaries = {}
         for metric in metrics:
             metric_boundary = None
-            if metric == 'iops' or metric == 'time':
-                if COL_PROC_NAME in view_types:
+            if metric in ['iops', 'io_bw', 'ops', 'time'] or '_time' in metric:
+                time_col = metric if '_time' in metric else 'time'
+                if COL_PROC_NAME in view_types and COL_TIME_RANGE in view_types:
                     metric_boundary = (
-                        main_view.groupby([COL_PROC_NAME]).sum()['time'].max().persist()
+                        main_view[time_col]
+                        .groupby(COL_TIME_RANGE)
+                        .max()
+                        .sum()
+                        .persist()
                     )
                 else:
-                    metric_boundary = main_view['time'].sum().persist()
-            elif metric == 'bw':
-                pass
+                    metric_boundary = main_view[time_col].sum().persist()
+            elif metric == 'io_compute_ratio':
+                metric_boundary = None
+            else:
+                raise NotImplementedError(
+                    f"Metric boundary method not found for: {metric}"
+                )
             metric_boundaries[metric] = metric_boundary
         return metric_boundaries
 
@@ -694,9 +723,15 @@ class Analyzer(abc.ABC):
                 .agg(non_proc_agg_dict)
                 .groupby([view_type])
                 .agg(proc_agg_dict)
+                .map_partitions(set_unoverlapped_times)
             )
         else:
-            view = records.reset_index().groupby([view_type]).agg(non_proc_agg_dict)
+            view = (
+                records.reset_index()
+                .groupby([view_type])
+                .agg(non_proc_agg_dict)
+                .map_partitions(set_unoverlapped_times)
+            )
 
         # Set metric slope
         view = view.map_partitions(

@@ -34,10 +34,10 @@ from .constants import (
     EVENT_DET_BOT,
     EVENT_READ_TRACES,
     EVENT_SAVE_BOT,
+    Layer,
 )
 from .rules import (
     HUMANIZED_KNOWN_RULES,
-    MAX_REASONS,
     BottleneckRule,
     KnownCharacteristics,
 )
@@ -183,7 +183,7 @@ class Output(abc.ABC):
             per_io_time=per_io_time,
         )
 
-        main_view_count = len(result.main_view)
+        main_view_count = len(result.main_view)  # todo
         raw_count = int(raw_stats["total_count"])
 
         perspective_count_tree = {}
@@ -635,76 +635,81 @@ class ConsoleOutput(Output):
         print_objects = []
 
         if self.show_characteristics:
-            char_table = self._create_characteristics_table(
-                characteristics=characteristics,
-                compact=self.compact,
-                job_time=float(raw_stats["job_time"]),
-            )
-            char_panel = Panel(
-                renderable=char_table,
-                title=' '.join([self.name, 'I/O Characteristics']).strip()
-                if self.show_header
-                else None,
-                subtitle=(
-                    '[bold]R[/bold]: Read - '
-                    '[bold]W[/bold]: Write - '
-                    '[bold]M[/bold]: Metadata '
-                ),
-                subtitle_align='left',
-                padding=1,
-            )
-            print_objects.append(char_panel)
-            print_objects.append(Padding(''))
-
-        for metric in metrics:
-            output = self._create_output_type(
-                characteristics=characteristics,
-                group_behavior=self.group_behavior,
-                metric=metric,
-                raw_stats=raw_stats,
-                result=result,
-            )
-
-            bottlenecks = output._bottlenecks
-            if len(self.view_names) > 0:
-                bottlenecks = bottlenecks.query(
-                    'view_name in @view_names',
-                    local_dict={'view_names': self.view_names},
-                )
-            elif self.root_only:
-                bottlenecks = bottlenecks[bottlenecks['view_depth'] == 1]
-
-            bot_table, total_bot_count, total_reason_count = (
-                self._create_bottleneck_table(
-                    bottleneck_rules=result.bottleneck_rules,
-                    bottlenecks=bottlenecks,
+            for layer in result.layers:
+                char_table = self._create_characteristics_table(
+                    characteristics=characteristics[layer],
                     compact=self.compact,
-                    max_bottlenecks=self.max_bottlenecks,
-                    metric=metric,
-                    pluralize=self.pluralize,
+                    job_time=float(raw_stats["job_time"]),
+                    show_job_time=layer == Layer.POSIX,
                 )
-            )
-
-            bot_panel = Panel(
-                bot_table,
-                title=(
-                    f"{humanized_metric_name(metric)}: "
-                    f"{total_bot_count} I/O {self.pluralize.plural_noun('Bottleneck', total_bot_count)} with "
-                    f"{total_reason_count} {self.pluralize.plural_noun('Reason', total_reason_count)}"
+                char_panel = Panel(
+                    renderable=char_table,
+                    title=' '.join([layer, 'I/O Characteristics']).strip()
+                    if self.show_header
+                    else None,
+                    subtitle=(
+                        '[bold]R[/bold]: Read - '
+                        '[bold]W[/bold]: Write - '
+                        '[bold]M[/bold]: Metadata '
+                    )
+                    if layer == Layer.POSIX
+                    else None,
+                    subtitle_align='left',
+                    padding=1,
                 )
-                if self.show_header
-                else None,
-                padding=1,
-            )
-
-            print_objects.append(bot_panel)
-            print_objects.append(Padding(''))
-
-            if self.show_debug:
-                debug_table = self._create_debug_table(metric=metric, output=output)
-                debug_panel = Panel(debug_table, title='Debug', padding=1)
-                print_objects.append(debug_panel)
+                print_objects.append(char_panel)
                 print_objects.append(Padding(''))
+
+        # for layer in result.layers:
+        #     for metric in metrics:
+        #         output = self._create_output_type(
+        #             characteristics=characteristics[layer],
+        #             group_behavior=self.group_behavior,
+        #             metric=metric,
+        #             raw_stats=raw_stats,
+        #             result=result,
+        #         )
+
+        #         bottlenecks = output._bottlenecks
+        #         if len(self.view_names) > 0:
+        #             bottlenecks = bottlenecks.query(
+        #                 'view_name in @view_names',
+        #                 local_dict={'view_names': self.view_names},
+        #             )
+        #         elif self.root_only:
+        #             bottlenecks = bottlenecks[bottlenecks['view_depth'] == 1]
+
+        #         bot_table, total_bot_count, total_reason_count = (
+        #             self._create_bottleneck_table(
+        #                 bottleneck_rules=result.bottleneck_rules,
+        #                 bottlenecks=bottlenecks,
+        #                 compact=self.compact,
+        #                 max_bottlenecks=self.max_bottlenecks,
+        #                 metric=metric,
+        #                 pluralize=self.pluralize,
+        #             )
+        #         )
+
+        #         bot_panel = Panel(
+        #             bot_table,
+        #             title=(
+        #                 f"{humanized_metric_name(metric)}: "
+        #                 f"{total_bot_count} I/O {self.pluralize.plural_noun('Bottleneck', total_bot_count)} with "
+        #                 f"{total_reason_count} {self.pluralize.plural_noun('Reason', total_reason_count)}"
+        #             )
+        #             if self.show_header
+        #             else None,
+        #             padding=1,
+        #         )
+
+        #         print_objects.append(bot_panel)
+        #         print_objects.append(Padding(''))
+
+        #         if self.show_debug:
+        #             debug_table = self._create_debug_table(metric=metric, output=output)
+        #             debug_panel = Panel(debug_table, title='Debug', padding=1)
+        #             print_objects.append(debug_panel)
+        #             print_objects.append(Padding(''))
 
         console = Console(record=True)
         console.print(*print_objects)
@@ -841,15 +846,18 @@ class ConsoleOutput(Output):
         characteristics: Characteristics,
         compact: bool,
         job_time: float,
+        show_job_time: bool = False,
+        app_characteristics: Characteristics = None,
     ):
         char_table = Table(box=None, show_header=False)
         char_table.add_column(style="cyan")
         char_table.add_column()
 
-        if compact:
-            char_table.add_row('Runtime', f"{job_time:.2f} s")
-        else:
-            char_table.add_row('Runtime', f"{job_time:.2f} seconds")
+        if show_job_time:
+            if compact:
+                char_table.add_row('Runtime', f"{job_time:.2f} s")
+            else:
+                char_table.add_row('Runtime', f"{job_time:.2f} seconds")
 
         # Add each key-value pair to the table as a row
         for char in characteristics.values():
