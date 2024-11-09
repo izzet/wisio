@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from dask.delayed import Delayed
 from dask.utils import format_bytes
+from dataclasses import dataclass
 from enum import Enum
 from jinja2 import Environment
 from pathlib import Path
@@ -32,6 +33,7 @@ from .constants import (
     XFER_SIZE_BIN_LABELS,
     XFER_SIZE_BIN_NAMES,
     AccessPattern,
+    Layer,
 )
 from .types import (
     Metric,
@@ -40,7 +42,6 @@ from .types import (
     RuleReason,
     RuleResult,
     RuleResultReason,
-    ScoringResult,
     ViewKey,
 )
 from .utils.collection_utils import get_intervals, join_with_and
@@ -99,24 +100,27 @@ KNOWN_RULES = {
         reasons=[
             RuleReason(
                 condition='(open_time > close_time) & (open_time > seek_time)',
-                message='''
-Overall {{ "%.2f" | format((metadata_time / time) * 100) }}% ({{ "%.2f" | format(metadata_time) }} seconds) of I/O time is spent on metadata access, \
-specifically {{ "%.2f" | format((open_time / time) * 100) }}% ({{ "%.2f" | format(open_time) }} seconds) on the 'open' operation.
-                ''',
+                message=(
+                    'Overall {{ "%.2f" | format((metadata_time / time) * 100) }}% ({{ "%.2f" | format(metadata_time) }} '
+                    'seconds) of I/O time is spent on metadata access, specifically {{ "%.2f" | format((open_time / time) * 100) }}% '
+                    '({{ "%.2f" | format(open_time) }} seconds) on the "open" operation.'
+                ),
             ),
             RuleReason(
                 condition='(close_time > open_time) & (close_time > seek_time)',
-                message='''
-Overall {{ "%.2f" | format((metadata_time / time) * 100) }}% ({{ "%.2f" | format(metadata_time) }} seconds) of I/O time is spent on metadata access, \
-specifically {{ "%.2f" | format((open_time / time) * 100) }}% ({{ "%.2f" | format(open_time) }} seconds) on the 'close' operation.
-                ''',
+                message=(
+                    'Overall {{ "%.2f" | format((metadata_time / time) * 100) }}% ({{ "%.2f" | format(metadata_time) }} '
+                    'seconds) of I/O time is spent on metadata access, specifically {{ "%.2f" | format((open_time / time) * 100) }}% '
+                    '({{ "%.2f" | format(open_time) }} seconds) on the "close" operation.'
+                ),
             ),
             RuleReason(
                 condition='(seek_time > open_time) & (seek_time > close_time)',
-                message='''
-Overall {{ "%.2f" | format((metadata_time / time) * 100) }}% ({{ "%.2f" | format(metadata_time) }} seconds) of I/O time is spent on metadata access, \
-specifically {{ "%.2f" | format((open_time / time) * 100) }}% ({{ "%.2f" | format(open_time) }} seconds) on the 'seek' operation.
-                ''',
+                message=(
+                    'Overall {{ "%.2f" | format((metadata_time / time) * 100) }}% ({{ "%.2f" | format(metadata_time) }} '
+                    'seconds) of I/O time is spent on metadata access, specifically {{ "%.2f" | format((open_time / time) * 100) }}% '
+                    '({{ "%.2f" | format(open_time) }} seconds) on the "seek" operation.'
+                ),
             ),
         ],
     ),
@@ -126,15 +130,17 @@ specifically {{ "%.2f" | format((open_time / time) * 100) }}% ({{ "%.2f" | forma
         reasons=[
             RuleReason(
                 condition='read_count > write_count',
-                message='''
-'read' operations are {{ "%.2f" | format((read_count / count) * 100) }}% ({{ read_count | format_number }} operations) of total I/O operations.
-                ''',
+                message=(
+                    '"read" operations are {{ "%.2f" | format((read_count / count) * 100) }}% '
+                    '({{ read_count | format_number }} operations) of total I/O operations.'
+                ),
             ),
             RuleReason(
                 condition='write_count > read_count',
-                message='''
-'write' operations are {{ "%.2f" | format((write_count / count) * 100) }}% ({{ write_count | format_number }} operations) of total I/O operations.
-                ''',
+                message=(
+                    '"write" operations are {{ "%.2f" | format((write_count / count) * 100) }}% '
+                    '({{ write_count | format_number }} operations) of total I/O operations.'
+                ),
             ),
         ],
     ),
@@ -144,10 +150,10 @@ specifically {{ "%.2f" | format((open_time / time) * 100) }}% ({{ "%.2f" | forma
         reasons=[
             RuleReason(
                 condition='random_count / count > 0.5',
-                message='''
-Issued high number of random operations, specifically {{ "%.2f" | format((random_count / count) * 100) }}% \
-({{ random_count | format_number }} operations) of total I/O operations.
-                ''',
+                message=(
+                    'Issued high number of random operations, specifically {{ "%.2f" | format((random_count / count) * 100) }}% '
+                    '({{ random_count | format_number }} operations) of total I/O operations.'
+                ),
             ),
         ],
     ),
@@ -157,15 +163,17 @@ Issued high number of random operations, specifically {{ "%.2f" | format((random
         reasons=[
             RuleReason(
                 condition='read_size > write_size',
-                message='''
-'read' size is {{ "%.2f" | format((read_size / size) * 100) }}% ({{ read_size | format_bytes }}) of total I/O size.
-                ''',
+                message=(
+                    '"read" size is {{ "%.2f" | format((read_size / size) * 100) }}% '
+                    '({{ read_size | format_bytes }}) of total I/O size.'
+                ),
             ),
             RuleReason(
                 condition='write_size > read_size',
-                message='''
-'write' size is {{ "%.2f" | format((write_size / size) * 100) }}% ({{ write_size | format_bytes }}) of total I/O size.
-                ''',
+                message=(
+                    '"write" size is {{ "%.2f" | format((write_size / size) * 100) }}% '
+                    '({{ write_size | format_bytes }}) of total I/O size.'
+                ),
             ),
         ],
     ),
@@ -175,15 +183,17 @@ Issued high number of random operations, specifically {{ "%.2f" | format((random
         reasons=[
             RuleReason(
                 condition='(read_time / time) > 0.5',
-                message='''
-'read' time is {{ "%.2f" | format((read_time / time) * 100) }}% ({{ "%.2f" | format(read_time) }} seconds) of I/O time.
-                ''',
+                message=(
+                    '"read" time is {{ "%.2f" | format((read_time / time) * 100) }}% '
+                    '({{ "%.2f" | format(read_time) }} seconds) of I/O time.'
+                ),
             ),
             RuleReason(
                 condition='(read_size / count) < 1048576',
-                message='''
-Average 'read's are {{ (read_size / count) | format_bytes }}, which is smaller than {{ 1048576 | format_bytes }}.
-                ''',
+                message=(
+                    'Average "read"s are {{ (read_size / count) | format_bytes }}, '
+                    'which is smaller than {{ 1048576 | format_bytes }}.'
+                ),
             ),
         ],
     ),
@@ -193,27 +203,31 @@ Average 'read's are {{ (read_size / count) | format_bytes }}, which is smaller t
         reasons=[
             RuleReason(
                 condition='(write_time / time) > 0.5',
-                message='''
-'write' time is {{ "%.2f" | format((write_time / time) * 100) }}% ({{ "%.2f" | format(write_time) }} seconds) of I/O time.
-                ''',
+                message=(
+                    '"write" time is {{ "%.2f" | format((write_time / time) * 100) }}% '
+                    '({{ "%.2f" | format(write_time) }} seconds) of I/O time.'
+                ),
             ),
             RuleReason(
                 condition='(write_size / count) < 1048576',
-                message='''
-Average 'write's are {{ (write_size / count) | format_bytes }}, which is smaller than {{ 1048576 | format_bytes }}.
-                ''',
+                message=(
+                    'Average "write"s are {{ (write_size / count) | format_bytes }}, '
+                    'which is smaller than {{ 1048576 | format_bytes }}.'
+                ),
             ),
         ],
     ),
     KnownRules.UNOVERLAPPED_IO.value: Rule(
         name='Unoverlapped I/O',
         condition='(u_io_time / time) > 0.3',
+        layers=[Layer.APP],
         reasons=[
             RuleReason(
                 condition='(u_io_time / time) > 0.3',
-                message='''
-Unoverlapped I/O time is {{ "%.2f" | format((u_io_time / time) * 100) }}% ({{ "%.2f" | format(u_io_time) }} seconds) of I/O time.
-''',
+                message=(
+                    'Unoverlapped I/O time is {{ "%.2f" | format((u_io_time / time) * 100) }}% '
+                    '({{ "%.2f" | format(u_io_time) }} seconds) of I/O time.'
+                ),
             ),
         ],
     ),
@@ -229,345 +243,352 @@ class RuleHandler(abc.ABC):
         self.rule_key = rule_key
 
 
-class BottleneckRule(RuleHandler):
-    def __init__(self, rule_key: str, rule: Rule, verbose: bool = False) -> None:
-        super().__init__(rule_key=rule_key)
-        self.rule = rule
-        self.verbose = verbose
+@dataclass
+class BottleneckRule:
+    rule_key: str
+    rule: Rule
+    verbose: bool = False
 
-    def define_tasks(
-        self,
-        metric: Metric,
-        metric_boundary: dd.core.Scalar,
-        scoring_result: ScoringResult,
-        view_key: ViewKey,
-    ) -> Dict[str, Delayed]:
-        view_type = view_key[-1]
 
-        bottlenecks = scoring_result.scored_view.query(self.rule.condition)
-        bottlenecks['time_overall'] = bottlenecks['time'] / metric_boundary
+# class BottleneckRule(RuleHandler):
+#     def __init__(self, rule_key: str, rule: Rule, verbose: bool = False) -> None:
+#         super().__init__(rule_key=rule_key)
+#         self.rule = rule
+#         self.verbose = verbose
 
-        details = (
-            scoring_result.records_index.to_frame()
-            .reset_index(drop=True)
-            .query(
-                f"{view_type} in @indices", local_dict={'indices': bottlenecks.index}
-            )
-        )
+#     def define_tasks(
+#         self,
+#         metric: Metric,
+#         metric_boundary: dd.core.Scalar,
+#         scoring_result: ScoringResult,
+#         view_key: ViewKey,
+#     ) -> Dict[str, Delayed]:
+#         view_type = view_key[-1]
 
-        tasks = {}
-        tasks['bottlenecks'] = bottlenecks
-        tasks['details'] = details
+#         bottlenecks = scoring_result.scored_view.query(self.rule.condition)
+#         bottlenecks['time_overall'] = bottlenecks['time'] / metric_boundary
 
-        for i, reason in enumerate(self.rule.reasons):
-            tasks[f"reason{i}"] = bottlenecks.eval(reason.condition)
+#         details = (
+#             scoring_result.records_index.to_frame()
+#             .reset_index(drop=True)
+#             .query(
+#                 f"{view_type} in @indices", local_dict={'indices': bottlenecks.index}
+#             )
+#         )
 
-        return tasks
+#         tasks = {}
+#         tasks['bottlenecks'] = bottlenecks
+#         tasks['details'] = details
 
-    def handle_task_results(
-        self,
-        metric: Metric,
-        view_key: ViewKey,
-        result: Dict[str, Union[str, int, pd.DataFrame, pd.Series, pd.Index]],
-    ) -> List[RuleResult]:
-        # t0 = time.perf_counter()
+#         for i, reason in enumerate(self.rule.reasons):
+#             tasks[f"reason{i}"] = bottlenecks.eval(reason.condition)
 
-        view_type = view_key[-1]
+#         return tasks
 
-        bottlenecks = result['bottlenecks']
+#     def handle_task_results(
+#         self,
+#         metric: Metric,
+#         view_key: ViewKey,
+#         result: Dict[str, Union[str, int, pd.DataFrame, pd.Series, pd.Index]],
+#     ) -> List[RuleResult]:
+#         # t0 = time.perf_counter()
 
-        if len(bottlenecks) == 0:
-            return []
+#         view_type = view_key[-1]
 
-        details = result['details'].to_frame(index=False)
-        metric_boundary = result['metric_boundary']
+#         bottlenecks = result['bottlenecks']
 
-        files = {}
-        processes = {}
-        time_periods = {}
+#         if len(bottlenecks) == 0:
+#             return []
 
-        num_files = {}
-        num_ops = bottlenecks[COL_COUNT].to_dict()
-        num_processes = {}
-        num_time_periods = {}
+#         details = result['details'].to_frame(index=False)
+#         metric_boundary = result['metric_boundary']
 
-        # print('handle_task_results t0', time.perf_counter() - t0)
+#         files = {}
+#         processes = {}
+#         time_periods = {}
 
-        # Logical view type fix
-        if view_type == COL_FILE_DIR:
-            details = set_file_dir(df=details.set_index(COL_FILE_NAME))
-        elif view_type == COL_FILE_PATTERN:
-            details = set_file_pattern(df=details.set_index(COL_FILE_NAME))
-        elif view_type in [COL_APP_NAME, COL_NODE_NAME, COL_RANK]:
-            details = set_proc_name_parts(df=details.set_index(COL_PROC_NAME))
+#         num_files = {}
+#         num_ops = bottlenecks[COL_COUNT].to_dict()
+#         num_processes = {}
+#         num_time_periods = {}
 
-        if self.verbose:
-            for col in details.columns:
-                if col in [COL_FILE_NAME, COL_FILE_DIR, COL_FILE_PATTERN]:
-                    files = details.groupby(view_type)[col].unique().to_dict()
-                    num_files = {f: len(files[f]) for f in files}
-                if col in [COL_APP_NAME, COL_NODE_NAME, COL_PROC_NAME, COL_RANK]:
-                    processes = details.groupby(view_type)[col].unique().to_dict()
-                    num_processes = {p: len(processes[p]) for p in processes}
-                if col == COL_TIME_RANGE:
-                    time_periods = details.groupby(view_type)[col].unique().to_dict()
-                    num_time_periods = {t: len(time_periods[t]) for t in time_periods}
-        else:
-            for col in details.columns:
-                if col in [COL_FILE_NAME, COL_FILE_DIR, COL_FILE_PATTERN]:
-                    num_files = details.groupby(view_type)[col].nunique().to_dict()
-                if col in [COL_APP_NAME, COL_NODE_NAME, COL_PROC_NAME, COL_RANK]:
-                    num_processes = details.groupby(view_type)[col].nunique().to_dict()
-                if col == COL_TIME_RANGE:
-                    num_time_periods = (
-                        details.groupby(view_type)[col].nunique().to_dict()
-                    )
+#         # print('handle_task_results t0', time.perf_counter() - t0)
 
-        # print('handle_task_results t1', time.perf_counter() - t0)
+#         # Logical view type fix
+#         if view_type == COL_FILE_DIR:
+#             details = set_file_dir(df=details.set_index(COL_FILE_NAME))
+#         elif view_type == COL_FILE_PATTERN:
+#             details = set_file_pattern(df=details.set_index(COL_FILE_NAME))
+#         elif view_type in [COL_APP_NAME, COL_NODE_NAME, COL_RANK]:
+#             details = set_proc_name_parts(df=details.set_index(COL_PROC_NAME))
 
-        reasoning = {}
-        reasoning_templates = {}
-        for i, reason in enumerate(self.rule.reasons):
-            reasoning[i] = result[f"reason{i}"].to_dict()
-            reasoning_templates[i] = jinja_env.from_string(reason.message)
+#         if self.verbose:
+#             for col in details.columns:
+#                 if col in [COL_FILE_NAME, COL_FILE_DIR, COL_FILE_PATTERN]:
+#                     files = details.groupby(view_type)[col].unique().to_dict()
+#                     num_files = {f: len(files[f]) for f in files}
+#                 if col in [COL_APP_NAME, COL_NODE_NAME, COL_PROC_NAME, COL_RANK]:
+#                     processes = details.groupby(view_type)[col].unique().to_dict()
+#                     num_processes = {p: len(processes[p]) for p in processes}
+#                 if col == COL_TIME_RANGE:
+#                     time_periods = details.groupby(view_type)[col].unique().to_dict()
+#                     num_time_periods = {t: len(time_periods[t]) for t in time_periods}
+#         else:
+#             for col in details.columns:
+#                 if col in [COL_FILE_NAME, COL_FILE_DIR, COL_FILE_PATTERN]:
+#                     num_files = details.groupby(view_type)[col].nunique().to_dict()
+#                 if col in [COL_APP_NAME, COL_NODE_NAME, COL_PROC_NAME, COL_RANK]:
+#                     num_processes = details.groupby(view_type)[col].nunique().to_dict()
+#                 if col == COL_TIME_RANGE:
+#                     num_time_periods = (
+#                         details.groupby(view_type)[col].nunique().to_dict()
+#                     )
 
-        results = []
+#         # print('handle_task_results t1', time.perf_counter() - t0)
 
-        for row in bottlenecks.itertuples():
-            bot_files = list(files.get(row.Index, []))
-            bot_processes = list(processes.get(row.Index, []))
-            bot_time_periods = list(time_periods.get(row.Index, []))
+#         reasoning = {}
+#         reasoning_templates = {}
+#         for i, reason in enumerate(self.rule.reasons):
+#             reasoning[i] = result[f"reason{i}"].to_dict()
+#             reasoning_templates[i] = jinja_env.from_string(reason.message)
 
-            bot_num_files = num_files.get(row.Index, 0)
-            bot_num_ops = num_ops.get(row.Index, 0)
-            bot_num_processes = num_processes.get(row.Index, 0)
-            bot_num_time_periods = num_time_periods.get(row.Index, 0)
+#         results = []
 
-            description = self.describe_bottleneck(
-                files=bot_files,
-                subject=row.Index,
-                metric=metric,
-                metric_boundary=metric_boundary,
-                num_files=bot_num_files,
-                num_ops=bot_num_ops,
-                num_processes=bot_num_processes,
-                num_time_periods=bot_num_time_periods,
-                processes=bot_processes,
-                row=row,
-                time_periods=bot_time_periods,
-                view_type=view_type,
-            )
+#         for row in bottlenecks.itertuples():
+#             bot_files = list(files.get(row.Index, []))
+#             bot_processes = list(processes.get(row.Index, []))
+#             bot_time_periods = list(time_periods.get(row.Index, []))
 
-            row_dict = row._asdict()
+#             bot_num_files = num_files.get(row.Index, 0)
+#             bot_num_ops = num_ops.get(row.Index, 0)
+#             bot_num_processes = num_processes.get(row.Index, 0)
+#             bot_num_time_periods = num_time_periods.get(row.Index, 0)
 
-            if self.verbose:
-                row_dict['files'] = bot_files
-                row_dict['processes'] = bot_processes
-                row_dict['time_periods'] = list(map(int, bot_time_periods))
-                # print(row_dict)
+#             description = self.describe_bottleneck(
+#                 files=bot_files,
+#                 subject=row.Index,
+#                 metric=metric,
+#                 metric_boundary=metric_boundary,
+#                 num_files=bot_num_files,
+#                 num_ops=bot_num_ops,
+#                 num_processes=bot_num_processes,
+#                 num_time_periods=bot_num_time_periods,
+#                 processes=bot_processes,
+#                 row=row,
+#                 time_periods=bot_time_periods,
+#                 view_type=view_type,
+#             )
 
-            row_dict['num_files'] = bot_num_files
-            row_dict['num_ops'] = bot_num_ops
-            row_dict['num_processes'] = bot_num_processes
-            row_dict['num_time_periods'] = bot_num_time_periods
+#             row_dict = row._asdict()
 
-            # Fix index
-            row_dict[view_type] = row_dict['Index']
-            del row_dict['Index']
+#             if self.verbose:
+#                 row_dict['files'] = bot_files
+#                 row_dict['processes'] = bot_processes
+#                 row_dict['time_periods'] = list(map(int, bot_time_periods))
+#                 # print(row_dict)
 
-            reasons = []
-            for i, reason in enumerate(self.rule.reasons):
-                if reasoning[i][row.Index]:
-                    reasons.append(
-                        RuleResultReason(
-                            description=reasoning_templates[i].render(row_dict).strip()
-                        )
-                    )
+#             row_dict['num_files'] = bot_num_files
+#             row_dict['num_ops'] = bot_num_ops
+#             row_dict['num_processes'] = bot_num_processes
+#             row_dict['num_time_periods'] = bot_num_time_periods
 
-            if len(reasons) == 0:
-                reasons.append(
-                    RuleResultReason(
-                        description='No reason found, further investigation needed.'
-                    )
-                )
+#             # Fix index
+#             row_dict[view_type] = row_dict['Index']
+#             del row_dict['Index']
 
-            result = RuleResult(
-                compact_desc=None,
-                description=description,
-                detail_list=None,
-                extra_data=row_dict,
-                object_hash=hash(
-                    '_'.join(
-                        [
-                            '{:,.6f}'.format(row_dict['time']),
-                            f"{row_dict['num_files']}",
-                            f"{row_dict['num_processes']}",
-                            f"{row_dict['num_time_periods']}",
-                        ]
-                    )
-                ),
-                reasons=reasons,
-                value=row_dict['time'],
-                value_fmt='{:,.6f}'.format(row_dict['time']),
-            )
+#             reasons = []
+#             for i, reason in enumerate(self.rule.reasons):
+#                 if reasoning[i][row.Index]:
+#                     reasons.append(
+#                         RuleResultReason(
+#                             description=reasoning_templates[i].render(row_dict).strip()
+#                         )
+#                     )
 
-            results.append(result)
+#             if len(reasons) == 0:
+#                 reasons.append(
+#                     RuleResultReason(
+#                         description='No reason found, further investigation needed.'
+#                     )
+#                 )
 
-        # print('handle_task_results t3', time.perf_counter() - t0, len(results))
+#             result = RuleResult(
+#                 compact_desc=None,
+#                 description=description,
+#                 detail_list=None,
+#                 extra_data=row_dict,
+#                 object_hash=hash(
+#                     '_'.join(
+#                         [
+#                             '{:,.6f}'.format(row_dict['time']),
+#                             f"{row_dict['num_files']}",
+#                             f"{row_dict['num_processes']}",
+#                             f"{row_dict['num_time_periods']}",
+#                         ]
+#                     )
+#                 ),
+#                 reasons=reasons,
+#                 value=row_dict['time'],
+#                 value_fmt='{:,.6f}'.format(row_dict['time']),
+#             )
 
-        return results
+#             results.append(result)
 
-    def describe_bottleneck(
-        self,
-        metric: Metric,
-        num_files: int,
-        num_ops: int,
-        num_processes: int,
-        num_time_periods: int,
-        subject: Union[str, int],
-        time: float,
-        time_overall: float,
-        view_type: str,
-        files=[],
-        processes=[],
-        time_periods=[],
-        compact=False,
-    ) -> str:
-        if num_files > 0 and num_processes > 0 and num_time_periods > 0:
-            nice_view_type = HUMANIZED_VIEW_TYPES[COL_PROC_NAME].lower()
-            accessor_name = ' '
-            accessed = HUMANIZED_VIEW_TYPES[COL_FILE_NAME].lower()
-            accessed_name = ' '
-            if view_type in [COL_FILE_NAME, COL_FILE_DIR, COL_FILE_PATTERN]:
-                accessed = HUMANIZED_VIEW_TYPES[view_type].lower()
-                if num_files == 1:
-                    if compact:
-                        accessed_name = f" ({Path(subject).name}) "
-                    else:
-                        accessed_name = f" ({subject}) "
-            if view_type in [COL_APP_NAME, COL_NODE_NAME, COL_PROC_NAME, COL_RANK]:
-                nice_view_type = HUMANIZED_VIEW_TYPES[view_type].lower()
-                if num_processes == 1:
-                    accessor_name = f" ({subject}) "
+#         # print('handle_task_results t3', time.perf_counter() - t0, len(results))
 
-            accessor_noun = self.pluralize.plural_noun(nice_view_type, num_processes)
-            accessor_verb = self.pluralize.plural_verb('accesses', num_processes)
-            accessed_noun = self.pluralize.plural_noun(accessed, num_files)
-            time_period_name = f" ({subject}) " if view_type == COL_TIME_RANGE else ' '
-            time_period_noun = self.pluralize.plural_noun(
-                'time period', num_time_periods
-            )
+#         return results
 
-            if self.verbose:
-                time_intervals = get_intervals(values=time_periods)
+#     def describe_bottleneck(
+#         self,
+#         metric: Metric,
+#         num_files: int,
+#         num_ops: int,
+#         num_processes: int,
+#         num_time_periods: int,
+#         subject: Union[str, int],
+#         time: float,
+#         time_overall: float,
+#         view_type: str,
+#         files=[],
+#         processes=[],
+#         time_periods=[],
+#         compact=False,
+#     ) -> str:
+#         if num_files > 0 and num_processes > 0 and num_time_periods > 0:
+#             nice_view_type = HUMANIZED_VIEW_TYPES[COL_PROC_NAME].lower()
+#             accessor_name = ' '
+#             accessed = HUMANIZED_VIEW_TYPES[COL_FILE_NAME].lower()
+#             accessed_name = ' '
+#             if view_type in [COL_FILE_NAME, COL_FILE_DIR, COL_FILE_PATTERN]:
+#                 accessed = HUMANIZED_VIEW_TYPES[view_type].lower()
+#                 if num_files == 1:
+#                     if compact:
+#                         accessed_name = f" ({Path(subject).name}) "
+#                     else:
+#                         accessed_name = f" ({subject}) "
+#             if view_type in [COL_APP_NAME, COL_NODE_NAME, COL_PROC_NAME, COL_RANK]:
+#                 nice_view_type = HUMANIZED_VIEW_TYPES[view_type].lower()
+#                 if num_processes == 1:
+#                     accessor_name = f" ({subject}) "
 
-                description = (
-                    f"{self.pluralize.join(processes)} {accessor_noun} {accessor_verb} "
-                    f"{accessed_noun} {self.pluralize.join(files)} "
-                    f"during the {join_with_and(values=time_intervals)}th {time_period_noun} "
-                    f"and {self.pluralize.plural_verb('has', num_processes)} an I/O time of {time:.2f} seconds which is "
-                    f"{time_overall*100:.2f}% of overall I/O time of the workload."
-                )
-            else:
-                # 32 processes access 1 file pattern within 6 time periods and have an I/O time of 2.92 seconds which
-                # is 70.89% of overall I/O time of the workload.
-                description = (
-                    f"{num_processes:,} {accessor_noun}{accessor_name}{accessor_verb} "
-                    f"{num_files:,} {accessed_noun}{accessed_name}"
-                    f"within {num_time_periods:,} {time_period_noun}{time_period_name}"
-                    f"across {num_ops:,} I/O {self.pluralize.plural_noun('operation', num_ops)} "
-                    f"and {self.pluralize.plural_verb('has', num_processes)} an I/O time of {time:.2f} seconds which is "
-                    f"{time_overall*100:.2f}% of overall I/O time of the workload."
-                )
+#             accessor_noun = self.pluralize.plural_noun(nice_view_type, num_processes)
+#             accessor_verb = self.pluralize.plural_verb('accesses', num_processes)
+#             accessed_noun = self.pluralize.plural_noun(accessed, num_files)
+#             time_period_name = f" ({subject}) " if view_type == COL_TIME_RANGE else ' '
+#             time_period_noun = self.pluralize.plural_noun(
+#                 'time period', num_time_periods
+#             )
 
-        else:
-            nice_subject = subject
-            nice_view_type = HUMANIZED_VIEW_TYPES[view_type].lower()
+#             if self.verbose:
+#                 time_intervals = get_intervals(values=time_periods)
 
-            count = 1
-            if view_type in [COL_FILE_NAME, COL_FILE_DIR, COL_FILE_PATTERN]:
-                count = num_files
-                if compact:
-                    nice_subject = Path(subject).name
-            elif view_type in [COL_APP_NAME, COL_NODE_NAME, COL_PROC_NAME, COL_RANK]:
-                count = num_processes
-            else:
-                count = num_time_periods
+#                 description = (
+#                     f"{self.pluralize.join(processes)} {accessor_noun} {accessor_verb} "
+#                     f"{accessed_noun} {self.pluralize.join(files)} "
+#                     f"during the {join_with_and(values=time_intervals)}th {time_period_noun} "
+#                     f"and {self.pluralize.plural_verb('has', num_processes)} an I/O time of {time:.2f} seconds which is "
+#                     f"{time_overall*100:.2f}% of overall I/O time of the workload."
+#                 )
+#             else:
+#                 # 32 processes access 1 file pattern within 6 time periods and have an I/O time of 2.92 seconds which
+#                 # is 70.89% of overall I/O time of the workload.
+#                 description = (
+#                     f"{num_processes:,} {accessor_noun}{accessor_name}{accessor_verb} "
+#                     f"{num_files:,} {accessed_noun}{accessed_name}"
+#                     f"within {num_time_periods:,} {time_period_noun}{time_period_name}"
+#                     f"across {num_ops:,} I/O {self.pluralize.plural_noun('operation', num_ops)} "
+#                     f"and {self.pluralize.plural_verb('has', num_processes)} an I/O time of {time:.2f} seconds which is "
+#                     f"{time_overall*100:.2f}% of overall I/O time of the workload."
+#                 )
 
-            description = (
-                f"{count:,} {self.pluralize.plural_noun(nice_view_type, count)} ({nice_subject}) "
-                f"{self.pluralize.plural_verb('has', count)} an I/O time of {time:.2f} seconds "
-                f"across {num_ops:,} I/O {self.pluralize.plural_noun('operation', num_ops)} "
-                f"which is {time_overall*100:.2f}% of overall I/O time of the workload."
-            )
+#         else:
+#             nice_subject = subject
+#             nice_view_type = HUMANIZED_VIEW_TYPES[view_type].lower()
 
-        return description
+#             count = 1
+#             if view_type in [COL_FILE_NAME, COL_FILE_DIR, COL_FILE_PATTERN]:
+#                 count = num_files
+#                 if compact:
+#                     nice_subject = Path(subject).name
+#             elif view_type in [COL_APP_NAME, COL_NODE_NAME, COL_PROC_NAME, COL_RANK]:
+#                 count = num_processes
+#             else:
+#                 count = num_time_periods
 
-    def describe_reason(self, bottleneck: dict, reason_index: int):
-        reason_template = self.rule.reasons[reason_index].message
-        return jinja_env.from_string(reason_template).render(bottleneck).strip()
+#             description = (
+#                 f"{count:,} {self.pluralize.plural_noun(nice_view_type, count)} ({nice_subject}) "
+#                 f"{self.pluralize.plural_verb('has', count)} an I/O time of {time:.2f} seconds "
+#                 f"across {num_ops:,} I/O {self.pluralize.plural_noun('operation', num_ops)} "
+#                 f"which is {time_overall*100:.2f}% of overall I/O time of the workload."
+#             )
 
-    @staticmethod
-    def _group_similar_behavior(bottlenecks: pd.DataFrame, metric: str, view_type: str):
-        behavior_col = 'behavior'
-        cols = bottlenecks.columns
+#         return description
 
-        if len(bottlenecks) > 1:
-            behavior_cols = cols[cols.str.contains('_min|_max|_count|_size')]
+#     def describe_reason(self, bottleneck: dict, reason_index: int):
+#         reason_template = self.rule.reasons[reason_index].message
+#         return jinja_env.from_string(reason_template).render(bottleneck).strip()
 
-            link_mat = linkage(bottlenecks[behavior_cols], method='single')
-            behavior_labels = fcluster(link_mat, t=10, criterion='distance')
+#     @staticmethod
+#     def _group_similar_behavior(bottlenecks: pd.DataFrame, metric: str, view_type: str):
+#         behavior_col = 'behavior'
+#         cols = bottlenecks.columns
 
-            bottlenecks[behavior_col] = behavior_labels
-        else:
-            bottlenecks[behavior_col] = 1
+#         if len(bottlenecks) > 1:
+#             behavior_cols = cols[cols.str.contains('_min|_max|_count|_size')]
 
-        agg_dict = {col: 'mean' for col in cols}
-        agg_dict[view_type] = list
-        agg_dict.pop(f"{metric}_score")
+#             link_mat = linkage(bottlenecks[behavior_cols], method='single')
+#             behavior_labels = fcluster(link_mat, t=10, criterion='distance')
 
-        return bottlenecks.reset_index().groupby(behavior_col).agg(agg_dict)
+#             bottlenecks[behavior_col] = behavior_labels
+#         else:
+#             bottlenecks[behavior_col] = 1
 
-    @staticmethod
-    def _union_details(
-        details: pd.DataFrame, behavior: int, indices: list, view_type: str
-    ):
-        view_types = details.index.names
+#         agg_dict = {col: 'mean' for col in cols}
+#         agg_dict[view_type] = list
+#         agg_dict.pop(f"{metric}_score")
 
-        filtered_details = details.query(
-            f"{view_type} in @indices", local_dict={'indices': indices}
-        )
+#         return bottlenecks.reset_index().groupby(behavior_col).agg(agg_dict)
 
-        if len(view_types) == 1:
-            # This means there is only one view type
-            detail_groups = filtered_details
+#     @staticmethod
+#     def _union_details(
+#         details: pd.DataFrame, behavior: int, indices: list, view_type: str
+#     ):
+#         view_types = details.index.names
 
-            # So override aggregations accordingly
-            agg_dict = {}
-            agg_dict[view_type] = set
-        else:
-            agg_dict = {col: set for col in SCORING_ORDER[view_type]}
-            agg_dict.pop(view_type)
+#         filtered_details = details.query(
+#             f"{view_type} in @indices", local_dict={'indices': indices}
+#         )
 
-            for agg_key in agg_dict.copy():
-                if agg_key not in view_types:
-                    agg_dict.pop(agg_key)
+#         if len(view_types) == 1:
+#             # This means there is only one view type
+#             detail_groups = filtered_details
 
-            detail_groups = (
-                filtered_details.reset_index().groupby(view_type).agg(agg_dict)
-            )
+#             # So override aggregations accordingly
+#             agg_dict = {}
+#             agg_dict[view_type] = set
+#         else:
+#             agg_dict = {col: set for col in SCORING_ORDER[view_type]}
+#             agg_dict.pop(view_type)
 
-            # Then create unions for other view types
-            agg_dict = {col: lambda x: set.union(*x) for col in agg_dict}
-            agg_dict[view_type] = set
+#             for agg_key in agg_dict.copy():
+#                 if agg_key not in view_types:
+#                     agg_dict.pop(agg_key)
 
-        return (
-            detail_groups.reset_index()
-            .assign(behavior=behavior)
-            .groupby(['behavior'])
-            .agg(agg_dict)
-            .reset_index(drop=True)
-        )
+#             detail_groups = (
+#                 filtered_details.reset_index().groupby(view_type).agg(agg_dict)
+#             )
+
+#             # Then create unions for other view types
+#             agg_dict = {col: lambda x: set.union(*x) for col in agg_dict}
+#             agg_dict[view_type] = set
+
+#         return (
+#             detail_groups.reset_index()
+#             .assign(behavior=behavior)
+#             .groupby(['behavior'])
+#             .agg(agg_dict)
+#             .reset_index(drop=True)
+#         )
 
 
 class CharacteristicRule(RuleHandler):

@@ -5,11 +5,13 @@ import itertools as it
 import json
 import logging
 import math
+import operator
 import os
 from dask import compute, persist
 from dask.base import unpack_collections
 from dask.delayed import Delayed
 from dask.distributed import fire_and_forget, get_client, wait
+from functools import reduce
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from .analysis import (
@@ -34,20 +36,20 @@ from .constants import (
     Layer,
 )
 from .metrics import KNOWN_METRICS
-from .rule_engine import RuleEngine, compute_characteristics
+from .rule_engine import compute_characteristics, reason_bottlenecks
 from .types import (
     AnalyzerResultType,
-    BottleneckResults,
-    Characteristics,
+    BottleneckRules,
+    Bottlenecks,
     Metric,
     RawStats,
     ViewKey,
     ViewResult,
-    ViewResults,
-    ViewResultsPerMetricPerView,
     ViewType,
+    Views,
+    view_name as format_view_name,
 )
-from .utils.dask_utils import EventLogger, event_logger, flatten_column_names
+from .utils.dask_utils import event_logger, flatten_column_names
 from .utils.file_utils import ensure_dir
 from .utils.json_encoders import NpEncoder
 
@@ -69,7 +71,7 @@ HLM_COLS = {
     'time_sum': 'time',
 }
 HLM_EXTRA_COLS = ['cat', 'io_cat', 'acc_pat', 'func_id']
-VERSION_HLM = "v2"
+VERSION_HLM = "v3"
 VERSION_LAYERS = "v1"
 VERSION_MAIN_VIEW = "v3"
 VERSION_METRIC_BOUNDARIES = "v4"
@@ -80,6 +82,7 @@ WAIT_ENABLED = True
 class Analyzer(abc.ABC):
     def __init__(
         self,
+        layer_defs: Dict[str, str],
         bottleneck_dir: str = "",
         checkpoint: bool = True,
         checkpoint_dir: str = "",
@@ -95,6 +98,7 @@ class Analyzer(abc.ABC):
         self.checkpoint = checkpoint
         self.checkpoint_dir = checkpoint_dir
         self.debug = debug
+        self.layer_defs = layer_defs
         self.time_approximate = time_approximate
         self.time_granularity = time_granularity
         self.verbose = verbose
@@ -106,14 +110,13 @@ class Analyzer(abc.ABC):
     def analyze_trace(
         self,
         trace_path: str,
-        app_metrics: List[Metric] = ['io_compute_ratio'],
-        app_view_types: List[ViewType] = ['time_range', 'proc_name'],
+        bottleneck_rules: BottleneckRules,
+        metrics: Dict[Layer, List[Metric]],
+        view_types: Dict[Layer, List[ViewType]],
         exclude_bottlenecks: List[str] = [],
         exclude_characteristics: List[str] = [],
         logical_view_types: bool = False,
         percentile: Optional[float] = None,
-        posix_metrics: List[Metric] = ['iops'],
-        posix_view_types: List[ViewType] = ['time_range', 'proc_name'],
         threshold: Optional[int] = None,
         time_view_type: Optional[ViewType] = None,
         unoverlapped_posix_only: Optional[bool] = False,
@@ -124,10 +127,8 @@ class Analyzer(abc.ABC):
         is_slope_based = threshold is not None
 
         # Check if high-level metrics are checkpointed
-        hlm_view_types = list(set(app_view_types).union(posix_view_types))
-        hlm_checkpoint_name = self.get_checkpoint_name(
-            CHECKPOINT_HLM, *sorted(hlm_view_types)
-        )
+        hlm_view_types = list(sorted(set(reduce(operator.concat, view_types.values()))))
+        hlm_checkpoint_name = self.get_hlm_checkpoint_name(view_types=hlm_view_types)
         traces = None
         raw_stats = None
         if not self.checkpoint or not self.has_checkpoint(name=hlm_checkpoint_name):
@@ -149,46 +150,46 @@ class Analyzer(abc.ABC):
             traces=traces,
             view_types=hlm_view_types,
         )
-        wait(hlm)
+        (hlm, raw_stats) = persist(hlm, raw_stats)
+        wait([hlm, raw_stats])
+
+        # Validate time granularity
+        self.validate_time_granularity(hlm=hlm, view_types=hlm_view_types)
 
         # Compute layers & views
-        categories = self.compute_categories(hlm=hlm)
-        layer_categories = self.arrange_layer_categories(categories)
         hlms = {}
         main_views = {}
+        main_indexes = {}
         metric_boundaries = {}
         views = {}
         bottlenecks = {}
-        for layer, categories in layer_categories.items():
-            # print(f'Processing layer: {layer}')
-            # print(f'Categories: {categories}')
-            metrics = posix_metrics if layer == Layer.POSIX else app_metrics
-            view_types = posix_view_types if layer == Layer.POSIX else app_view_types
-            layer_hlm = hlm[hlm[COL_CATEGORY].isin(categories)]
+        for layer, layer_condition in self.layer_defs.items():
+            layer_hlm = hlm.query(layer_condition)
             layer_main_view = self.compute_main_view(
                 layer=layer,
                 hlm=layer_hlm,
-                view_types=view_types,
+                view_types=view_types[layer],
             )
+            layer_main_index = layer_main_view.index.to_frame().reset_index(drop=True)
             layer_metric_boundaries = self.compute_metric_boundaries(
                 layer=layer,
                 main_view=layer_main_view,
-                metrics=metrics,
-                view_types=view_types,
+                metrics=metrics[layer],
+                view_types=view_types[layer],
             )
             layer_views = self.compute_views(
                 layer=layer,
                 main_view=layer_main_view,
-                view_types=view_types,
+                view_types=view_types[layer],
                 metric_boundaries=layer_metric_boundaries,
-                metrics=metrics,
+                metrics=metrics[layer],
                 percentile=percentile,
                 threshold=threshold,
                 is_slope_based=is_slope_based,
             )
             layer_bottlenecks = self.detect_bottlenecks(
                 views=layer_views,
-                metrics=metrics,
+                metrics=metrics[layer],
                 metric_boundaries=layer_metric_boundaries,
                 is_slope_based=is_slope_based,
                 percentile=percentile,
@@ -196,12 +197,13 @@ class Analyzer(abc.ABC):
             )
             hlms[layer] = layer_hlm
             main_views[layer] = layer_main_view
+            main_indexes[layer] = layer_main_index
             metric_boundaries[layer] = layer_metric_boundaries
             views[layer] = layer_views
             bottlenecks[layer] = layer_bottlenecks
 
         characteristics = {}
-        for layer in layer_categories:
+        for layer in self.layer_defs:
             characteristics_view = main_views[layer]
             if time_view_type:
                 characteristics_view = views[layer][(time_view_type,)]
@@ -219,36 +221,41 @@ class Analyzer(abc.ABC):
                 unoverlapped_posix_only=unoverlapped_posix_only,
             )
 
+        (main_indexes, bottlenecks, characteristics) = persist(
+            main_indexes,
+            bottlenecks,
+            characteristics,
+        )
+        wait([main_indexes, bottlenecks, characteristics])
+
+        (bottlenecks,) = persist(
+            reason_bottlenecks(
+                bottlenecks=bottlenecks,
+                exclude_bottlenecks=exclude_bottlenecks,
+                main_indexes=main_indexes,
+                rules=bottleneck_rules,
+                view_types=view_types,
+            )
+        )
+        wait(bottlenecks)
+
+        flat_bottlenecks = self.flatten_bottlenecks(bottlenecks=bottlenecks)
+
         # Return result
         return AnalyzerResultType(
             bottleneck_dir=self.bottleneck_dir,
-            bottleneck_rules={},  # bottleneck_rules,
+            bottleneck_rules=bottleneck_rules,
+            bottlenecks=bottlenecks,
             characteristics=characteristics,
-            evaluated_views=views,
-            layers=layer_categories.keys(),
+            flat_bottlenecks=flat_bottlenecks,
+            layers=self.layer_defs.keys(),
+            main_indexes=main_indexes,
             main_views=main_views,
             metric_boundaries=metric_boundaries,
             raw_stats=raw_stats,
             view_types=hlm_view_types,
+            views=views,
         )
-
-    def arrange_layer_categories(self, layers: List[str]) -> Dict[str, List[str]]:
-        layer_criteria = {
-            'NETCDF': ['NETCDF', 'HDF5', 'MPI', 'MPIIO', 'POSIX', 'STDIO'],
-            'PNETCDF': ['PNETCDF', 'MPI', 'MPIIO', 'POSIX', 'STDIO'],
-            'HDF5': ['HDF5', 'MPI', 'MPIIO', 'POSIX', 'STDIO'],
-            'MPI': ['MPI', 'MPIIO', 'POSIX', 'STDIO'],
-            'POSIX': ['POSIX', 'STDIO'],
-        }
-        uppercase_layers = [layer.upper() for layer in layers]
-        arranged_layers = {}
-        arranged_layers[Layer.APP] = list(layers)
-        for layer, criteria in layer_criteria.items():
-            if layer in uppercase_layers:
-                arranged_layers[getattr(Layer, layer)] = list(
-                    filter(lambda x: x.upper() in criteria, layers)
-                )
-        return arranged_layers
 
     def read_stats(self, traces: dd.DataFrame) -> RawStats:
         job_time = self.compute_job_time(traces=traces)
@@ -280,12 +287,6 @@ class Analyzer(abc.ABC):
     def compute_job_time(self, traces: dd.DataFrame) -> float:
         return traces['tend'].max() - traces['tstart'].min()
 
-    def compute_categories(self, hlm: dd.DataFrame) -> List[str]:
-        return self.restore_extra_data(
-            self.get_checkpoint_name(CHECKPOINT_CATEGORIES),
-            lambda: self._compute_categories(hlm),
-        )
-
     def compute_total_count(self, traces: dd.DataFrame) -> int:
         return traces.index.count().persist()
 
@@ -297,9 +298,7 @@ class Analyzer(abc.ABC):
         partition_size: str = '128MB',
         checkpoint_name: Optional[str] = None,
     ) -> dd.DataFrame:
-        checkpoint_name = checkpoint_name or self.get_checkpoint_name(
-            CHECKPOINT_HLM, *sorted(view_types), VERSION_HLM
-        )
+        checkpoint_name = checkpoint_name or self.get_hlm_checkpoint_name(view_types)
         return self.restore_view(
             name=checkpoint_name,
             fallback=lambda: self._compute_high_level_metrics(
@@ -319,7 +318,11 @@ class Analyzer(abc.ABC):
     ) -> dd.DataFrame:
         return self.restore_view(
             name=self.get_checkpoint_name(
-                CHECKPOINT_MAIN_VIEW, str(layer), *sorted(view_types), VERSION_MAIN_VIEW
+                CHECKPOINT_MAIN_VIEW,
+                str(layer),
+                *sorted(view_types),
+                str(self.time_granularity),
+                VERSION_MAIN_VIEW + VERSION_HLM,
             ),
             fallback=lambda: self._compute_main_view(
                 hlm=hlm,
@@ -345,7 +348,8 @@ class Analyzer(abc.ABC):
                 str(layer),
                 *sorted(metrics),
                 *sorted(view_types),
-                VERSION_METRIC_BOUNDARIES,
+                str(self.time_granularity),
+                VERSION_METRIC_BOUNDARIES + VERSION_MAIN_VIEW + VERSION_HLM,
             ),
             fallback=lambda: self._compute_metric_boundaries(
                 layer=layer,
@@ -365,8 +369,8 @@ class Analyzer(abc.ABC):
         percentile: Optional[float],
         threshold: Optional[int],
         is_slope_based: bool,
-    ) -> ViewResults:
-        view_results = {}
+    ) -> Views:
+        views = {}
         for view_key in self.view_permutations(view_types=view_types):
             view_type = view_key[-1]
             parent_view_key = view_key[:-1]
@@ -374,9 +378,9 @@ class Analyzer(abc.ABC):
             for parent_view_type in parent_view_key:
                 parent_records = parent_records.query(
                     f"{parent_view_type} in @indices",
-                    local_dict={'indices': view_results[(parent_view_type,)].index},
+                    local_dict={'indices': views[(parent_view_type,)].index},
                 )
-            view_results[view_key] = self.compute_view(
+            views[view_key] = self.compute_view(
                 is_slope_based=is_slope_based,
                 layer=layer,
                 metric_boundaries=metric_boundaries,
@@ -385,7 +389,7 @@ class Analyzer(abc.ABC):
                 view_key=view_key,
                 view_type=view_type,
             )
-        return view_results
+        return views
 
     def compute_logical_views(
         self,
@@ -448,7 +452,11 @@ class Analyzer(abc.ABC):
     ) -> dd.DataFrame:
         return self.restore_view(
             name=self.get_checkpoint_name(
-                CHECKPOINT_VIEW, str(layer), *list(view_key), VERSION_VIEWS
+                CHECKPOINT_VIEW,
+                str(layer),
+                *list(view_key),
+                str(self.time_granularity),
+                VERSION_VIEWS + VERSION_MAIN_VIEW + VERSION_HLM,
             ),
             fallback=lambda: self._compute_view(
                 is_slope_based=is_slope_based,
@@ -465,13 +473,13 @@ class Analyzer(abc.ABC):
     @event_logger(key=EventType.DETECT_BOTTLENECKS, message='Detect bottlenecks')
     def detect_bottlenecks(
         self,
-        views: ViewResults,
+        views: Views,
         metrics: List[Metric],
         metric_boundaries: Dict[Metric, dd.core.Scalar],
         is_slope_based: bool,
         percentile: Optional[float],
         threshold: Optional[int],
-    ) -> BottleneckResults:
+    ) -> Bottlenecks:
         bottlenecks = {}
         for view_key, view in views.items():
             bottlenecks[view_key] = {}
@@ -511,18 +519,23 @@ class Analyzer(abc.ABC):
             f"{query_col} >= @percentile",
             local_dict={'percentile': percentile},
         )
-        # indices = critical_view.index.unique()
-        # records = records.query(
-        #     f"{view_type} in @indices",
-        #     local_dict={'indices': indices},
-        # )
-        # return ViewResult(
-        #     critical_view=critical_view,
-        #     metric=metric,
-        #     records=records.persist(),
-        #     view=view,
-        #     view_type=view_type,
-        # )
+
+    @staticmethod
+    def flatten_bottlenecks(bottlenecks: Dict[Layer, Bottlenecks]) -> dd.DataFrame:
+        flattened_bottlenecks = []
+        for layer in bottlenecks:
+            for view_key in bottlenecks[layer]:
+                for metric in bottlenecks[layer][view_key]:
+                    view = bottlenecks[layer][view_key][metric]
+                    view['layer'] = layer
+                    view['metric'] = metric
+                    view['view_depth'] = len(view_key)
+                    view['view_name'] = format_view_name(view_key, '.')
+                    view.index = view.index.rename('subject')
+                    view = view.reset_index()
+                    view['subject'] = view['subject'].astype(str)
+                    flattened_bottlenecks.append(view)
+        return dd.concat(flattened_bottlenecks)
 
     def get_checkpoint_name(self, *args):
         checkpoint_name = "_".join(args).lower()
@@ -533,9 +546,20 @@ class Analyzer(abc.ABC):
     def get_checkpoint_path(self, name: str):
         return f"{self.checkpoint_dir}/{name}"
 
+    def get_hlm_checkpoint_name(self, view_types: List[ViewType]) -> str:
+        return self.get_checkpoint_name(
+            CHECKPOINT_HLM,
+            *sorted(view_types),
+            str(self.time_granularity),
+            VERSION_HLM,
+        )
+
     def has_checkpoint(self, name: str):
         checkpoint_path = self.get_checkpoint_path(name=name)
         return os.path.exists(f"{checkpoint_path}/_metadata")
+
+    def read_bottlenecks(self):
+        return dd.read_parquet(self.bottleneck_dir)
 
     def restore_extra_data(
         self,
@@ -604,12 +628,33 @@ class Analyzer(abc.ABC):
             write_metadata_file=True,
         )
 
+    def validate_time_granularity(self, hlm: dd.DataFrame, view_types: List[ViewType]):
+        if 'io_time' in hlm.columns:
+            max_io_time = hlm.groupby(view_types)['io_time'].sum().max().compute()
+            if max_io_time > (self.time_granularity / 1e6):
+                raise ValueError(
+                    f"The max 'io_time' exceeds the 'time_granularity' '{int(self.time_granularity / 1e6)}e6'. "
+                    f"Please adjust the 'time_granularity' to '{int(2 * max_io_time)}e6' and rerun the analyzer."
+                )
+
     @staticmethod
     def view_permutations(view_types: List[ViewType]):
         def _iter_permutations(r: int):
             return it.permutations(view_types, r + 1)
 
         return it.chain.from_iterable(map(_iter_permutations, range(len(view_types))))
+
+    def write_bottlenecks(
+        self,
+        flat_bottlenecks: dd.DataFrame,
+        compute=True,
+        write_metadata_file=True,
+    ):
+        flat_bottlenecks.to_parquet(
+            self.bottleneck_dir,
+            compute=compute,
+            write_metadata_file=write_metadata_file,
+        )
 
     def _compute_categories(self, hlm: dd.DataFrame) -> List[str]:
         return list(hlm[COL_CATEGORY].unique())

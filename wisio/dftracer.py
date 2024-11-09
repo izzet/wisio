@@ -25,7 +25,7 @@ from .constants import (
     IOCategory,
     Layer,
 )
-from .types import Metric, ViewType
+from .types import ViewType
 
 
 CAT_POSIX = 'POSIX'
@@ -36,12 +36,6 @@ IGNORED_CALLS = [
     "DLIOBenchmark._train",
     "DLIOBenchmark.initialize",
     "DLIOBenchmark.run",
-]
-IGNORED_CATEGORIES = [
-    # "ai_framework",
-    "config",
-    "dftracer",
-    # "dlio_benchmark",
 ]
 PFW_COL_MAPPING = {
     'name': COL_FUNC_ID,
@@ -650,13 +644,6 @@ class DFTracerAnalyzer(Analyzer):
 
     def compute_job_time(self, traces: dd.DataFrame) -> float:
         return (traces['te'].max() - traces['ts'].min()) / DFTRACER_TIME_RESOLUTION
-
-    def compute_categories(self, hlm: dd.DataFrame) -> dd.DataFrame:
-        categories = super().compute_categories(hlm)
-        for category in IGNORED_CATEGORIES:
-            if category in categories:
-                categories.remove(category)
-        return categories
 
     def set_layer_columns(self, layer: Layer, hlm: dd.DataFrame) -> dd.DataFrame:
         hlm = super().set_layer_columns(layer, hlm)

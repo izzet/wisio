@@ -28,7 +28,10 @@ Metric = Literal[
 ]
 ViewType = Literal['file_name', 'host_name', 'proc_name', 'step', 'time_range']
 ViewKey = Union[
-    Tuple[ViewType], Tuple[ViewType, ViewType], Tuple[ViewType, ViewType, ViewType]
+    Tuple[ViewType],
+    Tuple[ViewType, ViewType],
+    Tuple[ViewType, ViewType, ViewType],
+    Tuple[ViewType, ViewType, ViewType, ViewType],
 ]
 
 
@@ -44,13 +47,6 @@ class AnalysisRuntimeConfig:
     threshold: float
     verbose: bool
     working_dir: str
-
-
-@dataclass
-class ScoringResult:
-    critical_view: dd.DataFrame
-    records_index: dd.Index
-    scored_view: dd.DataFrame
 
 
 @dataclass
@@ -70,8 +66,8 @@ class RuleReason:
 class Rule:
     name: str
     condition: str
+    layers: Optional[List[Layer]] = None
     reasons: Optional[List[RuleReason]] = None
-    # source: Optional[str]
 
 
 @dataclass
@@ -122,19 +118,16 @@ class ViewResult:
     view_type: ViewType
 
 
+MainIndex = dd.DataFrame
 MainView = dd.DataFrame
+View = dd.DataFrame
 
+BottleneckRules = Dict[str, Rule]
+Bottlenecks = Dict[ViewKey, Dict[Metric, View]]
 Characteristics = Dict[str, RuleResult]
-
-ScoringPerView = Dict[ViewKey, ScoringResult]
-ScoringPerViewPerMetric = Dict[Metric, ScoringPerView]
-
-ViewResults = Dict[ViewKey, dd.DataFrame]
-
-BottleneckResults = Dict[ViewKey, Dict[Metric, dd.DataFrame]]
-
-ViewResultsPerMetric = Dict[Metric, ViewResult]
-ViewResultsPerMetricPerView = Dict[ViewKey, ViewResultsPerMetric]
+MetricBoundary = Union[int, float]
+MetricBoundaries = Dict[Metric, MetricBoundary]
+Views = Dict[ViewKey, View]
 
 
 @dataclass
@@ -236,15 +229,17 @@ class OutputType:
 @dataclass
 class AnalyzerResultType:
     bottleneck_dir: str
-    bottleneck_rules: dict
+    bottleneck_rules: BottleneckRules
+    bottlenecks: Dict[Layer, Bottlenecks]
     characteristics: Dict[Layer, Characteristics]
-    evaluated_views: Dict[Layer, ScoringPerViewPerMetric]
+    flat_bottlenecks: dd.DataFrame
     layers: List[Layer]
+    main_indexes: Dict[Layer, MainIndex]
     main_views: Dict[Layer, MainView]
-    metric_boundaries: Dict[Layer, Dict[Metric, Union[int, float]]]
+    metric_boundaries: Dict[Layer, MetricBoundaries]
     raw_stats: RawStats
     view_types: List[ViewType]
-    # view_results: ViewResultsPerViewPerMetric
+    views: Dict[Layer, Views]
 
 
 def humanized_metric_name(metric: Metric):

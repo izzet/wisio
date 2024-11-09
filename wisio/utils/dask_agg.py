@@ -2,14 +2,24 @@ import dask.dataframe as dd
 import itertools as it
 import numpy as np
 import portion as P
+
 from ..utils.collection_utils import deepflatten
+
+
+def nunique():
+    return dd.Aggregation(
+        name="nunique",
+        chunk=lambda s: s.apply(lambda x: list(set(x))),
+        agg=lambda s0: s0.obj.groupby(level=list(range(s0.obj.index.nlevels))).sum(),
+        finalize=lambda s1: s1.apply(lambda final: len(set(final))),
+    )
 
 
 def unique():
     return dd.Aggregation(
         'unique',
         lambda s: s.apply(set),
-        lambda s0: s0.apply(lambda x: list(set(it.chain.from_iterable(x))))
+        lambda s0: s0.apply(lambda x: list(set(it.chain.from_iterable(x)))),
     )
 
 
@@ -19,12 +29,14 @@ def union_portions():
         for x in s:
             emp = emp | x
         return emp
+
     def fin(s):
         val = 0.0
         for i in s:
             if not i.is_empty():
                 val += i.upper - i.lower
         return val
+
     return dd.Aggregation(
         'portion',
         union_s,

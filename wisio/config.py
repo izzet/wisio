@@ -6,7 +6,8 @@ from hydra.conf import HelpConf, JobConf
 from omegaconf import MISSING
 from typing import Any, Dict, List, Optional
 
-from .constants import VIEW_TYPES
+from .constants import VIEW_TYPES, Layer
+from .rules import KNOWN_RULES, Rule
 from .utils.env_utils import get_bool_env_var
 
 
@@ -19,6 +20,7 @@ class AnalyzerConfig:
     bottleneck_dir: Optional[str] = "${hydra:runtime.output_dir}/bottlenecks"
     checkpoint: Optional[bool] = True
     checkpoint_dir: Optional[str] = "${hydra:runtime.output_dir}/checkpoints"
+    layer_defs: Dict[str, str] = MISSING
     time_approximate: Optional[bool] = True
     time_granularity: Optional[float] = MISSING
 
@@ -32,6 +34,13 @@ class DarshanAnalyzerConfig(AnalyzerConfig):
 @dataclass
 class DFTracerAnalyzerConfig(AnalyzerConfig):
     _target_: str = "wisio.dftracer.DFTracerAnalyzer"
+    layer_defs: Dict[str, str] = field(
+        default_factory=lambda: {
+            Layer.APP: '~cat.isin(["config", "dftracer"])',
+            Layer.DATALOADER: 'cat.isin(["data_loader", "POSIX", "STDIO"])',
+            Layer.POSIX: 'cat.isin(["POSIX", "STDIO"])',
+        }
+    )
     time_granularity: Optional[float] = 1e6
 
 
@@ -61,13 +70,13 @@ class JobQueueClusterSchedulerConfig:
 
 @dataclass
 class JobQueueClusterConfig(ClusterConfig):
-    cores: int = 16
+    cores: int = 16  # ncores
     death_timeout: Optional[int] = 60
     job_directives_skip: Optional[List[str]] = field(default_factory=list)
     job_extra_directives: Optional[List[str]] = field(default_factory=list)
     log_directory: Optional[str] = ""
     memory: Optional[str] = None
-    processes: Optional[int] = 1
+    processes: Optional[int] = 1  # nnodes
     scheduler_options: Optional[JobQueueClusterSchedulerConfig] = field(
         default_factory=JobQueueClusterSchedulerConfig
     )
@@ -205,22 +214,27 @@ class Config:
         ]
     )
     analyzer: AnalyzerConfig = MISSING
-    app_metrics: Optional[List[str]] = field(default_factory=list)
-    app_view_types: Optional[List[str]] = field(default_factory=lambda: VIEW_TYPES)
+    bottleneck_rules: Optional[Dict[str, Rule]] = field(
+        default_factory=lambda: KNOWN_RULES
+    )
     cluster: ClusterConfig = MISSING
     debug: Optional[bool] = False
     exclude_bottlenecks: Optional[List[str]] = field(default_factory=list)
     exclude_characteristics: Optional[List[str]] = field(default_factory=list)
     logical_view_types: Optional[bool] = False
+    metrics: Optional[Dict[Layer, List[str]]] = field(
+        default_factory=lambda: {Layer.POSIX: ["iops"]}
+    )
     output: OutputConfig = MISSING
     percentile: Optional[float] = None
-    posix_metrics: Optional[List[str]] = field(default_factory=list)
-    posix_view_types: Optional[List[str]] = field(default_factory=lambda: VIEW_TYPES)
     threshold: Optional[int] = None
     time_granularity: Optional[float] = 1e6
     time_view_type: Optional[str] = None
     trace_path: str = MISSING
     verbose: Optional[bool] = False
+    view_types: Optional[Dict[Layer, List[str]]] = field(
+        default_factory=lambda: {Layer.POSIX: VIEW_TYPES}
+    )
     unoverlapped_posix_only: Optional[bool] = False
 
 

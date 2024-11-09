@@ -1,6 +1,6 @@
 import numpy as np
 from enum import Enum, auto
-from .utils.enum_utils import AutoStrEnum
+from strenum import StrEnum
 
 
 class AccessPattern(Enum):
@@ -8,7 +8,7 @@ class AccessPattern(Enum):
     RANDOM = 1
 
 
-class EventType(AutoStrEnum):
+class EventType(StrEnum):
     ATTACH_REASONS = auto()
     COMPUTE_HLM = auto()
     COMPUTE_MAIN_VIEW = auto()
@@ -29,8 +29,9 @@ class IOCategory(Enum):
     METADATA = 3
 
 
-class Layer(AutoStrEnum):
+class Layer(StrEnum):
     APP = auto()
+    DATALOADER = auto()
     NETCDF = auto()
     PNETCDF = auto()
     HDF5 = auto()

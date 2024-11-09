@@ -35,13 +35,14 @@ from .rules import (
     KnownCharacteristics as kc,
 )
 from .types import (
+    BottleneckRules,
+    Bottlenecks,
     Characteristics,
     Metric,
     RawStats,
     RuleResult,
-    ScoringPerViewPerMetric,
-    ScoringResult,
     ViewKey,
+    Views,
     ViewType,
     view_name as format_view_name,
 )
@@ -59,6 +60,7 @@ def compute_characteristics(
         Layer.APP: [
             CharacteristicAppTimeRule(),
         ],
+        Layer.DATALOADER: [],
         Layer.POSIX: [
             CharacteristicIOTimeRule(is_unoverlapped=unoverlapped_posix_only),
             CharacteristicIOOpsRule(is_unoverlapped=unoverlapped_posix_only),
@@ -99,6 +101,57 @@ def compute_characteristics(
             )
     (characteristics,) = persist(tasks)
     return characteristics
+
+
+def reason_bottlenecks(
+    bottlenecks: Dict[Layer, Bottlenecks],
+    main_indexes: Dict[Layer, dd.DataFrame],
+    rules: BottleneckRules,
+    view_types: Dict[Layer, List[ViewType]],
+    exclude_bottlenecks: List[str] = [],
+) -> Dict[Layer, Bottlenecks]:
+    reasoned_bottlenecks = {}
+    for layer in bottlenecks:
+        layer_rules = dict(rules)
+        for rule, rule_def in rules.items():
+            if rule_def.layers and layer not in rule_def.layers:
+                del layer_rules[rule]
+        reasoned_bottlenecks[layer] = {}
+        for view_key in bottlenecks[layer]:
+            reasoned_bottlenecks[layer][view_key] = {}
+            for metric in bottlenecks[layer][view_key]:
+                view = bottlenecks[layer][view_key][metric]
+                detail_index = main_indexes[layer].copy()
+                for view_type in view_key:
+                    detail_index = detail_index.query(
+                        f"{view_type} in @view_index",
+                        local_dict={
+                            "view_index": bottlenecks[layer][(view_type,)][metric].index
+                        },
+                    )
+                view_type = view_key[-1]
+                for detail_view_type in view_types[layer]:
+                    detail_view = detail_index.groupby(view_type)[
+                        detail_view_type
+                    ].nunique()
+                    detail_view.name = f"n_{detail_view_type}"
+                    view = view.merge(detail_view.to_frame())
+                reasoned_bottlenecks[layer][view_key][metric] = view.map_partitions(
+                    _set_bottleneck_reasons, rules=layer_rules
+                )
+    return reasoned_bottlenecks
+
+
+def _set_bottleneck_reasons(bottlenecks: pd.DataFrame, rules: BottleneckRules):
+    for rule_key, rule_def in rules.items():
+        rule_result = bottlenecks.eval(rule_def.condition)
+        rule_result.name = f"b_{rule_key}"
+        bottlenecks = bottlenecks.join(rule_result)
+        for i, reason in enumerate(rule_def.reasons):
+            reason_result = bottlenecks.eval(reason.condition)
+            reason_result.name = f"b_{rule_key}_{i}"
+            bottlenecks = bottlenecks.join(reason_result)
+    return bottlenecks
 
 
 def _assign_behavior(bottlenecks: pd.DataFrame, metric: str):
@@ -145,7 +198,7 @@ def _assign_behavior(bottlenecks: pd.DataFrame, metric: str):
 class RuleEngine(object):
     def __init__(
         self,
-        rules: Dict[ViewType, List[str]],
+        rules: BottleneckRules,
         raw_stats: RawStats,
         verbose: bool = False,
     ) -> None:
@@ -155,7 +208,7 @@ class RuleEngine(object):
 
     def process_bottlenecks(
         self,
-        evaluated_views: ScoringPerViewPerMetric,
+        views: Views,
         group_behavior: bool,
         metric_boundaries: Dict[Metric, dd.core.Scalar],
         exclude_bottlenecks: List[str] = [],
@@ -170,10 +223,10 @@ class RuleEngine(object):
 
         bottlenecks = []
 
-        for metric in evaluated_views:
-            for view_key in evaluated_views[metric]:
-                scored_view = evaluated_views[metric][view_key].scored_view
-                records_index = evaluated_views[metric][view_key].records_index
+        for metric in views:
+            for view_key in views[metric]:
+                scored_view = views[metric][view_key].scored_view
+                records_index = views[metric][view_key].records_index
                 bottlenecks.append(
                     scored_view.map_partitions(
                         self._assign_bottlenecks,
@@ -303,7 +356,7 @@ class RuleEngine(object):
 
     @staticmethod
     def _define_bottleneck_tasks(
-        zipped: Tuple[str, str, ViewKey, ScoringResult],
+        zipped: Tuple[str, str, ViewKey, Views],
         rules: Dict[str, BottleneckRule],
         metric_boundaries: Dict[Metric, dd.core.Scalar],
     ):
