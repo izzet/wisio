@@ -50,6 +50,7 @@ dftracer = ["zindex_py==0.0.2"]
 [project.scripts]
 wisio = "wisio.__main__:main"
 wisio-cluster = "wisio.cluster:main"
+wisio-plot = "wisio.plots:main"
 
 [project.urls]
 documentation = "https://grc.iit.edu/docs/category/wisio/"
