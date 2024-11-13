@@ -45,7 +45,7 @@ dependencies = [
 
 [project.optional-dependencies]
 darshan = ["darshan>=3.4"]
-dftracer = ["zindex_py==0.0.2"]
+dftracer = ["portion>=2.4", "zindex_py==0.0.2"]
 
 [project.scripts]
 wisio = "wisio.__main__:main"
