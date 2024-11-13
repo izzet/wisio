@@ -219,11 +219,11 @@ KNOWN_RULES = {
     ),
     KnownRules.UNOVERLAPPED_IO.value: Rule(
         name='Unoverlapped I/O',
-        condition='(u_io_time / time) > 0.3',
+        condition='(u_io_time / time) > 0.5',
         layers=[Layer.APP],
         reasons=[
             RuleReason(
-                condition='(u_io_time / time) > 0.3',
+                condition='(u_io_time / time) > 0.5',
                 message=(
                     'Unoverlapped I/O time is {{ "%.2f" | format((u_io_time / time) * 100) }}% '
                     '({{ "%.2f" | format(u_io_time) }} seconds) of I/O time.'
