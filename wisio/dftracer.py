@@ -1,6 +1,6 @@
 import dask
 import dask.dataframe as dd
-import intervals as I
+import portion as I
 import math
 import json
 import logging
@@ -30,6 +30,24 @@ from .types import ViewType
 
 CAT_POSIX = 'POSIX'
 CAT_STDIO = 'STDIO'
+COND_APP = {
+    "cat": {"IO"},
+    "name": {
+        "NPZReader.read_index",
+        "TFReader.parse_image",
+        "__getitem__",
+        "checkpoint",
+        "read_index",
+    },
+}
+COND_COMPUTE = {
+    "cat": {"compute"},
+    "name": {"compute", "cpu"},
+}
+COND_IO = {
+    "cat": {CAT_POSIX, CAT_STDIO},
+    "name": set(),
+}
 DFTRACER_TIME_RESOLUTION = 1e6
 IGNORED_CALLS = [
     "DLIOBenchmark.__init__",
@@ -108,6 +126,22 @@ def get_conditions_deepspeed(json_obj):
     return app_cond, compute_cond, io_cond
 
 
+def get_conditions_generic(json_obj: dict):
+    app_cond = any(
+        any(cond in json_obj[prop] for cond in conditions)
+        for prop, conditions in COND_APP.items()
+    )
+    compute_cond = any(
+        any(cond in json_obj[prop] for cond in conditions)
+        for prop, conditions in COND_COMPUTE.items()
+    )
+    io_cond = any(
+        any(cond in json_obj[prop] for cond in conditions)
+        for prop, conditions in COND_IO.items()
+    )
+    return app_cond, compute_cond, io_cond
+
+
 def io_columns(time_approximate=True):
     return {
         # "compute_time": "string" if not time_approximate else np.float64,
@@ -136,7 +170,8 @@ def io_function(json_object, current_dict, time_approximate, condition_fn):
     d["phase"] = 0
     if not condition_fn:
         # condition_fn = get_conditions_default
-        condition_fn = get_conditions_deepspeed
+        # condition_fn = get_conditions_deepspeed
+        condition_fn = get_conditions_generic
     app_io_cond, compute_cond, io_cond = condition_fn(json_object)
     if time_approximate:
         d["total_time"] = 0
