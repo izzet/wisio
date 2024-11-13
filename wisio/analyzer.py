@@ -75,6 +75,7 @@ VERSION_HLM = "v3"
 VERSION_LAYERS = "v1"
 VERSION_MAIN_VIEW = "v3"
 VERSION_METRIC_BOUNDARIES = "v4"
+VERSION_STATS = "v1"
 VERSION_VIEWS = "v1"
 WAIT_ENABLED = True
 
@@ -140,7 +141,7 @@ class Analyzer(abc.ABC):
         else:
             # Restore stats
             raw_stats = self.restore_extra_data(
-                name=self.get_checkpoint_name(CHECKPOINT_RAW_STATS),
+                name=self.get_stats_checkpoint_name(),
                 fallback=lambda: None,
             )
 
@@ -261,7 +262,7 @@ class Analyzer(abc.ABC):
         job_time = self.compute_job_time(traces=traces)
         total_count = self.compute_total_count(traces=traces)
         raw_stats: RawStats = self.restore_extra_data(
-            name=self.get_checkpoint_name(CHECKPOINT_RAW_STATS),
+            name=self.get_stats_checkpoint_name(),
             fallback=lambda: dict(
                 job_time=job_time,
                 time_granularity=self.time_granularity,
@@ -552,6 +553,13 @@ class Analyzer(abc.ABC):
             *sorted(view_types),
             str(self.time_granularity),
             VERSION_HLM,
+        )
+
+    def get_stats_checkpoint_name(self):
+        return self.get_checkpoint_name(
+            CHECKPOINT_RAW_STATS,
+            VERSION_STATS,
+            str(self.time_granularity),
         )
 
     def has_checkpoint(self, name: str):
