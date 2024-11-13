@@ -721,7 +721,11 @@ class Analyzer(abc.ABC):
         metric_boundaries = {}
         for metric in metrics:
             metric_boundary = None
-            if metric in ['iops', 'io_bw', 'ops', 'time'] or '_time' in metric:
+            if (
+                metric in ['iops', 'ops', 'time']
+                or '_time' in metric
+                or '_bw' in metric
+            ):
                 time_col = metric if '_time' in metric else 'time'
                 if COL_PROC_NAME in view_types and COL_TIME_RANGE in view_types:
                     metric_boundary = (

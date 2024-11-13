@@ -7,26 +7,6 @@ from .metrics import KNOWN_METRICS
 from .types import Metric, Score
 
 
-BW_BINS = [  # bw_ranges = [0, 1, 128, 1024, 1024*64]
-    0,  # -- 'critical'
-    1024**2,  # 1MB -- 'very high'
-    1024**2 * 16,  # 16MB -- 'high',
-    1024**2 * 16 * 16,  # 256MB -- 'medium',
-    1024**3,  # 1GB -- 'low',
-    1024**3 * 16,  # 16GB -- 'very low',
-    1024**3 * 16 * 4,  # 64GB -- 'trivial',
-    1024**4,  # 1TB -- 'none
-]
-BW_BINS_PER_PROC = [
-    1,  # -- 'critical'
-    1024**2,  # 1MB -- 'very high'
-    1024**2 * 10,  # 10MB -- 'high'
-    1024**2 * 128,  # 128MB -- 'medium' --- fast hd
-    1024**2 * 256,  # 256MB -- 'low', --- nvme perf
-    1024**2 * 512,  # 512MB -- 'very low', --- hbm memory
-    1024**3,  # 1GB 'trivial' --- single thread bw for memory
-    1024**3 * 64,  # 64GB -- 'none', -- agg bw for memory
-]
 IS_NORMALIZED: Dict[Metric, bool] = dict(
     att_perf=True,
     bw=True,
