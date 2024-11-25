@@ -18,14 +18,14 @@ from .config import Config, init_hydra_config_store
 
 
 def plot_bottleneck_summary(
-    bottlenecks: dd.DataFrame,
+    flat_bottlenecks: dd.DataFrame,
     groupby: tuple,
     view_depth=1,
     xaxis_major_label_orientation=math.pi / 2,
     y_range_start=0,
 ):
-    bot_cols = get_bottleneck_columns(bottlenecks)
-    df = bottlenecks.query(f"view_depth == {view_depth}")
+    bot_cols = get_bottleneck_columns(flat_bottlenecks)
+    df = flat_bottlenecks.query(f"view_depth == {view_depth}")
     group_df = df.groupby(list(groupby))[bot_cols].sum().compute()
     group_df = group_df.reset_index()
     group_df['group_id'] = list(map(str, zip(*(group_df[col] for col in groupby))))
