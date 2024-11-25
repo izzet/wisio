@@ -1,9 +1,11 @@
 import dask.dataframe as dd
 import dataclasses
 import itertools as it
+import numpy as np
 import pandas as pd
 from dask import delayed, persist
-from scipy.cluster.hierarchy import linkage, fcluster
+from sklearn.cluster import DBSCAN
+from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import StandardScaler
 from typing import Dict, List, Tuple, Union
 
@@ -136,10 +138,52 @@ def reason_bottlenecks(
                     ].nunique()
                     detail_view.name = f"n_{detail_view_type}"
                     view = view.merge(detail_view.to_frame())
-                reasoned_bottlenecks[layer][view_key][metric] = view.map_partitions(
-                    _set_bottleneck_reasons, rules=layer_rules
+                reasoned_bottlenecks[layer][view_key][metric] = (
+                    view.map_partitions(_set_bottleneck_reasons, rules=layer_rules)
+                    .repartition(npartitions=1)
+                    .map_partitions(_set_bottleneck_behavior)
                 )
     return reasoned_bottlenecks
+
+
+def _find_optimal_eps(scaled_behaviors: np.ndarray, min_samples: int = 5):
+    if len(scaled_behaviors) <= min_samples:
+        return 0
+    # Calculate distances
+    neigh = NearestNeighbors(n_neighbors=min_samples)
+    neigh.fit(scaled_behaviors)
+    distances, _ = neigh.kneighbors(scaled_behaviors)
+    distances = np.sort(distances[:, -1])
+    if len(distances) <= 3:
+        return np.mean(distances)
+    # Calculate derivatives
+    diffs = np.diff(distances)
+    acceleration = np.diff(diffs)
+    elbow_index = np.argmax(acceleration) + 1
+    eps = distances[elbow_index]
+    return eps
+
+
+def _set_bottleneck_behavior(bottlenecks: pd.DataFrame, min_samples: int = 5):
+    behavior_cols = bottlenecks.columns[
+        bottlenecks.columns.str.contains("_min|_max|_count|_size|n_|b_")
+        & ~bottlenecks.columns.str.contains("_score")
+    ]
+    behaviors = bottlenecks[behavior_cols].copy()
+    num_behaviors = len(behaviors)
+    if num_behaviors == 0:
+        bottlenecks["behavior"] = -1
+        return bottlenecks
+    scaler = StandardScaler()
+    scaled_behaviors = scaler.fit_transform(behaviors)
+    min_samples = min(min_samples, num_behaviors - 1)
+    if min_samples == 0:
+        bottlenecks["behavior"] = -1
+        return bottlenecks
+    optimal_eps = _find_optimal_eps(scaled_behaviors, min_samples=min_samples)
+    dbscan = DBSCAN(eps=max(optimal_eps, 1.0), min_samples=min_samples)
+    bottlenecks["behavior"] = dbscan.fit_predict(scaled_behaviors)
+    return bottlenecks
 
 
 def _set_bottleneck_reasons(bottlenecks: pd.DataFrame, rules: BottleneckRules):
@@ -187,10 +231,10 @@ def _assign_behavior(bottlenecks: pd.DataFrame, metric: str):
             scaler = StandardScaler()
             scaled_behavior = scaler.fit_transform(behaviors[behavior_cols])
 
-            link_mat = linkage(scaled_behavior, method='weighted')
-            clusters = fcluster(link_mat, t=1, criterion='distance')
+            # link_mat = linkage(scaled_behavior, method='weighted')
+            # clusters = fcluster(link_mat, t=1, criterion='distance')
 
-            bottlenecks.loc[behavior_key, COL_BEHAVIOR] = clusters
+            # bottlenecks.loc[behavior_key, COL_BEHAVIOR] = clusters
 
     return bottlenecks.reset_index()
 
