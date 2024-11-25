@@ -27,6 +27,9 @@ class IOCategory(Enum):
     READ = 1
     WRITE = 2
     METADATA = 3
+    PCTL = 4
+    IPC = 5
+    OTHER = 6
 
 
 class Layer(StrEnum):
@@ -77,6 +80,69 @@ DERIVED_MD_OPS = ['close', 'open', 'seek', 'stat']
 IO_CATS = [io_cat.value for io_cat in list(IOCategory)]
 IO_TYPES = ['read', 'write', 'metadata']
 COMPACT_IO_TYPES = ['R', 'W', 'M']
+
+
+# todo(izzet): add mmap
+POSIX_IO_CAT_MAPPING = {
+    IOCategory.READ: [
+        'read',
+        'pread',
+        'readv',
+        'preadv',
+    ],
+    IOCategory.WRITE: [
+        'write',
+        'pwrite',
+        'writev',
+        'pwritev',
+    ],
+    IOCategory.METADATA: [
+        "__fxstat",
+        "__fxstat64",
+        "__lxstat64",
+        "__xstat",
+        "__xstat64",
+        "lseek64",
+        'access',
+        'close',
+        'closedir',
+        'fnctl',
+        'fstat',
+        'fstatat',
+        'mkdir',
+        'open',
+        'open64',
+        'opendir',
+        'readdir',
+        'readlink',
+        'rename',
+        'rmdir',
+        'seek',
+        'stat',
+        'unlink',
+    ],
+    IOCategory.PCTL: [
+        'exec',
+        'exit',
+        'fork',
+        'kill',
+        'pipe',
+        'wait',
+    ],
+    IOCategory.IPC: [
+        'msgctl',
+        'msgget',
+        'msgrcv',
+        'msgsnd',
+        'semctl',
+        'semget',
+        'semop',
+        'shmat',
+        'shmctl',
+        'shmdt',
+        'shmget',
+    ],
+}
 
 FILE_PATTERN_PLACEHOLDER = '[0-9]'
 PROC_NAME_SEPARATOR = '#'

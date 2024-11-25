@@ -22,6 +22,7 @@ from .constants import (
     COL_PROC_NAME,
     COL_TIME,
     COL_TIME_RANGE,
+    POSIX_IO_CAT_MAPPING,
     IOCategory,
     Layer,
 )
@@ -646,28 +647,22 @@ class DFTracerAnalyzer(Analyzer):
                 + traces['tid'].astype(str)
             )
 
-        read_cond = 'read'
-        write_cond = 'write'
-        metadata_cond = 'readlink'
-        traces[COL_IO_CAT] = 0
-        traces[COL_IO_CAT] = traces[COL_IO_CAT].mask(
-            (traces['cat'] == CAT_POSIX)
-            & ~traces[COL_FUNC_ID].str.contains(read_cond)
-            & ~traces[COL_FUNC_ID].str.contains(write_cond),
-            IOCategory.METADATA.value,
-        )
-        traces[COL_IO_CAT] = traces[COL_IO_CAT].mask(
-            (traces['cat'] == CAT_POSIX)
-            & traces[COL_FUNC_ID].str.contains(read_cond)
-            & ~traces[COL_FUNC_ID].str.contains(metadata_cond),
-            IOCategory.READ.value,
-        )
-        traces[COL_IO_CAT] = traces[COL_IO_CAT].mask(
-            (traces['cat'] == CAT_POSIX)
-            & traces[COL_FUNC_ID].str.contains(write_cond)
-            & ~traces[COL_FUNC_ID].str.contains(metadata_cond),
-            IOCategory.WRITE.value,
-        )
+        traces[COL_IO_CAT] = IOCategory.OTHER.value
+        for io_cat, io_funcs in POSIX_IO_CAT_MAPPING.items():
+            if io_cat == IOCategory.METADATA:
+                traces[COL_IO_CAT] = traces[COL_IO_CAT].mask(
+                    (traces['cat'] == CAT_POSIX)
+                    & traces[COL_FUNC_ID].str.contains('|'.join(io_funcs)),
+                    io_cat.value,
+                )
+            else:
+                metadata_funcs = POSIX_IO_CAT_MAPPING[IOCategory.METADATA]
+                traces[COL_IO_CAT] = traces[COL_IO_CAT].mask(
+                    (traces['cat'] == CAT_POSIX)
+                    & traces[COL_FUNC_ID].str.contains('|'.join(io_funcs))
+                    & ~traces[COL_FUNC_ID].str.contains('|'.join(metadata_funcs)),
+                    io_cat.value,
+                )
 
         # drop columns that are not needed
         if COL_FILE_NAME not in view_types:
