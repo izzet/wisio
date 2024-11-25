@@ -13,6 +13,7 @@ from pathlib import Path
 from scipy.cluster.hierarchy import linkage, fcluster
 from typing import Dict, List, Union
 
+from .analysis import compute_time_boundaries
 from .analysis_utils import set_file_dir, set_file_pattern, set_proc_name_parts
 from .constants import (
     ACC_PAT_SUFFIXES,
@@ -674,13 +675,8 @@ class CharacteristicAppTimeRule(CharacteristicRule):
         super().__init__(rule_key=KnownCharacteristics.APP_TIME.value)
 
     def define_tasks(self, view: dd.DataFrame) -> Dict[str, Delayed]:
-        time_cols = [col for col in view.columns if 'time' in col]
-        view_types = view.index._meta.names
         tasks = {}
-        if COL_PROC_NAME in view_types:
-            tasks['times'] = view.max()[time_cols]
-        else:
-            tasks['times'] = view.sum()[time_cols]
+        tasks['times'] = compute_time_boundaries(view, COL_TIME_RANGE)
         return tasks
 
     def handle_task_results(
@@ -930,13 +926,8 @@ class CharacteristicIOTimeRule(CharacteristicRule):
         self.prefer_app_characteristics = True
 
     def define_tasks(self, view: dd.DataFrame) -> Dict[str, Delayed]:
-        time_cols = [col for col in view.columns if 'time' in col]
-        view_types = view.index._meta.names
         tasks = {}
-        if COL_PROC_NAME in view_types:
-            tasks['times'] = view.max()[time_cols]
-        else:
-            tasks['times'] = view.sum()[time_cols]
+        tasks['times'] = compute_time_boundaries(view, COL_TIME_RANGE)
         return tasks
 
     def handle_task_results(

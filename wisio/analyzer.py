@@ -16,6 +16,9 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from .analysis import (
     THRESHOLD_FUNCTIONS,
+    compute_time_boundaries,
+    is_metric_time_bound,
+    metric_time_column,
     set_metrics,
     set_metric_scores,
     set_unoverlapped_times,
@@ -74,7 +77,7 @@ HLM_EXTRA_COLS = ['cat', 'io_cat', 'acc_pat', 'func_id']
 VERSION_HLM = "v3"
 VERSION_LAYERS = "v1"
 VERSION_MAIN_VIEW = "v3"
-VERSION_METRIC_BOUNDARIES = "v4"
+VERSION_METRIC_BOUNDARIES = "v5"
 VERSION_STATS = "v1"
 VERSION_VIEWS = "v1"
 WAIT_ENABLED = True
@@ -366,7 +369,7 @@ class Analyzer(abc.ABC):
         main_view: dd.DataFrame,
         view_types: List[ViewType],
         metrics: List[Metric],
-        metric_boundaries: Dict[Metric, dd.core.Scalar],
+        metric_boundaries: Dict[ViewType, Dict[Metric, dd.core.Scalar]],
         percentile: Optional[float],
         threshold: Optional[int],
         is_slope_based: bool,
@@ -384,7 +387,7 @@ class Analyzer(abc.ABC):
             views[view_key] = self.compute_view(
                 is_slope_based=is_slope_based,
                 layer=layer,
-                metric_boundaries=metric_boundaries,
+                metric_boundaries=metric_boundaries[view_type],
                 metrics=metrics,
                 records=parent_records,
                 view_key=view_key,
@@ -483,11 +486,12 @@ class Analyzer(abc.ABC):
     ) -> Bottlenecks:
         bottlenecks = {}
         for view_key, view in views.items():
+            view_type = view_key[-1]
             bottlenecks[view_key] = {}
             view = view.map_partitions(
                 set_metric_scores,
                 metrics=metrics,
-                metric_boundaries=metric_boundaries,
+                metric_boundaries=metric_boundaries[view_type],
                 is_slope_based=is_slope_based,
             )
             for metric in metrics:
@@ -509,15 +513,15 @@ class Analyzer(abc.ABC):
         threshold: Optional[int],
         is_slope_based: bool,
     ):
-        query_col = KNOWN_METRICS[metric].query_column_name(slope=is_slope_based)
+        metric_col = KNOWN_METRICS[metric].metric_column(slope=is_slope_based)
         if is_slope_based:
             corrected_threshold = THRESHOLD_FUNCTIONS[metric](threshold)
             return view.query(
-                f"{query_col} <= @threshold",
+                f"{metric_col} <= @threshold",
                 local_dict={'threshold': corrected_threshold},
             )
         return view.query(
-            f"{query_col} >= @percentile",
+            f"{metric_col} >= @percentile",
             local_dict={'percentile': percentile},
         )
 
@@ -527,7 +531,7 @@ class Analyzer(abc.ABC):
         for layer in bottlenecks:
             for view_key in bottlenecks[layer]:
                 for metric in bottlenecks[layer][view_key]:
-                    view = bottlenecks[layer][view_key][metric]
+                    view = bottlenecks[layer][view_key][metric].copy()
                     view['layer'] = layer
                     view['metric'] = metric
                     view['view_depth'] = len(view_key)
@@ -719,31 +723,27 @@ class Analyzer(abc.ABC):
         view_types: List[ViewType],
     ) -> Dict[Metric, dd.core.Scalar]:
         metric_boundaries = {}
-        for metric in metrics:
-            metric_boundary = None
-            if (
-                metric in ['iops', 'ops', 'time']
-                or '_time' in metric
-                or '_bw' in metric
-            ):
-                time_col = metric if '_time' in metric else 'time'
-                if COL_PROC_NAME in view_types and COL_TIME_RANGE in view_types:
-                    metric_boundary = (
-                        main_view[time_col]
-                        .groupby(COL_TIME_RANGE)
-                        .max()
+        for view_type in view_types:
+            metric_boundaries[view_type] = {}
+            for metric in metrics:
+                metric_boundaries[view_type][metric] = None
+                if is_metric_time_bound(metric):
+                    time_col = metric_time_column(metric)
+                    metric_boundaries[view_type][metric] = (
+                        compute_time_boundaries(
+                            view=main_view,
+                            view_type=view_type,
+                        )[time_col]
                         .sum()
                         .persist()
                     )
+                elif metric in ['intensity', 'io_compute_per']:
+                    pass
                 else:
-                    metric_boundary = main_view[time_col].sum().persist()
-            elif metric == 'io_compute_ratio':
-                metric_boundary = None
-            else:
-                raise NotImplementedError(
-                    f"Metric boundary method not found for: {metric}"
-                )
-            metric_boundaries[metric] = metric_boundary
+                    raise NotImplementedError(
+                        f"Metric boundary method not found for: {metric}"
+                    )
+        # print('metric_boundaries:', metric_boundaries)
         return metric_boundaries
 
     def _compute_view(
@@ -834,6 +834,8 @@ class Analyzer(abc.ABC):
                     hlm['io_cat'] == io_cat.value, hlm[col]
                 )
         for io_cat in list(IOCategory):
+            # if io_cat not in [IOCategory.READ, IOCategory.WRITE]:
+            #     continue
             min_name, max_name = (
                 f"{io_cat.name.lower()}_min",
                 f"{io_cat.name.lower()}_max",

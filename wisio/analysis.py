@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 from typing import Callable, Dict, List, Union
 
+from .constants import COL_PROC_NAME
 from .metrics import KNOWN_METRICS
 from .types import Metric, Score
 
@@ -60,6 +61,34 @@ THRESHOLD_FUNCTIONS: Dict[Metric, Callable[[int], Union[float, int]]] = dict(
     iops=lambda x: np.tan(np.deg2rad(x)),
     time=lambda x: x,
 )
+
+
+def compute_time_boundaries(view: dd.DataFrame, view_type: str):
+    time_cols = [col for col in view.columns if 'time' in col]
+    view_types = view.index._meta.names
+    if view_type not in view_types:
+        raise ValueError(f"Cannot compute time boundary for view type: {view_type}")
+    if len(view_types) == 1 and view_type in view_types:
+        if view_type == COL_PROC_NAME:
+            return view[time_cols].max()
+        return view[time_cols].sum()
+    elif COL_PROC_NAME in view_types:
+        return view[time_cols].groupby(view_type).max().sum()
+    return view[time_cols].groupby(view_type).sum()
+
+
+def is_metric_time_bound(metric: Metric):
+    return (
+        metric in ['iops', 'ops', 'bw', 'time']
+        or 'time_' in metric
+        or '_bw' in metric
+        or '_time' in metric
+    )
+
+
+def metric_time_column(metric: Metric):
+    metric_col = metric.replace('_norm', '').replace('_per', '')
+    return metric_col if '_time' in metric_col else 'time'
 
 
 def set_bound_columns(ddf: Union[dd.DataFrame, pd.DataFrame], is_initial=False):
