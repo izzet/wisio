@@ -164,11 +164,19 @@ def _find_optimal_eps(scaled_behaviors: np.ndarray, min_samples: int = 5):
     return eps
 
 
-def _set_bottleneck_behavior(bottlenecks: pd.DataFrame, min_samples: int = 5):
-    behavior_cols = bottlenecks.columns[
+def _get_bottleneck_behavior_columns(bottlenecks: pd.DataFrame):
+    return bottlenecks.columns[
+        # Include only behavior columns
         bottlenecks.columns.str.contains("_min|_max|_count|_size|n_|b_")
+        # Remove bottleneck scores
         & ~bottlenecks.columns.str.contains("_score")
+        # Remove bottleneck reasons
+        & ~bottlenecks.columns.str.contains("|".join([f"_{r}" for r in range(0, 10)]))
     ]
+
+
+def _set_bottleneck_behavior(bottlenecks: pd.DataFrame, min_samples: int = 5):
+    behavior_cols = _get_bottleneck_behavior_columns(bottlenecks)
     behaviors = bottlenecks[behavior_cols].copy()
     num_behaviors = len(behaviors)
     if num_behaviors == 0:

@@ -50,7 +50,7 @@ COL_COUNT = 'count'
 COL_FILE_DIR = 'file_dir'
 COL_FILE_NAME = 'file_name'
 COL_FILE_PATTERN = 'file_pattern'
-COL_FUNC_ID = 'func_id'
+COL_FUNC_NAME = 'func_name'
 COL_HOST_NAME = 'host_name'
 COL_IO_CAT = 'io_cat'
 COL_NODE_NAME = 'node_name'
@@ -63,11 +63,14 @@ COL_TIME_RANGE = 'time_range'
 
 
 LOGICAL_VIEW_TYPES = [
-    ('proc_name', 'app_name'),
-    ('proc_name', 'node_name'),
-    ('proc_name', 'rank'),
     ('file_name', 'file_dir'),
     ('file_name', 'file_pattern'),
+    ('proc_name', 'app_name'),
+    ('proc_name', 'host_name'),
+    ('proc_name', 'node_name'),
+    ('proc_name', 'proc_id'),
+    ('proc_name', 'rank'),
+    ('proc_name', 'thread_id'),
 ]
 VIEW_TYPES = [
     'file_name',
@@ -83,53 +86,66 @@ COMPACT_IO_TYPES = ['R', 'W', 'M']
 
 
 # todo(izzet): add mmap
-POSIX_IO_CAT_MAPPING = {
-    IOCategory.READ: [
-        'read',
+POSIX_IO_CAT_FUNCTIONS = {
+    IOCategory.READ: {
+        'fread',
         'pread',
-        'readv',
         'preadv',
-    ],
-    IOCategory.WRITE: [
-        'write',
+        'read',
+        'readv',
+    },
+    IOCategory.WRITE: {
+        'fsync',
+        'fwrite',
         'pwrite',
-        'writev',
         'pwritev',
-    ],
-    IOCategory.METADATA: [
-        "__fxstat",
-        "__fxstat64",
-        "__lxstat64",
-        "__xstat",
-        "__xstat64",
-        "lseek64",
+        'write',
+        'writev',
+    },
+    IOCategory.METADATA: {
+        '__fxstat',
+        '__fxstat64',
+        '__lxstat',
+        '__lxstat64',
+        '__xstat',
+        '__xstat64',
         'access',
         'close',
         'closedir',
-        'fnctl',
+        'fclose',
+        'fcntl',
+        'fopen',
+        'fopen64',
+        'fseek',
         'fstat',
         'fstatat',
+        'ftell',
+        'ftruncate',
+        'link',
+        'lseek',
+        'lseek64',
         'mkdir',
         'open',
         'open64',
         'opendir',
         'readdir',
         'readlink',
+        'remove',
         'rename',
         'rmdir',
         'seek',
         'stat',
         'unlink',
-    ],
-    IOCategory.PCTL: [
+    },
+    IOCategory.PCTL: {
         'exec',
         'exit',
         'fork',
         'kill',
         'pipe',
         'wait',
-    ],
-    IOCategory.IPC: [
+    },
+    IOCategory.IPC: {
         'msgctl',
         'msgget',
         'msgrcv',
@@ -141,8 +157,15 @@ POSIX_IO_CAT_MAPPING = {
         'shmctl',
         'shmdt',
         'shmget',
-    ],
+    },
 }
+POSIX_IO_CAT_MAPPING = {
+    func: category
+    for category, functions in POSIX_IO_CAT_FUNCTIONS.items()
+    for func in functions
+}
+POSIX_METADATA_FUNCTIONS = POSIX_IO_CAT_FUNCTIONS[IOCategory.METADATA]
+
 
 FILE_PATTERN_PLACEHOLDER = '[0-9]'
 PROC_NAME_SEPARATOR = '#'
@@ -159,7 +182,7 @@ HUMANIZED_COLS = dict(
     file_dir='File Directory',
     file_name='File',
     file_pattern='File Pattern',
-    func_id='Function ID',
+    func_name='Function Name',
     host_name='Host',
     io_cat='I/O Category',
     io_time='I/O Time',

@@ -19,9 +19,7 @@ from .analysis import (
     compute_time_boundaries,
     is_metric_time_bound,
     metric_time_column,
-    set_metrics,
-    set_metric_scores,
-    set_unoverlapped_times,
+    # set_metric_scores,
 )
 from .analysis_utils import set_file_dir, set_file_pattern, set_proc_name_parts
 from .config import CHECKPOINT_VIEWS, HASH_CHECKPOINT_NAMES
@@ -38,7 +36,7 @@ from .constants import (
     IOCategory,
     Layer,
 )
-from .metrics import KNOWN_METRICS
+from .metrics import KNOWN_METRICS, set_metrics, set_metric_scores
 from .rule_engine import compute_characteristics, reason_bottlenecks
 from .types import (
     AnalyzerResultType,
@@ -73,7 +71,7 @@ HLM_COLS = {
     'size_sum': 'size',
     'time_sum': 'time',
 }
-HLM_EXTRA_COLS = ['cat', 'io_cat', 'acc_pat', 'func_id']
+HLM_EXTRA_COLS = ['cat', 'io_cat', 'acc_pat', 'func_name']
 VERSION_HLM = "v3"
 VERSION_LAYERS = "v1"
 VERSION_MAIN_VIEW = "v3"
@@ -86,11 +84,15 @@ WAIT_ENABLED = True
 class Analyzer(abc.ABC):
     def __init__(
         self,
-        layer_defs: Dict[str, str],
+        layer_defs: Dict[Layer, str],
+        derived_metrics: Dict[Layer, Dict[str, list]],
+        metric_overrides: Optional[Dict[Layer, Dict[str, list]]],
+        additional_metrics: Optional[Dict[Layer, Dict[str, str]]] = {},
         bottleneck_dir: str = "",
         checkpoint: bool = True,
         checkpoint_dir: str = "",
         debug: bool = False,
+        logical_views: Optional[Dict[ViewType, Dict[ViewType, str]]] = {},
         time_approximate: bool = True,
         time_granularity: float = 1e6,
         verbose: bool = False,
@@ -98,11 +100,15 @@ class Analyzer(abc.ABC):
         if checkpoint:
             assert checkpoint_dir != '', 'Checkpoint directory must be defined'
 
+        self.additional_metrics = additional_metrics
         self.bottleneck_dir = bottleneck_dir
         self.checkpoint = checkpoint
         self.checkpoint_dir = checkpoint_dir
         self.debug = debug
+        self.derived_metrics = derived_metrics
         self.layer_defs = layer_defs
+        self.logical_views = logical_views
+        self.metric_overrides = metric_overrides
         self.time_approximate = time_approximate
         self.time_granularity = time_granularity
         self.verbose = verbose
@@ -138,6 +144,7 @@ class Analyzer(abc.ABC):
         if not self.checkpoint or not self.has_checkpoint(name=hlm_checkpoint_name):
             # Read trace & stats
             traces = self.read_trace(trace_path=trace_path)
+            # return traces
             raw_stats = self.read_stats(traces=traces)
             traces = self.postread_trace(traces=traces, view_types=hlm_view_types)
             # return traces
@@ -191,20 +198,81 @@ class Analyzer(abc.ABC):
                 threshold=threshold,
                 is_slope_based=is_slope_based,
             )
-            layer_bottlenecks = self.detect_bottlenecks(
+            layer_logical_views = self.compute_logical_views(
+                layer=layer,
+                main_view=layer_main_view,
                 views=layer_views,
-                metrics=metrics[layer],
+                view_types=view_types[layer],
                 metric_boundaries=layer_metric_boundaries,
-                is_slope_based=is_slope_based,
+                metrics=metrics[layer],
                 percentile=percentile,
                 threshold=threshold,
+                is_slope_based=is_slope_based,
             )
+            layer_views.update(layer_logical_views)
+            # layer_bottlenecks = self.detect_bottlenecks(
+            #     views=layer_views,
+            #     metrics=metrics[layer],
+            #     metric_boundaries=layer_metric_boundaries,
+            #     is_slope_based=is_slope_based,
+            #     percentile=percentile,
+            #     threshold=threshold,
+            # )
             hlms[layer] = layer_hlm
             main_views[layer] = layer_main_view
             main_indexes[layer] = layer_main_index
             metric_boundaries[layer] = layer_metric_boundaries
             views[layer] = layer_views
-            bottlenecks[layer] = layer_bottlenecks
+            # bottlenecks[layer] = layer_bottlenecks
+
+        (views, raw_stats) = compute(views, raw_stats)
+
+        time_boundary_cols = {
+            view_key: [] for layer in views for view_key in views[layer]
+        }
+
+        flat_views = {}
+        for layer in views:
+            for view_key in views[layer]:
+                view = views[layer][view_key]
+                view.columns = view.columns.map(lambda col: layer.lower() + '_' + col)
+                if view_key in flat_views:
+                    flat_views[view_key] = flat_views[view_key].merge(
+                        view,
+                        how='outer',
+                        left_index=True,
+                        right_index=True,
+                    )
+                else:
+                    flat_views[view_key] = view
+                time_boundary_cols[view_key].append(f"{layer.lower()}_time")
+
+        time_boundaries = {}
+        for view_key in flat_views:
+            view_type = view_key[-1]
+            if view_type == COL_PROC_NAME or self.is_logical_view_of(
+                view_key=view_key,
+                parent_view_type=COL_PROC_NAME,
+            ):
+                time_boundaries[view_key] = (
+                    flat_views[view_key][time_boundary_cols[view_key]].max().sum()
+                )
+            else:
+                time_boundaries[view_key] = (
+                    flat_views[view_key][time_boundary_cols[view_key]].sum().sum()
+                )
+
+        flat_views = {
+            view_key: set_metric_scores(
+                set_metrics(
+                    flat_views[view_key].fillna(0),
+                    time_boundary=time_boundaries[view_key],
+                )
+            )
+            for view_key in flat_views
+        }
+
+        return traces, hlms, main_views, time_boundaries, views, flat_views
 
         characteristics = {}
         for layer in self.layer_defs:
@@ -257,6 +325,7 @@ class Analyzer(abc.ABC):
             main_views=main_views,
             metric_boundaries=metric_boundaries,
             raw_stats=raw_stats,
+            traces=traces,
             view_types=hlm_view_types,
             views=views,
         )
@@ -264,13 +333,15 @@ class Analyzer(abc.ABC):
     def read_stats(self, traces: dd.DataFrame) -> RawStats:
         job_time = self.compute_job_time(traces=traces)
         total_count = self.compute_total_count(traces=traces)
-        raw_stats: RawStats = self.restore_extra_data(
-            name=self.get_stats_checkpoint_name(),
-            fallback=lambda: dict(
-                job_time=job_time,
-                time_granularity=self.time_granularity,
-                total_count=total_count,
-            ),
+        raw_stats = RawStats(
+            **self.restore_extra_data(
+                name=self.get_stats_checkpoint_name(),
+                fallback=lambda: dict(
+                    job_time=job_time,
+                    time_granularity=self.time_granularity,
+                    total_count=total_count,
+                ),
+            )
         )
         return raw_stats
 
@@ -399,49 +470,117 @@ class Analyzer(abc.ABC):
         self,
         layer: Layer,
         main_view: dd.DataFrame,
-        metric_boundaries: Dict[Metric, dd.core.Scalar],
+        views: Dict[ViewKey, dd.DataFrame],
+        view_types: List[ViewType],
         metrics: List[Metric],
+        metric_boundaries: Dict[Metric, dd.core.Scalar],
         percentile: Optional[float],
         threshold: Optional[int],
-        view_results: Dict[Metric, Dict[ViewKey, ViewResult]],
-        view_types: List[ViewType],
+        is_slope_based: bool,
     ):
-        for metric in metrics:
-            for view_key in LOGICAL_VIEW_TYPES:
-                view_type = view_key[-1]
-                parent_view_key = view_key[:-1]
-                parent_view_type = parent_view_key[0]
-
-                if parent_view_type not in view_types:
-                    continue
-
-                parent_view_result = view_results[metric].get(parent_view_key, None)
-                parent_records = (
-                    main_view
-                    if parent_view_result is None
-                    else parent_view_result.records
-                )
-
-                if view_type not in parent_records.columns:
-                    parent_records = self._set_logical_columns(
-                        view=parent_records,
-                        view_types=[parent_view_type],
+        logical_views = {}
+        for parent_view_type in self.logical_views:
+            parent_view_key = (parent_view_type,)
+            if parent_view_key not in views:
+                continue
+            for view_type in self.logical_views[parent_view_type]:
+                view_key = (parent_view_type, view_type)
+                parent_records = main_view
+                for parent_view_type in parent_view_key:
+                    parent_records = parent_records.query(
+                        f"{parent_view_type} in @indices",
+                        local_dict={'indices': views[(parent_view_type,)].index},
                     )
-
-                view_result = self.compute_view(
+                view_condition = self.logical_views[parent_view_type][view_type]
+                if view_condition is None:
+                    if view_type == 'file_dir':
+                        parent_records = parent_records.map_partitions(set_file_dir)
+                    elif view_type == 'file_pattern':
+                        parent_records = parent_records.map_partitions(set_file_pattern)
+                    else:
+                        raise ValueError("XXX")
+                else:
+                    parent_records = parent_records.eval(
+                        f"{view_type} = {view_condition}"
+                    )
+                logical_views[view_key] = self.compute_view(
+                    is_slope_based=is_slope_based,
+                    layer=layer,
+                    metric_boundaries=metric_boundaries[parent_view_type],
                     metrics=metrics,
-                    metric=metric,
-                    metric_boundary=metric_boundaries[metric],
                     records=parent_records,
-                    percentile=percentile,
-                    threshold=threshold,
                     view_key=view_key,
                     view_type=view_type,
                 )
+        return logical_views
 
-                view_results[metric][view_key] = view_result
+        # for view_key in LOGICAL_VIEW_TYPES:
+        #     view_type = view_key[-1]
+        #     parent_view_key = view_key[:-1]
+        #     if parent_view_key not in views:
+        #         continue
+        #     parent_records = main_view
+        #     for parent_view_type in parent_view_key:
+        #         parent_records = parent_records.query(
+        #             f"{parent_view_type} in @indices",
+        #             local_dict={'indices': views[(parent_view_type,)].index},
+        #         )
+        #     if view_type not in parent_records.columns:
+        #         parent_records = self._set_logical_columns(
+        #             view=parent_records,
+        #             view_types=[parent_view_type],
+        #         )
+        #     if view_type not in parent_records.columns:
+        #         # todo(izzet): log warning
+        #         continue
+        #     parent_view_type = parent_view_key[-1]
+        #     views[view_key] = self.compute_view(
+        #         is_slope_based=is_slope_based,
+        #         layer=layer,
+        #         metric_boundaries=metric_boundaries[parent_view_type],
+        #         metrics=metrics,
+        #         records=parent_records,
+        #         view_key=view_key,
+        #         view_type=view_type,
+        #     )
+        # return views
 
-        return view_results
+        # for metric in metrics:
+        #     for view_key in LOGICAL_VIEW_TYPES:
+        #         view_type = view_key[-1]
+        #         parent_view_key = view_key[:-1]
+        #         parent_view_type = parent_view_key[0]
+
+        #         if parent_view_type not in view_types:
+        #             continue
+
+        #         parent_view_result = view_results[metric].get(parent_view_key, None)
+        #         parent_records = (
+        #             main_view
+        #             if parent_view_result is None
+        #             else parent_view_result.records
+        #         )
+
+        #         if view_type not in parent_records.columns:
+        #             parent_records = self._set_logical_columns(
+        #                 view=parent_records,
+        #                 view_types=[parent_view_type],
+        #             )
+
+        #         view_result = self.compute_view(
+        #             metrics=metrics,
+        #             metric=metric,
+        #             metric_boundary=metric_boundaries[metric],
+        #             records=parent_records,
+        #             percentile=percentile,
+        #             threshold=threshold,
+        #             view_key=view_key,
+        #             view_type=view_type,
+        #         )
+
+        #         view_results[metric][view_key] = view_result
+
+        # return view_results
 
     @event_logger(key=EventType.COMPUTE_VIEW, message='Compute view')
     def compute_view(
@@ -570,6 +709,11 @@ class Analyzer(abc.ABC):
         checkpoint_path = self.get_checkpoint_path(name=name)
         return os.path.exists(f"{checkpoint_path}/_metadata")
 
+    def is_logical_view_of(self, view_key: ViewKey, parent_view_type: ViewType) -> bool:
+        if len(view_key) == 2:
+            return view_key[1] in self.logical_views[parent_view_type]
+        return False
+
     def read_bottlenecks(self):
         return dd.read_parquet(self.bottleneck_dir)
 
@@ -621,9 +765,25 @@ class Analyzer(abc.ABC):
             self.bottleneck_dir, compute=True, write_metadata_file=True
         )
 
-    def set_layer_columns(self, layer: Layer, hlm: dd.DataFrame) -> dd.DataFrame:
-        # Set POSIX columns for every layer
-        hlm = self._set_posix_columns(hlm=hlm)
+    def set_layer_metrics(self, layer: Layer, hlm: dd.DataFrame) -> dd.DataFrame:
+        for metric, mask_value in self.metric_overrides[layer].items():
+            mask_condition = mask_value[0]
+            override_value = mask_value[1]
+            hlm[metric] = hlm[metric].mask(hlm.eval(mask_condition), override_value)
+        for metric, mask_value in self.derived_metrics[layer].items():
+            mask_condition = mask_value[0]
+            mask_col = mask_value[1]
+            metric_dtype = 'double[pyarrow]'
+            hlm[metric] = 0.0
+            if (
+                mask_col in ['count', 'size']
+                or mask_col.endswith('_max')
+                or mask_col.endswith('_min')
+            ):
+                hlm[metric] = 0
+                metric_dtype = 'uint64[pyarrow]'
+            hlm[metric] = hlm[metric].mask(hlm.eval(mask_condition), hlm[mask_col])
+            hlm[metric] = hlm[metric].astype(metric_dtype)
         return hlm
 
     @staticmethod
@@ -679,19 +839,16 @@ class Analyzer(abc.ABC):
     ) -> dd.DataFrame:
         # Add layer columns
         groupby = list(set(view_types).union(HLM_EXTRA_COLS))
-        agg_columns, column_names = self.additional_high_level_metrics()
-        assert len(agg_columns) == len(column_names), 'Additional columns mismatch'
-        agg_columns.update(HLM_AGG)
         hlm = (
             traces.groupby(groupby)
-            .agg(agg_columns, split_out=math.ceil(math.sqrt(traces.npartitions)))
+            .agg(HLM_AGG, split_out=math.ceil(math.sqrt(traces.npartitions)))
             .persist()
             .reset_index()
             .repartition(partition_size=partition_size)
         )
-        column_names.update(HLM_COLS)
-        hlm = flatten_column_names(hlm).rename(columns=column_names)
-        return hlm.persist()
+        hlm = flatten_column_names(hlm)
+        renamed_columns = {col: col.replace('_sum', '') for col in hlm.columns}
+        return hlm.rename(columns=renamed_columns).persist()
 
     def _compute_main_view(
         self,
@@ -701,17 +858,15 @@ class Analyzer(abc.ABC):
         partition_size: str,
     ) -> dd.DataFrame:
         # Set derived columns depending on layer
-        hlm = self.set_layer_columns(layer=layer, hlm=hlm)
+        hlm_with_metrics = self.set_layer_metrics(layer=layer, hlm=hlm.copy())
         # Set groupby
         groupby = list(view_types)
         # Compute agg_view
         main_view = (
-            hlm.drop(columns=HLM_EXTRA_COLS, errors='ignore')
+            hlm_with_metrics.drop(columns=HLM_EXTRA_COLS, errors='ignore')
             .groupby(groupby)
-            .sum(split_out=hlm.npartitions)
+            .sum(split_out=hlm_with_metrics.npartitions)
         )
-        # Set hashed ids
-        main_view['id'] = main_view.index.map(hash)
         # Return main_view
         return main_view.persist()
 
@@ -778,23 +933,21 @@ class Analyzer(abc.ABC):
                 .agg(non_proc_agg_dict)
                 .groupby([view_type])
                 .agg(proc_agg_dict)
-                .map_partitions(set_unoverlapped_times)
             )
         else:
-            view = (
-                records.reset_index()
-                .groupby([view_type])
-                .agg(non_proc_agg_dict)
-                .map_partitions(set_unoverlapped_times)
-            )
+            view = records.reset_index().groupby([view_type]).agg(non_proc_agg_dict)
+
+        for metric, eval_condition in self.additional_metrics[layer].items():
+            view = view.eval(f"{metric} = {eval_condition}")
+            view[metric] = view[metric].fillna(0).astype('double[pyarrow]')
 
         # Set metric slope
-        view = view.map_partitions(
-            set_metrics,
-            is_slope_based=is_slope_based,
-            metrics=metrics,
-            metric_boundaries=metric_boundaries,
-        )
+        # view = view.map_partitions(
+        #     set_metrics,
+        #     is_slope_based=is_slope_based,
+        #     metrics=metrics,
+        #     metric_boundaries=metric_boundaries,
+        # )
 
         # Return view
         return view
@@ -869,29 +1022,16 @@ class Analyzer(abc.ABC):
                 hlm[col_name] = 0.0 if col == 'time' else 0
                 if md_op in ['close', 'open']:
                     hlm[col_name] = hlm[col_name].mask(
-                        hlm['func_id'].str.contains(md_op)
-                        & ~hlm['func_id'].str.contains('dir'),
+                        hlm['func_name'].str.contains(md_op)
+                        & ~hlm['func_name'].str.contains('dir'),
                         hlm[col],
                     )
                 else:
                     hlm[col_name] = hlm[col_name].mask(
-                        hlm['func_id'].str.contains(md_op), hlm[col]
+                        hlm['func_name'].str.contains(md_op), hlm[col]
                     )
         # Return ddf
         return hlm
-
-    def _set_logical_columns(
-        self, view: dd.DataFrame, view_types: List[ViewType]
-    ) -> dd.DataFrame:
-        # Check if view types include `proc_name`
-        if COL_PROC_NAME in view_types:
-            view = view.map_partitions(set_proc_name_parts)
-
-        # Check if view types include `file_name`
-        if COL_FILE_NAME in view_types:
-            view = view.map_partitions(set_file_dir).map_partitions(set_file_pattern)
-
-        return view
 
     @staticmethod
     def _wait_all(tasks: Union[dd.DataFrame, Delayed, dict]):

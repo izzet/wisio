@@ -36,9 +36,172 @@ class DFTracerAnalyzerConfig(AnalyzerConfig):
     _target_: str = "wisio.dftracer.DFTracerAnalyzer"
     layer_defs: Dict[str, str] = field(
         default_factory=lambda: {
-            Layer.APP: '~cat.isin(["config", "dftracer"])',
-            Layer.DATALOADER: 'cat.isin(["data_loader", "POSIX", "STDIO"])',
+            # Layer.APP: '~cat.isin(["config", "dftracer"])',
+            'dlio': 'cat.isin(["dlio_benchmark"])',
+            'compute': 'cat.isin(["ai_framework"])',
+            Layer.DATALOADER: 'cat.isin(["data_loader"])',
+            'checkpoint': 'cat.isin(["checkpoint"])',
+            'reader': 'cat.isin(["reader"])',
             Layer.POSIX: 'cat.isin(["POSIX", "STDIO"])',
+        }
+    )
+    derived_metrics: Dict[str, Dict[str, list]] = field(
+        default_factory=lambda: {
+            Layer.APP: {
+                # 'checkpoint_time': [
+                #     'cat == "checkpoint" or func_name.isin(["TFCheckpointing.checkpoint"])',
+                #     'time',
+                # ],
+                # 'compute_time': [
+                #     'func_name.isin(["<module>.yield"])',
+                #     'time',
+                # ],
+                # 'read_time': [
+                #     'func_name.str.contains(".__getitem__|._parse_image")',
+                #     'time',
+                # ],
+                # 'stall_time': [
+                #     'func_name.isin(["<module>.iter"])',
+                #     'time',
+                # ],
+            },
+            'dlio': {
+                'compute_time': [
+                    'func_name.isin(["<module>.yield"])',
+                    'time',
+                ],
+                'stall_time': [
+                    'func_name.isin(["<module>.iter"])',
+                    'time',
+                ],
+            },
+            'compute': {},
+            Layer.DATALOADER: {
+                'sample_time': [
+                    'func_name.str.contains(".__getitem__|._parse_image")',
+                    'time',
+                ],
+            },
+            'reader': {
+                'preprocess_time': [
+                    'func_name.str.contains(".preprocess")',
+                    'time',
+                ],
+                'sample_size': [
+                    'func_name.str.contains(".get_sample")',
+                    'size',
+                ],
+                'sample_size_max': [
+                    'func_name.str.contains(".get_sample")',
+                    'size_max',
+                ],
+                'sample_size_min': [
+                    'func_name.str.contains(".get_sample")',
+                    'size_min',
+                ],
+                'sample_time': [
+                    'func_name.str.contains(".get_sample")',  # for unet3d check open
+                    'time',
+                ],
+            },
+            'checkpoint': {},
+            Layer.POSIX: {
+                'data_count': ['io_cat == 1 or io_cat == 2', 'count'],
+                'data_size': ['io_cat == 1 or io_cat == 2', 'size'],
+                'data_size_max': ['io_cat == 1 or io_cat == 2', 'size_max'],
+                'data_size_min': ['io_cat == 1 or io_cat == 2', 'size_min'],
+                'data_time': ['io_cat == 1 or io_cat == 2', 'time'],
+                'ipc_count': ['io_cat == 5', 'count'],
+                'ipc_time': ['io_cat == 5', 'time'],
+                'metadata_count': ['io_cat == 3', 'count'],
+                'metadata_time': ['io_cat == 3', 'time'],
+                'other_count': ['io_cat == 6', 'count'],
+                'other_time': ['io_cat == 6', 'time'],  # mmap, dup, dup2
+                'pctl_count': ['io_cat == 4', 'count'],
+                'pctl_time': ['io_cat == 4', 'time'],
+                'read_count': ['io_cat == 1', 'count'],
+                'read_size': ['io_cat == 1', 'size'],
+                'read_size_max': ['io_cat == 1', 'size_max'],
+                'read_size_min': ['io_cat == 1', 'size_min'],
+                'read_time': ['io_cat == 1', 'time'],
+                'write_count': ['io_cat == 2', 'count'],
+                'write_size': ['io_cat == 2', 'size'],
+                'write_size_max': ['io_cat == 2', 'size_max'],
+                'write_size_min': ['io_cat == 2', 'size_min'],
+                'write_time': ['io_cat == 2', 'time'],
+                'close_count': [
+                    'io_cat == 3 and func_name.str.contains("close") and ~func_name.str.contains("dir")',
+                    'count',
+                ],
+                'close_time': [
+                    'io_cat == 3 and func_name.str.contains("close") and ~func_name.str.contains("dir")',
+                    'time',
+                ],
+                'open_count': [
+                    'io_cat == 3 and func_name.str.contains("open") and ~func_name.str.contains("dir")',
+                    'count',
+                ],
+                'open_time': [
+                    'io_cat == 3 and func_name.str.contains("open") and ~func_name.str.contains("dir")',
+                    'time',
+                ],
+                'seek_count': [
+                    'io_cat == 3 and func_name.str.contains("seek")',
+                    'count',
+                ],
+                'seek_time': [
+                    'io_cat == 3 and func_name.str.contains("seek")',
+                    'time',
+                ],
+                'stat_count': [
+                    'io_cat == 3 and func_name.str.contains("stat")',
+                    'count',
+                ],
+                'stat_time': [
+                    'io_cat == 3 and func_name.str.contains("stat")',
+                    'time',
+                ],
+            },
+        }
+    )
+    additional_metrics: Dict[str, Dict[str, Optional[str]]] = field(
+        default_factory=lambda: {
+            Layer.APP: {},
+            'dlio': {'compute_util': 'compute_time / (compute_time + stall_time)'},
+            'compute': {},
+            Layer.DATALOADER: {},
+            'reader': {},
+            'checkpoint': {},
+            Layer.POSIX: {},
+        }
+    )
+    logical_views: Dict[str, Dict[str, Optional[str]]] = field(
+        default_factory=lambda: {
+            'file_name': {
+                'file_dir': None,
+                'file_pattern': None,
+            },
+            'proc_name': {
+                'host_name': 'proc_name.str.split("#").str[1]',
+                'proc_id': 'proc_name.str.split("#").str[2]',
+                'thread_id': 'proc_name.str.split("#").str[3]',
+            },
+        }
+    )
+    metric_overrides: Dict[str, Dict[str, list]] = field(
+        default_factory=lambda: {
+            Layer.APP: {
+                # 'time': ['func_name.isin(["<module>.yield"])', 0.0],
+            },
+            'dlio': {},
+            'compute': {},
+            Layer.DATALOADER: {
+                'count': ['cat == "ai_framework"', 0],
+                'time': ['cat == "ai_framework"', 0.0],
+            },
+            'reader': {},
+            'checkpoint': {},
+            Layer.POSIX: {},
         }
     )
     time_granularity: Optional[float] = 1e6
@@ -238,7 +401,7 @@ class Config:
     unoverlapped_posix_only: Optional[bool] = False
 
 
-def init_hydra_config_store() -> None:
+def init_hydra_config_store() -> ConfigStore:
     cs = ConfigStore.instance()
     cs.store(group="hydra/help", name="custom", node=asdict(CustomHelpConfig()))
     cs.store(group="hydra/job", name="custom", node=CustomJobConfig)
@@ -255,3 +418,4 @@ def init_hydra_config_store() -> None:
     cs.store(group="output", name="console", node=ConsoleOutputConfig)
     cs.store(group="output", name="csv", node=CSVOutputConfig)
     cs.store(group="output", name="sqlite", node=SQLiteOutputConfig)
+    return cs

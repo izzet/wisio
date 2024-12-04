@@ -1,28 +1,30 @@
 import dask
 import dask.dataframe as dd
-import portion as I
-import math
 import json
 import logging
+import math
+import numpy as np
 import os
+import pandas as pd
+import portion as I
 import zindex_py as zindex
 from dask.distributed import wait
 from glob import glob
 from typing import List
 
-from .analysis import set_unoverlapped_times
 from .analyzer import Analyzer
 from .constants import (
     COL_ACC_PAT,
     COL_COUNT,
     COL_FILE_NAME,
-    COL_FUNC_ID,
+    COL_FUNC_NAME,
     COL_HOST_NAME,
     COL_IO_CAT,
     COL_PROC_NAME,
     COL_TIME,
     COL_TIME_RANGE,
     POSIX_IO_CAT_MAPPING,
+    POSIX_METADATA_FUNCTIONS,
     IOCategory,
     Layer,
 )
@@ -31,33 +33,45 @@ from .types import ViewType
 
 CAT_POSIX = 'POSIX'
 CAT_STDIO = 'STDIO'
-COND_APP = {
-    "cat": {"IO"},
-    "name": {
-        "NPZReader.read_index",
-        "TFReader.parse_image",
-        "__getitem__",
-        "checkpoint",
-        "read_index",
-    },
+COND_CHECKPOINT = {
+    "cat": {"checkpoint"},
+    "name": {"TFCheckpointing.checkpoint"},
 }
 COND_COMPUTE = {
     "cat": {"compute"},
-    "name": {"compute", "cpu"},
+    "name": {"TFFramework.compute", "compute", "cpu"},
 }
-COND_IO = {
-    "cat": {CAT_POSIX, CAT_STDIO},
-    "name": set(),
+COND_READ = {
+    "cat": {"IO"},
+    "name": {
+        "TFReader._parse_image",
+        "TorchDataset.__getitem__",
+    },
 }
 DFTRACER_TIME_RESOLUTION = 1e6
-IGNORED_CALLS = [
-    "DLIOBenchmark.__init__",
-    "DLIOBenchmark._train",
-    "DLIOBenchmark.initialize",
-    "DLIOBenchmark.run",
+IGNORED_FUNC_NAMES = [
+    'DLIOBenchmark.__init__',
+    'DLIOBenchmark._train',
+    'DLIOBenchmark.initialize',
+    'DLIOBenchmark.run',
+    'IndexedBinaryMMapReader.__init__',
+    'IndexedBinaryMMapReader.load_index',
+    'IndexedBinaryMMapReader.read_index',
+    'NPZReader.__init__',
+    'NPZReader.next',
+    'TFFramework.get_loader',
+    'TFFramework.init_loader',
+    'TFFramework.is_nativeio_available',
+    'TFFramework.trace_object',
+    'TFReader.__init__',
+    'TFReader.next',
+    'TorchFramework.get_loader',
+    'TorchFramework.init_loader',
+    'TorchFramework.is_nativeio_available',
+    'TorchFramework.trace_object',
 ]
 PFW_COL_MAPPING = {
-    'name': COL_FUNC_ID,
+    'name': COL_FUNC_NAME,
     'dur': COL_TIME,
     'trange': COL_TIME_RANGE,
 }
@@ -128,99 +142,106 @@ def get_conditions_deepspeed(json_obj):
 
 
 def get_conditions_generic(json_obj: dict):
-    app_cond = any(
-        any(cond in json_obj[prop] for cond in conditions)
-        for prop, conditions in COND_APP.items()
+    checkpoint_cond = any(
+        any(cond == json_obj[prop] for cond in conditions)
+        for prop, conditions in COND_CHECKPOINT.items()
     )
     compute_cond = any(
-        any(cond in json_obj[prop] for cond in conditions)
+        any(cond == json_obj[prop] for cond in conditions)
         for prop, conditions in COND_COMPUTE.items()
     )
-    io_cond = any(
-        any(cond in json_obj[prop] for cond in conditions)
-        for prop, conditions in COND_IO.items()
+    read_cond = any(
+        any(cond == json_obj[prop] for cond in conditions)
+        for prop, conditions in COND_READ.items()
     )
-    return app_cond, compute_cond, io_cond
+    return checkpoint_cond, compute_cond, read_cond
+
+
+def get_io_cat(func_name: str):
+    if func_name in POSIX_METADATA_FUNCTIONS:
+        return IOCategory.METADATA.value
+    if func_name in POSIX_IO_CAT_MAPPING:
+        return POSIX_IO_CAT_MAPPING[func_name].value
+    return IOCategory.OTHER.value
 
 
 def io_columns(time_approximate=True):
-    return {
-        # "compute_time": "string" if not time_approximate else np.float64,
-        # "io_time": "string" if not time_approximate else np.float64,
-        # "app_io_time": "string" if not time_approximate else np.float64,
-        # "total_time": "string" if not time_approximate else np.float64,
-        # "fhash": "string",
-        # # "hostname": "string",
-        # "phase": np.int16,
-        # "size": np.int64,
-        'compute_time': "string[pyarrow]"
-        if not time_approximate
-        else "uint64[pyarrow]",
-        'io_time': "string[pyarrow]" if not time_approximate else "uint64[pyarrow]",
-        'app_io_time': "string[pyarrow]" if not time_approximate else "uint64[pyarrow]",
-        'total_time': "string[pyarrow]" if not time_approximate else "uint64[pyarrow]",
+    columns = {
         'fhash': "uint64[pyarrow]",
         'hhash': "uint64[pyarrow]",
+        'image_id': "uint64[pyarrow]",
+        'io_cat': "uint8[pyarrow]",
         'phase': "uint16[pyarrow]",
         'size': "uint64[pyarrow]",
     }
+    if time_approximate:
+        columns.update(
+            {
+                'compute_time': "uint64[pyarrow]",
+                'checkpoint_time': "uint64[pyarrow]",
+                'read_time': "uint64[pyarrow]",
+            }
+        )
+    else:
+        columns.update(
+            {
+                'compute_time': "string[pyarrow]",
+                'checkpoint_time': "string[pyarrow]",
+                'read_time': "string[pyarrow]",
+            }
+        )
+    return columns
 
 
 def io_function(json_object, current_dict, time_approximate, condition_fn):
     d = {}
+    d[COL_IO_CAT] = IOCategory.OTHER.value
     d["phase"] = 0
     if not condition_fn:
         # condition_fn = get_conditions_default
         # condition_fn = get_conditions_deepspeed
         condition_fn = get_conditions_generic
-    app_io_cond, compute_cond, io_cond = condition_fn(json_object)
+    checkpoint_cond, compute_cond, read_cond = condition_fn(json_object)
     if time_approximate:
-        d["total_time"] = 0
         if compute_cond:
             d["compute_time"] = current_dict["dur"]
-            d["total_time"] = current_dict["dur"]
             d["phase"] = 1
-        elif io_cond:
-            d["io_time"] = current_dict["dur"]
-            d["total_time"] = current_dict["dur"]
+        elif read_cond:
+            d["read_time"] = current_dict["dur"]
             d["phase"] = 2
-        elif app_io_cond:
-            d["total_time"] = current_dict["dur"]
-            d["app_io_time"] = current_dict["dur"]
+        elif checkpoint_cond:
+            d["checkpoint_time"] = current_dict["dur"]
             d["phase"] = 3
     else:
         if compute_cond:
             d["compute_time"] = current_dict["tinterval"]
-            d["total_time"] = current_dict["tinterval"]
             d["phase"] = 1
-        elif io_cond:
-            d["io_time"] = current_dict["tinterval"]
-            d["total_time"] = current_dict["tinterval"]
+        elif read_cond:
+            d["read_time"] = current_dict["tinterval"]
             d["phase"] = 2
-        elif app_io_cond:
-            d["app_io_time"] = current_dict["tinterval"]
-            d["total_time"] = current_dict["tinterval"]
+        elif checkpoint_cond:
+            d["checkpoint_time"] = current_dict["tinterval"]
             d["phase"] = 3
-        else:
-            d["total_time"] = I.to_string(I.empty())
-            d["io_time"] = I.to_string(I.empty())
     if "args" in json_object:
         if "fhash" in json_object["args"]:
             if type(json_object["args"]["fhash"]) is str:
                 d["fhash"] = int(json_object["args"]["fhash"], 16)
             else:
                 d["fhash"] = json_object["args"]["fhash"]
-        if "POSIX" == json_object["cat"] and "ret" in json_object["args"]:
-            size = int(json_object["args"]["ret"])
-            if size > 0:
-                if "write" in json_object["name"]:
-                    d["size"] = size
-                elif (
-                    "read" in json_object["name"]
-                    and "readdir" not in json_object["name"]
-                ):
-                    d["size"] = size
+        if json_object["cat"] in [CAT_POSIX, CAT_STDIO]:
+            name = json_object["name"]
+            io_cat = get_io_cat(name)
+            if "ret" in json_object["args"]:
+                size = int(json_object["args"]["ret"])
+                if size > 0:
+                    if io_cat in [IOCategory.READ.value, IOCategory.WRITE.value]:
+                        d["size"] = size
+            d[COL_IO_CAT] = io_cat
         else:
+            if "image_idx" in json_object["args"]:
+                image_id = int(json_object["args"]["image_idx"])
+                if image_id > 0:
+                    d["image_id"] = image_id
             if "image_size" in json_object["args"]:
                 size = int(json_object["args"]["image_size"])
                 if size > 0:
@@ -271,17 +292,27 @@ def load_objects(line, fn, time_granularity, time_approximate, condition_fn, loa
                 d["pid"] = val["pid"]
             if "tid" in val:
                 d["tid"] = val["tid"]
-            d["step"] = 0
             if "args" in val:
                 if "hhash" in val["args"]:
                     if type(val["args"]["hhash"]) is str:
                         d["hhash"] = int(val["args"]["hhash"], 16)
                     else:
                         d["hhash"] = val["args"]["hhash"]
+
                 if "level" in val["args"]:
                     d["level"] = int(val["args"]["level"])
+                if (
+                    "epoch" in val["args"]
+                    and val["args"]["epoch"] != "train"
+                    and val["args"]["epoch"] != "valid"
+                ):
+                    epoch = int(val["args"]["epoch"])
+                    if epoch > 0:
+                        d["epoch"] = epoch
                 if "step" in val["args"]:
-                    d["step"] = int(val["args"]["step"])
+                    step = int(val["args"]["step"])
+                    if step > 0:
+                        d["step"] = step
             if "M" == val["ph"]:
                 if d["name"] == "FH":
                     d["type"] = 1  # 1-> file hash
@@ -365,24 +396,6 @@ def load_objects(line, fn, time_granularity, time_approximate, condition_fn, loa
 
 
 class DFTracerAnalyzer(Analyzer):
-    def additional_high_level_metrics(self):
-        columns = {
-            'app_io_time': [sum],
-            'checkpoint_io_time': [sum],
-            'compute_time': [sum],
-            'io_time': [sum],
-            'read_io_time': [sum],
-        }
-        column_names = {
-            'app_io_time_sum': 'app_io_time',
-            'checkpoint_io_time_sum': 'checkpoint_io_time',
-            'compute_time_sum': 'compute_time',
-            'io_time_sum': 'io_time',
-            'read_io_time_sum': 'read_io_time',
-        }
-        # print("Additional high level metrics:", list(columns.keys()))
-        return columns, column_names
-
     def read_trace(self, trace_path: str) -> dd.DataFrame:
         conditions = None
         load_cols = {}
@@ -490,21 +503,23 @@ class DFTracerAnalyzer(Analyzer):
             # # columns.update(load_cols)
             # traces = main_bag.to_dataframe(meta=columns)
             columns = {
-                'name': "string[pyarrow]",
                 'cat': "string[pyarrow]",
-                'type': "uint8[pyarrow]",
-                'pid': "uint64[pyarrow]",
-                'tid': "uint64[pyarrow]",
-                'ts': "uint64[pyarrow]",
-                'te': "uint64[pyarrow]",
                 'dur': "uint64[pyarrow]",
-                'tinterval': "string[pyarrow]"
-                if not self.time_approximate
-                else "uint64[pyarrow]",
-                'trange': "uint64[pyarrow]",
+                'epoch': "uint64[pyarrow]",
                 'level': "uint8[pyarrow]",
+                'name': "string[pyarrow]",
+                'pid': "uint64[pyarrow]",
                 'step': "uint64[pyarrow]",
+                'te': "uint64[pyarrow]",
+                'tid': "uint64[pyarrow]",
+                'trange': "uint64[pyarrow]",
+                'ts': "uint64[pyarrow]",
+                'type': "uint8[pyarrow]",
             }
+            if self.time_approximate:
+                columns['tinterval'] = "uint64[pyarrow]"
+            else:
+                columns['tinterval'] = "string[pyarrow]"
             columns.update(io_columns())
             columns.update(load_cols)
             file_hash_columns = {
@@ -601,16 +616,31 @@ class DFTracerAnalyzer(Analyzer):
         self.events['dur'] = self.events['dur'] / DFTRACER_TIME_RESOLUTION
 
         file_hashes = self.file_hash[['name']].rename(columns={'name': COL_FILE_NAME})
-        host_hashes = self.host_hash.set_index('hhash')[['name']].rename(
-            columns={'name': COL_HOST_NAME}
-        )
+        host_hhash_empty = self.host_hash['hhash'].isna().all().compute()
+        if host_hhash_empty:
+            host_hashes = self.host_hash[['name']].rename(
+                columns={'name': COL_HOST_NAME}
+            )
+        else:
+            host_hashes = self.host_hash.set_index('hhash')[['name']].rename(
+                columns={'name': COL_HOST_NAME}
+            )
 
-        self.events = self.events.merge(
-            file_hashes, how='left', left_on='fhash', right_index=True
-        ).drop(columns=['fhash'])
-        self.events = self.events.merge(
-            host_hashes, how='left', left_on='hhash', right_index=True
-        ).drop(columns=['hhash'])
+        self.events = (
+            self.events.merge(
+                file_hashes,
+                how='left',
+                left_on='fhash',
+                right_index=True,
+            )
+            .merge(
+                host_hashes,
+                how='left',
+                left_on='hhash',
+                right_index=True,
+            )
+            .drop(columns=['fhash', 'hhash'])
+        )
 
         return self.events.rename(columns=PFW_COL_MAPPING)
 
@@ -620,19 +650,20 @@ class DFTracerAnalyzer(Analyzer):
         view_types: List[ViewType],
     ) -> dd.DataFrame:
         # ignore the ignored calls
-        traces = traces[~traces[COL_FUNC_ID].isin(IGNORED_CALLS)]
+        traces = traces[~traces[COL_FUNC_NAME].isin(IGNORED_FUNC_NAMES)]
 
-        traces['app_io_time'] = traces['app_io_time'] / DFTRACER_TIME_RESOLUTION
-        traces['compute_time'] = traces['compute_time'] / DFTRACER_TIME_RESOLUTION
-        traces['io_time'] = traces['io_time'] / DFTRACER_TIME_RESOLUTION
-        traces['read_io_time'] = 0.0
-        traces['read_io_time'] = traces['read_io_time'].mask(
-            traces['func_id'].str.contains('__getitem__'), traces['time']
-        )
-        traces['checkpoint_io_time'] = 0.0
-        traces['checkpoint_io_time'] = traces['checkpoint_io_time'].mask(
-            traces['func_id'].str.contains('checkpoint'), traces['time']
-        )
+        # traces['compute_time'] = traces['compute_time'] / DFTRACER_TIME_RESOLUTION
+        # traces['checkpoint_time'] = traces['checkpoint_time'] / DFTRACER_TIME_RESOLUTION
+        # traces['read_time'] = traces['read_time'] / DFTRACER_TIME_RESOLUTION
+        # traces['io_time'] = traces['io_time'] / DFTRACER_TIME_RESOLUTION
+        # traces['io_checkpoint_time'] = 0.0
+        # traces['io_checkpoint_time'] = traces['io_checkpoint_time'].mask(
+        #     traces['func_id'].str.contains('checkpoint'), traces['time']
+        # )
+        # traces['io_read_time'] = 0.0
+        # traces['io_read_time'] = traces['io_read_time'].mask(
+        #     traces['func_id'].str.contains('__getitem__|_parse_image'), traces['time']
+        # )
 
         traces[COL_ACC_PAT] = 0
         traces[COL_COUNT] = 1
@@ -647,35 +678,63 @@ class DFTracerAnalyzer(Analyzer):
                 + traces['tid'].astype(str)
             )
 
-        traces[COL_IO_CAT] = IOCategory.OTHER.value
-        for io_cat, io_funcs in POSIX_IO_CAT_MAPPING.items():
-            if io_cat == IOCategory.METADATA:
-                traces[COL_IO_CAT] = traces[COL_IO_CAT].mask(
-                    (traces['cat'] == CAT_POSIX)
-                    & traces[COL_FUNC_ID].str.contains('|'.join(io_funcs)),
-                    io_cat.value,
-                )
-            else:
-                metadata_funcs = POSIX_IO_CAT_MAPPING[IOCategory.METADATA]
-                traces[COL_IO_CAT] = traces[COL_IO_CAT].mask(
-                    (traces['cat'] == CAT_POSIX)
-                    & traces[COL_FUNC_ID].str.contains('|'.join(io_funcs))
-                    & ~traces[COL_FUNC_ID].str.contains('|'.join(metadata_funcs)),
-                    io_cat.value,
-                )
-
         # drop columns that are not needed
-        if COL_FILE_NAME not in view_types:
-            traces = traces.drop(columns=[COL_FILE_NAME], errors='ignore')
-        if COL_HOST_NAME not in view_types:
-            traces = traces.drop(columns=[COL_HOST_NAME], errors='ignore')
+        # if COL_FILE_NAME not in view_types:
+        #     traces = traces.drop(columns=[COL_FILE_NAME], errors='ignore')
+        # if COL_HOST_NAME not in view_types:
+        #     traces = traces.drop(columns=[COL_HOST_NAME], errors='ignore')
+
+        # Set batches
+        # traces['batch'] = traces.groupby(['func_name', 'step']).cumcount() + 1
+        # batch_counts = traces['batch'].value_counts()
+        # last_valid_batch = batch_counts[batch_counts > 1].index.max()
+        # traces['batch'] = traces['batch'].mask(
+        #     traces['batch'] > last_valid_batch, pd.NA
+        # )
+
+        # pytorch reads images instead of batches
+        # e.g. 4 workers = 0..4 images = who starts/finishes first
+
+        # epoch and step make sense in dlio layer
+
+        # to put step back, target variable = previous compute + my io
+
+        # Set steps depending on time ranges
+        # step_time_ranges = traces.groupby(['pid', 'epoch', 'step']).agg({'ts': min, 'te': max})
+        # traces = traces.map_partitions(
+        #     self._set_steps, step_time_ranges=step_time_ranges.reset_index()
+        # )
 
         return traces
 
     def compute_job_time(self, traces: dd.DataFrame) -> float:
         return (traces['te'].max() - traces['ts'].min()) / DFTRACER_TIME_RESOLUTION
 
-    def set_layer_columns(self, layer: Layer, hlm: dd.DataFrame) -> dd.DataFrame:
-        hlm = super().set_layer_columns(layer, hlm)
-        hlm = set_unoverlapped_times(hlm)
-        return hlm
+    @staticmethod
+    def _set_steps(df: pd.DataFrame, step_time_ranges: pd.DataFrame):
+        mapped_traces = df.copy()
+
+        for pid in df['pid'].unique():
+            pid_trace_cond = mapped_traces['pid'] == pid
+            pid_traces = mapped_traces[pid_trace_cond]
+            pid_step_ranges = step_time_ranges[step_time_ranges['pid'] == pid]
+
+            # Sort step ranges by start timestamp
+            pid_step_ranges_sorted = pid_step_ranges.sort_values('ts')
+
+            # Create bins and labels
+            bins = pid_step_ranges_sorted['ts'].tolist()
+            if len(bins) > 0:
+                bins.append(pid_step_ranges_sorted['te'].max())
+            # print(pid, bins)
+            steps = pid_step_ranges_sorted['step'].tolist()
+
+            # Use np.digitize to find bin indices
+            bin_indices = np.digitize(pid_traces['ts'], bins=bins) - 1
+
+            # Map indices to steps, leaving as None for out-of-range timestamps
+            mapped_traces.loc[pid_trace_cond, 'step'] = [
+                steps[idx] if 0 <= idx < len(steps) else pd.NA for idx in bin_indices
+            ]
+
+        return mapped_traces

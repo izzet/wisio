@@ -238,6 +238,7 @@ class AnalyzerResultType:
     main_views: Dict[Layer, MainView]
     metric_boundaries: Dict[Layer, MetricBoundaries]
     raw_stats: RawStats
+    traces: dd.DataFrame
     view_types: List[ViewType]
     views: Dict[Layer, Views]
 

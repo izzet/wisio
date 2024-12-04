@@ -135,7 +135,7 @@ def set_metric_scores(
 
 
 def set_metrics(
-    df: pd.DataFrame,
+    view: pd.DataFrame,
     metrics: List[Metric],
     metric_boundaries: Dict[Metric, float],
     is_slope_based: bool,
@@ -162,19 +162,4 @@ def set_metrics(
     # for the capability of automated bottleneck detection
     # absolute value of io time doesn't give us the rate of change depending on io_time/count
 
-    return df
-
-
-def set_unoverlapped_times(df: pd.DataFrame):
-    required_columns = ['compute_time', 'app_io_time', 'io_time']
-    for col in required_columns:
-        if col not in df.columns:
-            raise ValueError(f"Missing column {col} for unoverlapped time calculation")
-    time_cols = [col for col in df.columns if '_time' in col]
-    for time_col in time_cols:
-        if 'u_' in time_col or '_per' in time_col:
-            continue
-        df[f'u_{time_col}'] = np.maximum(df[time_col] - df['compute_time'], 0)
-    df['u_app_compute_time'] = np.maximum(df['compute_time'] - df['app_io_time'], 0)
-    df['u_compute_time'] = np.maximum(df['compute_time'] - df['io_time'], 0)
     return df
