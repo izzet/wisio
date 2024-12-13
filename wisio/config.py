@@ -21,6 +21,7 @@ class AnalyzerConfig:
     checkpoint: Optional[bool] = True
     checkpoint_dir: Optional[str] = "${hydra:runtime.output_dir}/checkpoints"
     layer_defs: Dict[str, str] = MISSING
+    layer_deps: Optional[Dict[str, Optional[str]]] = MISSING
     time_approximate: Optional[bool] = True
     time_granularity: Optional[float] = MISSING
 
@@ -36,35 +37,28 @@ class DFTracerAnalyzerConfig(AnalyzerConfig):
     _target_: str = "wisio.dftracer.DFTracerAnalyzer"
     layer_defs: Dict[str, str] = field(
         default_factory=lambda: {
-            # Layer.APP: '~cat.isin(["config", "dftracer"])',
             'dlio': 'cat.isin(["dlio_benchmark"])',
             'compute': 'cat.isin(["ai_framework"])',
-            Layer.DATALOADER: 'cat.isin(["data_loader"])',
-            'checkpoint': 'cat.isin(["checkpoint"])',
+            'dataloader': 'cat.isin(["data_loader"])',
+            'image': 'func_name.str.contains(".__getitem__")',
             'reader': 'cat.isin(["reader"])',
-            Layer.POSIX: 'cat.isin(["POSIX", "STDIO"])',
+            'posix': 'cat.isin(["POSIX", "STDIO", "POSIX_lustre", "POSIX_ssd", "STDIO_lustre", "STDIO_ssd"])',
+            'checkpoint': 'cat.isin(["checkpoint"]) & ~func_name.str.contains("checkpoint_start_|checkpoint_end_|.save_state")',
+        }
+    )
+    layer_deps: Optional[Dict[str, Optional[str]]] = field(
+        default_factory=lambda: {
+            'dlio': None,
+            'compute': 'dlio',
+            'dataloader': None,
+            'image': 'dataloader',
+            'reader': 'image',
+            'posix': 'reader',
+            'checkpoint': None,
         }
     )
     derived_metrics: Dict[str, Dict[str, list]] = field(
         default_factory=lambda: {
-            Layer.APP: {
-                # 'checkpoint_time': [
-                #     'cat == "checkpoint" or func_name.isin(["TFCheckpointing.checkpoint"])',
-                #     'time',
-                # ],
-                # 'compute_time': [
-                #     'func_name.isin(["<module>.yield"])',
-                #     'time',
-                # ],
-                # 'read_time': [
-                #     'func_name.str.contains(".__getitem__|._parse_image")',
-                #     'time',
-                # ],
-                # 'stall_time': [
-                #     'func_name.isin(["<module>.iter"])',
-                #     'time',
-                # ],
-            },
             'dlio': {
                 'compute_time': [
                     'func_name.isin(["<module>.yield"])',
@@ -76,12 +70,13 @@ class DFTracerAnalyzerConfig(AnalyzerConfig):
                 ],
             },
             'compute': {},
-            Layer.DATALOADER: {
+            'dataloader': {
                 'sample_time': [
                     'func_name.str.contains(".__getitem__|._parse_image")',
                     'time',
                 ],
             },
+            'image': {},
             'reader': {
                 'preprocess_time': [
                     'func_name.str.contains(".preprocess")',
@@ -104,8 +99,7 @@ class DFTracerAnalyzerConfig(AnalyzerConfig):
                     'time',
                 ],
             },
-            'checkpoint': {},
-            Layer.POSIX: {
+            'posix': {
                 'data_count': ['io_cat == 1 or io_cat == 2', 'count'],
                 'data_size': ['io_cat == 1 or io_cat == 2', 'size'],
                 'data_size_max': ['io_cat == 1 or io_cat == 2', 'size_max'],
@@ -115,20 +109,69 @@ class DFTracerAnalyzerConfig(AnalyzerConfig):
                 'ipc_time': ['io_cat == 5', 'time'],
                 'metadata_count': ['io_cat == 3', 'count'],
                 'metadata_time': ['io_cat == 3', 'time'],
+                'metadata_lustre_count': [
+                    'io_cat == 3 and cat.str.endswith("_lustre")',
+                    'count',
+                ],
+                'metadata_ssd_count': [
+                    'io_cat == 3 and cat.str.endswith("_ssd")',
+                    'count',
+                ],
+                'metadata_lustre_time': [
+                    'io_cat == 3 and cat.str.endswith("_lustre")',
+                    'time',
+                ],
+                'metadata_ssd_time': [
+                    'io_cat == 3 and cat.str.endswith("_ssd")',
+                    'time',
+                ],
                 'other_count': ['io_cat == 6', 'count'],
-                'other_time': ['io_cat == 6', 'time'],  # mmap, dup, dup2
+                'other_time': ['io_cat == 6', 'time'],
                 'pctl_count': ['io_cat == 4', 'count'],
                 'pctl_time': ['io_cat == 4', 'time'],
                 'read_count': ['io_cat == 1', 'count'],
+                'read_lustre_count': [
+                    'io_cat == 1 and cat.str.endswith("_lustre")',
+                    'count',
+                ],
+                'read_ssd_count': ['io_cat == 1 and cat.str.endswith("_ssd")', 'count'],
                 'read_size': ['io_cat == 1', 'size'],
+                'read_lustre_size': [
+                    'io_cat == 1 and cat.str.endswith("_lustre")',
+                    'size',
+                ],
+                'read_ssd_size': ['io_cat == 1 and cat.str.endswith("_ssd")', 'size'],
                 'read_size_max': ['io_cat == 1', 'size_max'],
                 'read_size_min': ['io_cat == 1', 'size_min'],
                 'read_time': ['io_cat == 1', 'time'],
+                'read_lustre_time': [
+                    'io_cat == 1 and cat.str.endswith("_lustre")',
+                    'time',
+                ],
+                'read_ssd_time': ['io_cat == 1 and cat.str.endswith("_ssd")', 'time'],
                 'write_count': ['io_cat == 2', 'count'],
+                'write_lustre_count': [
+                    'io_cat == 2 and cat.str.endswith("_lustre")',
+                    'count',
+                ],
+                'write_ssd_count': [
+                    'io_cat == 2 and cat.str.endswith("_ssd")',
+                    'count',
+                ],
                 'write_size': ['io_cat == 2', 'size'],
+                'write_lustre_size': [
+                    'io_cat == 2 and cat.str.endswith("_lustre")',
+                    'size',
+                ],
+                'write_ssd_size': ['io_cat == 2 and cat.str.endswith("_ssd")', 'size'],
                 'write_size_max': ['io_cat == 2', 'size_max'],
                 'write_size_min': ['io_cat == 2', 'size_min'],
                 'write_time': ['io_cat == 2', 'time'],
+                'write_lustre_time': [
+                    'io_cat == 2 and cat.str.endswith("_lustre")',
+                    'time',
+                ],
+                'write_ssd_time': ['io_cat == 2 and cat.str.endswith("_ssd")', 'time'],
                 'close_count': [
                     'io_cat == 3 and func_name.str.contains("close") and ~func_name.str.contains("dir")',
                     'count',
@@ -162,17 +205,12 @@ class DFTracerAnalyzerConfig(AnalyzerConfig):
                     'time',
                 ],
             },
+            'checkpoint': {},
         }
     )
-    additional_metrics: Dict[str, Dict[str, Optional[str]]] = field(
+    additional_metrics: Optional[Dict[str, Optional[str]]] = field(
         default_factory=lambda: {
-            Layer.APP: {},
-            'dlio': {'compute_util': 'compute_time / (compute_time + stall_time)'},
-            'compute': {},
-            Layer.DATALOADER: {},
-            'reader': {},
-            'checkpoint': {},
-            Layer.POSIX: {},
+            'dlio_compute_util': 'dlio_compute_time / (dlio_compute_time + dlio_stall_time + checkpoint_time.fillna(0))',
         }
     )
     logical_views: Dict[str, Dict[str, Optional[str]]] = field(
@@ -186,22 +224,6 @@ class DFTracerAnalyzerConfig(AnalyzerConfig):
                 'proc_id': 'proc_name.str.split("#").str[2]',
                 'thread_id': 'proc_name.str.split("#").str[3]',
             },
-        }
-    )
-    metric_overrides: Dict[str, Dict[str, list]] = field(
-        default_factory=lambda: {
-            Layer.APP: {
-                # 'time': ['func_name.isin(["<module>.yield"])', 0.0],
-            },
-            'dlio': {},
-            'compute': {},
-            Layer.DATALOADER: {
-                'count': ['cat == "ai_framework"', 0],
-                'time': ['cat == "ai_framework"', 0.0],
-            },
-            'reader': {},
-            'checkpoint': {},
-            Layer.POSIX: {},
         }
     )
     time_granularity: Optional[float] = 1e6

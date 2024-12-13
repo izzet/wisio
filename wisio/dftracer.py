@@ -54,17 +54,29 @@ IGNORED_FUNC_NAMES = [
     'DLIOBenchmark._train',
     'DLIOBenchmark.initialize',
     'DLIOBenchmark.run',
+    'FileStorage.__init__',
     'IndexedBinaryMMapReader.__init__',
     'IndexedBinaryMMapReader.load_index',
     'IndexedBinaryMMapReader.read_index',
     'NPZReader.__init__',
     'NPZReader.next',
+    'SCRPyTorchCheckpointing.__init__',
+    'TFCheckpointing.__init__',
+    'TFCheckpointing.finalize',
+    'TFDataLoader.__init__',
+    'TFDataLoader.finalize',
+    'TFDataLoader.next',
     'TFFramework.get_loader',
     'TFFramework.init_loader',
     'TFFramework.is_nativeio_available',
     'TFFramework.trace_object',
     'TFReader.__init__',
     'TFReader.next',
+    'TorchDataLoader.__init__',
+    'TorchDataLoader.finalize',
+    'TorchDataLoader.next',
+    'TorchDataset.__init__',
+    'TorchDataset.worker_init',
     'TorchFramework.get_loader',
     'TorchFramework.init_loader',
     'TorchFramework.is_nativeio_available',
@@ -704,6 +716,17 @@ class DFTracerAnalyzer(Analyzer):
         # traces = traces.map_partitions(
         #     self._set_steps, step_time_ranges=step_time_ranges.reset_index()
         # )
+
+        traces['cat'] = traces['cat'].mask(
+            traces['cat'].isin(['POSIX', 'STDIO'])
+            & traces['file_name'].str.contains('/lustre'),
+            traces['cat'] + '_lustre',
+        )
+        traces['cat'] = traces['cat'].mask(
+            traces['cat'].isin(['POSIX', 'STDIO'])
+            & traces['file_name'].str.contains('/ssd'),
+            traces['cat'] + '_ssd',
+        )
 
         return traces
 

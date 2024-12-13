@@ -2,7 +2,7 @@ import abc
 import dask.dataframe as dd
 import numpy as np
 import pandas as pd
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from .constants import COL_PROC_NAME
 from .types import Layer, RawStats, Score
@@ -263,6 +263,23 @@ KNOWN_METRICS: Dict[str, Metric] = {
 }
 
 
+def _get_layer_dep_list(
+    layer_deps: Dict[Layer, Optional[Layer]],
+) -> Dict[str, List[str]]:
+    def _get_layer_deps(parent_layer: str):
+        deps = [parent_layer]
+        while layer_deps.get(parent_layer):
+            parent_layer = layer_deps[parent_layer]
+            deps.append(parent_layer)
+        return list(reversed(deps))
+
+    layer_dep_list = {}
+    for layer in layer_deps:
+        if layer_deps[layer] is not None:
+            layer_dep_list[layer] = _get_layer_deps(layer)
+    return layer_dep_list
+
+
 def _find_metric(metrics, suffix):
     return [m for m in metrics if m.endswith(suffix)]
 
@@ -274,20 +291,36 @@ def _find_metric_pairs(metrics, suffix1, suffix2):
     return [(prefix + suffix1, prefix + suffix2) for prefix in common_prefixes]
 
 
-def set_metrics(df: pd.DataFrame, time_boundary: float) -> pd.DataFrame:
+def set_metrics(
+    df: pd.DataFrame,
+    layer_defs: Dict[Layer, str],
+    layer_deps: Dict[Layer, Optional[Layer]],
+    time_boundary: float,
+) -> pd.DataFrame:
     metric_cols = []
     # Set count metrics
     for count_col in _find_metric(df.columns, '_count'):
         count_per_col = f"{count_col}_per"
         df[count_per_col] = df[count_col] / df[count_col].sum()
         metric_cols.append(count_per_col)
-    # Set unoverlapped time metrics (this has to come before time percentage calc.)
+    # Check if there is compute time
     if 'compute_time' in df.columns:
+        # Set unoverlapped time metrics (this has to come before time percentage calc.)
         for time_col in _find_metric(df.columns, '_time'):
             if 'u_' in time_col or time_col == 'compute_time':
                 continue
-            df[f"u_{time_col}"] = np.maximum(df[time_col] - df['compute_time'], 0)
+            df[f"u_{time_col}"] = np.maximum(
+                df[time_col] - df['compute_time'].fillna(0), 0
+            )
             df[f"u_{time_col}"] = df[f"u_{time_col}"].astype('double[pyarrow]')
+        # Set compute time ratios
+        for layer in layer_defs.keys():
+            ratio_col = f"{layer.lower()}_compute_per"
+            df[ratio_col] = 0.0
+            df[ratio_col] = df[ratio_col].mask(
+                df['compute_time'] > 0,
+                df[f"{layer.lower()}_time"] / df['compute_time'],
+            )
     # Set time metrics
     for time_col in _find_metric(df.columns, '_time'):
         time_norm_col = f"{time_col}_norm"
@@ -326,68 +359,57 @@ def set_metrics(df: pd.DataFrame, time_boundary: float) -> pd.DataFrame:
         metric_cols.append(ops_slope_col)
         metric_cols.append(ops_rank_col)
     cols = df.columns[df.columns.str.endswith('_bw|_per|_intensity|_norm|_rank|_slope')]
-    df[cols] = df[cols].fillna(0).astype('double[pyarrow]')
+    df[cols] = df[cols].astype('double[pyarrow]')
     # df.columns = df.columns.map(lambda col: 'm_' + col if col in metric_cols else col)
     return df.sort_index(axis=1)
 
 
+def set_metric_diffs(
+    df: pd.DataFrame,
+    layer_deps: Dict[Layer, Optional[Layer]],
+) -> pd.DataFrame:
+    def _calculate_diff(df: pd.DataFrame, dep_list: List[str]):
+        diff = df[f"{dep_list[-1]}_time"].fillna(0)
+        for dep in dep_list[:-1]:
+            diff -= df[f"{dep}_time"].fillna(0)
+        return np.where(np.isnan(diff) | (diff < 0), 0, diff)
+
+    layer_dep_list = _get_layer_dep_list(layer_deps)
+    for layer, dep_list in layer_dep_list.items():
+        df[f"d_{layer.lower()}_time"] = _calculate_diff(df.copy(), dep_list)
+
+    return df
+
+
 def set_metric_scores(df: pd.DataFrame) -> pd.DataFrame:
-    score_cols = []
     # Set bandwidth scores
     for bw_col in _find_metric(df.columns, '_bw'):
         bw_bins = BW_BINS_PER_PROC if COL_PROC_NAME in df.index.names else BW_BINS
         bw_score_col = f"{bw_col}_score"
-        # df[bw_score_col] = pd.cut(
-        #     df[bw_col],
-        #     bins=bw_bins,
-        #     labels=np.flip(SCORE_BINS),
-        #     right=True,
-        # )
         df[bw_score_col] = np.digitize(df[bw_col], bins=bw_bins, right=True)
-        df[bw_score_col] = df[bw_score_col].mask(np.isnan(df[bw_col]), 0)
-        score_cols.append(bw_score_col)
+        df[bw_score_col] = df[bw_score_col].mask(np.isnan(df[bw_col]), pd.NA)
     # Set intensity scores
     for intensity_col in _find_metric(df.columns, '_intensity'):
         intensity_score_col = f"{intensity_col}_score"
-        # df[intensity_score_col] = pd.cut(
-        #     df[intensity_col],
-        #     bins=INTENSITY_BINS,
-        #     labels=SCORE_BINS,
-        #     right=True,
-        # )
         df[intensity_score_col] = np.digitize(
             df[intensity_col], bins=INTENSITY_BINS, right=True
         )
         df[intensity_score_col] = df[intensity_score_col].mask(
-            np.isnan(df[intensity_col]), 0
+            np.isnan(df[intensity_col]), pd.NA
         )
-        score_cols.append(intensity_score_col)
     # Set percentage scores
-    for col in ["_norm", "_intensity", "_per", "_rank", "_util"]:
+    for col in ['_norm', '_per', '_rank', '_util']:
         for metric in _find_metric(df.columns, col):
             score_col = f"{metric}_score"
-            # df[score_col] = pd.cut(
-            #     df[metric],
-            #     bins=PERCENTAGE_BINS,
-            #     labels=SCORE_BINS,
-            #     right=True,
-            # )
             df[score_col] = np.digitize(df[metric], bins=PERCENTAGE_BINS, right=True)
-            df[score_col] = df[score_col].mask(np.isnan(df[metric]), 0)
-            score_cols.append(score_col)
+            if col == '_util':
+                df[score_col] = len(PERCENTAGE_BINS) - df[score_col]
+            df[score_col] = df[score_col].mask(np.isnan(df[metric]), pd.NA)
     # Set slope scores
     for slope_col in _find_metric(df.columns, '_slope'):
         slope_score_col = f"{slope_col}_score"
-        # df[slope_score_col] = pd.cut(
-        #     df[slope_col],
-        #     bins=SLOPE_BINS,
-        #     labels=SCORE_BINS,
-        #     right=True,
-        # )
         df[slope_score_col] = np.digitize(df[slope_col], bins=SLOPE_BINS, right=True)
-        df[slope_score_col] = df[slope_score_col].mask(np.isnan(df[slope_col]), 0)
-        score_cols.append(slope_score_col)
+        df[slope_score_col] = df[slope_score_col].mask(np.isnan(df[slope_col]), pd.NA)
     cols = df.columns[df.columns.str.endswith('_score')]
-    df[cols] = df[cols].fillna(0).astype('uint8[pyarrow]')
-    # df.columns = df.columns.map(lambda col: 's_' + col if col in score_cols else col)
+    df[cols] = df[cols].astype('uint8[pyarrow]')
     return df.sort_index(axis=1)

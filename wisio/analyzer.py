@@ -7,6 +7,7 @@ import logging
 import math
 import operator
 import os
+import pandas as pd
 from dask import compute, persist
 from dask.base import unpack_collections
 from dask.delayed import Delayed
@@ -36,7 +37,7 @@ from .constants import (
     IOCategory,
     Layer,
 )
-from .metrics import KNOWN_METRICS, set_metrics, set_metric_scores
+from .metrics import KNOWN_METRICS, set_metrics, set_metric_diffs, set_metric_scores
 from .rule_engine import compute_characteristics, reason_bottlenecks
 from .types import (
     AnalyzerResultType,
@@ -51,6 +52,7 @@ from .types import (
     view_name as format_view_name,
 )
 from .utils.dask_utils import event_logger, flatten_column_names
+from .utils.expr_utils import extract_numerator_denominator
 from .utils.file_utils import ensure_dir
 from .utils.json_encoders import NpEncoder
 
@@ -86,12 +88,12 @@ class Analyzer(abc.ABC):
         self,
         layer_defs: Dict[Layer, str],
         derived_metrics: Dict[Layer, Dict[str, list]],
-        metric_overrides: Optional[Dict[Layer, Dict[str, list]]],
-        additional_metrics: Optional[Dict[Layer, Dict[str, str]]] = {},
+        additional_metrics: Optional[Dict[str, Union[str, List[str]]]] = {},
         bottleneck_dir: str = "",
         checkpoint: bool = True,
         checkpoint_dir: str = "",
         debug: bool = False,
+        layer_deps: Optional[Dict[Layer, Optional[Layer]]] = {},
         logical_views: Optional[Dict[ViewType, Dict[ViewType, str]]] = {},
         time_approximate: bool = True,
         time_granularity: float = 1e6,
@@ -107,8 +109,11 @@ class Analyzer(abc.ABC):
         self.debug = debug
         self.derived_metrics = derived_metrics
         self.layer_defs = layer_defs
+        self.layer_deps = layer_deps
         self.logical_views = logical_views
-        self.metric_overrides = metric_overrides
+        self.root_layers = [
+            layer for layer, parent_layer in self.layer_deps.items() if not parent_layer
+        ]
         self.time_approximate = time_approximate
         self.time_granularity = time_granularity
         self.verbose = verbose
@@ -245,7 +250,18 @@ class Analyzer(abc.ABC):
                     )
                 else:
                     flat_views[view_key] = view
-                time_boundary_cols[view_key].append(f"{layer.lower()}_time")
+                time_boundary_col = f"{layer.lower()}_time"
+                if layer.lower() not in self.root_layers:
+                    time_boundary_col = f"d_{time_boundary_col}"
+                time_boundary_cols[view_key].append(time_boundary_col)
+
+        flat_views = {
+            view_key: set_metric_diffs(
+                flat_views[view_key],
+                layer_deps=self.layer_deps,
+            )
+            for view_key in flat_views
+        }
 
         time_boundaries = {}
         for view_key in flat_views:
@@ -264,9 +280,13 @@ class Analyzer(abc.ABC):
 
         flat_views = {
             view_key: set_metric_scores(
-                set_metrics(
-                    flat_views[view_key].fillna(0),
-                    time_boundary=time_boundaries[view_key],
+                self.set_additional_metrics(
+                    set_metrics(
+                        flat_views[view_key],
+                        layer_defs=self.layer_defs,
+                        layer_deps=self.layer_deps,
+                        time_boundary=time_boundaries[view_key],
+                    )
                 )
             )
             for view_key in flat_views
@@ -329,6 +349,17 @@ class Analyzer(abc.ABC):
             view_types=hlm_view_types,
             views=views,
         )
+
+    def set_additional_metrics(self, view: pd.DataFrame) -> pd.DataFrame:
+        for metric, eval_condition in self.additional_metrics.items():
+            view = view.eval(f"{metric} = {eval_condition}")
+            numerator_denominator = extract_numerator_denominator(eval_condition)
+            if numerator_denominator:
+                numerator, denominator = numerator_denominator
+                view[metric] = view[metric].mask(
+                    view.eval(f"{numerator}.isna() | {numerator} == 0"), pd.NA
+                )
+        return view
 
     def read_stats(self, traces: dd.DataFrame) -> RawStats:
         job_time = self.compute_job_time(traces=traces)
@@ -766,10 +797,6 @@ class Analyzer(abc.ABC):
         )
 
     def set_layer_metrics(self, layer: Layer, hlm: dd.DataFrame) -> dd.DataFrame:
-        for metric, mask_value in self.metric_overrides[layer].items():
-            mask_condition = mask_value[0]
-            override_value = mask_value[1]
-            hlm[metric] = hlm[metric].mask(hlm.eval(mask_condition), override_value)
         for metric, mask_value in self.derived_metrics[layer].items():
             mask_condition = mask_value[0]
             mask_col = mask_value[1]
@@ -936,10 +963,6 @@ class Analyzer(abc.ABC):
             )
         else:
             view = records.reset_index().groupby([view_type]).agg(non_proc_agg_dict)
-
-        for metric, eval_condition in self.additional_metrics[layer].items():
-            view = view.eval(f"{metric} = {eval_condition}")
-            view[metric] = view[metric].fillna(0).astype('double[pyarrow]')
 
         # Set metric slope
         # view = view.map_partitions(

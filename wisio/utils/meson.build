@@ -7,6 +7,7 @@ py.install_sources(
         'dask_utils.py',
         'distributed_plugins.py',
         'env_utils.py',
+        'expr_utils.py',
         'file_utils.py',
         'json_encoders.py',
         'logger.py',
