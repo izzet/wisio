@@ -49,6 +49,16 @@ COND_READ = {
     },
 }
 DFTRACER_TIME_RESOLUTION = 1e6
+IGNORED_FILE_PATTERNS = [
+    "/dev/",
+    "/etc/",
+    "/gapps/python",
+    "/lib/python",
+    "/proc/",
+    "/software/",
+    "/usr/lib",
+    "/venv",
+]
 IGNORED_FUNC_NAMES = [
     'DLIOBenchmark.__init__',
     'DLIOBenchmark._train',
@@ -60,7 +70,10 @@ IGNORED_FUNC_NAMES = [
     'IndexedBinaryMMapReader.read_index',
     'NPZReader.__init__',
     'NPZReader.next',
+    'PyTorchCheckpointing.__init__',
+    'PyTorchCheckpointing.finalize',
     'SCRPyTorchCheckpointing.__init__',
+    'SCRPyTorchCheckpointing.finalize',
     'TFCheckpointing.__init__',
     'TFCheckpointing.finalize',
     'TFDataLoader.__init__',
@@ -137,7 +150,7 @@ def get_size(filename):
             verbose=False,
         )
         size = line_number * 256
-    logging.debug(f" The {filename} has {size/1024**3} GB size")
+    logging.debug(f" The {filename} has {size / 1024**3} GB size")
     return int(size)
 
 
@@ -661,7 +674,13 @@ class DFTracerAnalyzer(Analyzer):
         traces: dd.DataFrame,
         view_types: List[ViewType],
     ) -> dd.DataFrame:
-        # ignore the ignored calls
+        # Ignore redundant files
+        traces = traces[
+            traces[COL_FILE_NAME].isna()
+            | ~traces[COL_FILE_NAME].str.contains("|".join(IGNORED_FILE_PATTERNS))
+        ]
+
+        # Ignore redundant calls
         traces = traces[~traces[COL_FUNC_NAME].isin(IGNORED_FUNC_NAMES)]
 
         # traces['compute_time'] = traces['compute_time'] / DFTRACER_TIME_RESOLUTION
