@@ -52,7 +52,7 @@ from .types import (
     view_name as format_view_name,
 )
 from .utils.dask_utils import event_logger, flatten_column_names
-from .utils.expr_utils import extract_numerator_denominator
+from .utils.expr_utils import extract_numerator_and_denominators
 from .utils.file_utils import ensure_dir
 from .utils.json_encoders import NpEncoder
 
@@ -353,12 +353,14 @@ class Analyzer(abc.ABC):
     def set_additional_metrics(self, view: pd.DataFrame) -> pd.DataFrame:
         for metric, eval_condition in self.additional_metrics.items():
             view = view.eval(f"{metric} = {eval_condition}")
-            numerator_denominator = extract_numerator_denominator(eval_condition)
-            if numerator_denominator:
-                numerator, denominator = numerator_denominator
-                view[metric] = view[metric].mask(
-                    view.eval(f"{numerator}.isna() | {numerator} == 0"), pd.NA
-                )
+            numerator_denominators = extract_numerator_and_denominators(eval_condition)
+            if numerator_denominators:
+                numerator, denominators = numerator_denominators
+                denominator_conditions = [
+                    f"({denom}.isna() | {denom} == 0)" for denom in denominators
+                ]
+                mask_condition = " & ".join(denominator_conditions)
+                view[metric] = view[metric].mask(view.eval(mask_condition), pd.NA)
         return view
 
     def read_stats(self, traces: dd.DataFrame) -> RawStats:
