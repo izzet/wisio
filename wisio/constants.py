@@ -30,6 +30,7 @@ class IOCategory(Enum):
     PCTL = 4
     IPC = 5
     OTHER = 6
+    SYNC = 7
 
 
 class Layer(StrEnum):
@@ -47,6 +48,7 @@ COL_APP_NAME = 'app_name'
 COL_BEHAVIOR = 'behavior'
 COL_CATEGORY = 'cat'
 COL_COUNT = 'count'
+COL_EPOCH = 'epoch'
 COL_FILE_DIR = 'file_dir'
 COL_FILE_NAME = 'file_name'
 COL_FILE_PATTERN = 'file_pattern'
@@ -54,6 +56,7 @@ COL_FUNC_NAME = 'func_name'
 COL_HOST_NAME = 'host_name'
 COL_IO_CAT = 'io_cat'
 COL_NODE_NAME = 'node_name'
+COL_PROC_ID = 'proc_id'
 COL_PROC_NAME = 'proc_name'
 COL_RANK = 'rank'
 COL_SIZE = 'size'
@@ -95,12 +98,17 @@ POSIX_IO_CAT_FUNCTIONS = {
         'readv',
     },
     IOCategory.WRITE: {
-        'fsync',
         'fwrite',
         'pwrite',
         'pwritev',
         'write',
         'writev',
+    },
+    IOCategory.SYNC: {
+        'fsync',  # Forces write of all dirty pages for a file to disk
+        'fdatasync',  # Similar to fsync but doesn't flush metadata
+        'msync',  # Memory-mapped file sync
+        'sync',  # System-wide sync
     },
     IOCategory.METADATA: {
         '__fxstat',
