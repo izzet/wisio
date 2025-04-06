@@ -11,37 +11,31 @@ def extract_numerator_and_denominators(expr):
         def visit_BinOp(self, node):
             if isinstance(node.op, ast.Div) and self.numerator is None:
                 self.numerator = ast.unparse(node.left).strip()
-                if isinstance(node.right, ast.BinOp) and isinstance(
-                    node.right.op, ast.Add
-                ):
-                    self.visit_Add(node.right)
-                elif '/' in ast.unparse(node.right):
-                    self.denominators.extend(
-                        [
-                            self.clean_variable_name(den.strip())
-                            for den in ast.unparse(node.right).split('/')
-                        ]
-                    )
-                else:
-                    self.denominators.append(
-                        self.clean_variable_name(ast.unparse(node.right).strip())
-                    )
-                return
-            self.generic_visit(node)
-
-        def visit_Add(self, node):
-            if isinstance(node.left, ast.BinOp) and isinstance(node.left.op, ast.Add):
-                self.visit_Add(node.left)
+                self.process_denominator(node.right)
             else:
-                self.denominators.append(
-                    self.clean_variable_name(ast.unparse(node.left).strip())
-                )
-            self.denominators.append(
-                self.clean_variable_name(ast.unparse(node.right).strip())
-            )
+                self.generic_visit(node)  # Continue visiting child nodes
 
-        def clean_variable_name(self, name):
-            return re.sub(r'\..*', '', name)
+        def process_denominator(self, node):
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+                # Split addition into terms
+                self.process_denominator(node.left)
+                self.process_denominator(node.right)
+            else:
+                # Extract individual denominator components
+                denominators = self.extract_variable_name(ast.unparse(node).strip())
+                self.denominators.extend(denominators)
+
+        def extract_variable_name(self, name):
+            if '.fillna' in name:
+                variables = []
+                # Corrected logic here
+                for var in name.split('.fillna'):
+                    cleaned_var = var.replace('(', '').replace(')', '').strip()
+                    if cleaned_var not in ('', '0'):
+                        variables.append(cleaned_var)
+                return variables
+            # Extract the base variable name (ignore method calls)
+            return [re.sub(r'\..*', '', name)]
 
     tree = ast.parse(expr, mode='eval')
     visitor = BinOpVisitor()

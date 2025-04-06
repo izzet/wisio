@@ -356,11 +356,12 @@ class Analyzer(abc.ABC):
             numerator_denominators = extract_numerator_and_denominators(eval_condition)
             if numerator_denominators:
                 numerator, denominators = numerator_denominators
-                denominator_conditions = [
-                    f"({denom}.isna() | {denom} == 0)" for denom in denominators
-                ]
-                mask_condition = " & ".join(denominator_conditions)
-                view[metric] = view[metric].mask(view.eval(mask_condition), pd.NA)
+                if denominators:
+                    denominator_conditions = [
+                        f"({denom}.isna() | {denom} == 0)" for denom in denominators
+                    ]
+                    mask_condition = " & ".join(denominator_conditions)
+                    view[metric] = view[metric].mask(view.eval(mask_condition), pd.NA)
         return view
 
     def read_stats(self, traces: dd.DataFrame) -> RawStats:
