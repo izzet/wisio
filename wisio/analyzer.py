@@ -936,19 +936,19 @@ class Analyzer(abc.ABC):
         layer: Layer,
         records: dd.DataFrame,
         view_type: str,
-        metrics: List[Metric],
-        metric_boundaries: Dict[Metric, dd.core.Scalar],
         is_slope_based: bool,
     ) -> dd.DataFrame:
         view_types = records.index._meta.names
 
         non_proc_agg_dict = self._get_agg_dict(
+            layer=layer,
             for_view_type=view_type,
             view_columns=records.columns,
             view_types=view_types,
             is_proc=False,
         )
         proc_agg_dict = self._get_agg_dict(
+            layer=layer,
             for_view_type=view_type,
             view_columns=records.columns,
             view_types=view_types,
@@ -957,35 +957,55 @@ class Analyzer(abc.ABC):
 
         # Check view type
         if view_type is not COL_PROC_NAME and COL_PROC_NAME in view_types:
+            # if layer in self.threaded_layers:
+            #     # thread_agg_dict = self._get_agg_dict(
+            #     #     layer=layer,
+            #     #     for_view_type=view_type,
+            #     #     view_columns=records.columns,
+            #     #     view_types=view_types,
+            #     #     is_thread=True,
+            #     # )
+            #     view = (
+            #         records.map_partitions(set_proc_name_parts)
+            #         .reset_index()
+            #         .groupby([view_type, COL_PROC_ID])
+            #         .agg(non_proc_agg_dict)
+            #         .groupby([view_type])
+            #         .max()
+            #         .map_partitions(set_unique_counts, layer=layer)
+            #     )
+            # else:
             view = (
                 records.reset_index()
                 .groupby([view_type, COL_PROC_NAME])
                 .agg(non_proc_agg_dict)
                 .groupby([view_type])
                 .agg(proc_agg_dict)
+                .map_partitions(set_unique_counts, layer=layer)
             )
         else:
-            view = records.reset_index().groupby([view_type]).agg(non_proc_agg_dict)
-
-        # Set metric slope
-        # view = view.map_partitions(
-        #     set_metrics,
-        #     is_slope_based=is_slope_based,
-        #     metrics=metrics,
-        #     metric_boundaries=metric_boundaries,
-        # )
+            view = (
+                records.reset_index()
+                .groupby([view_type])
+                .agg(non_proc_agg_dict)
+                .map_partitions(set_unique_counts, layer=layer)
+            )
 
         # Return view
         return view
 
-    @staticmethod
     def _get_agg_dict(
+        self,
+        layer: Layer,
         for_view_type: ViewType,
         view_columns: List[str],
         view_types: List[ViewType],
         is_proc=False,
+        is_thread=False,
     ):
-        if is_proc:
+        if is_thread:
+            agg_dict = {col: max for col in view_columns}
+        elif is_proc:
             agg_dict = {col: max if 'time' in col else sum for col in view_columns}
         else:
             agg_dict = {col: sum for col in view_columns}
@@ -993,8 +1013,16 @@ class Analyzer(abc.ABC):
         # agg_dict['bw'] = max
         # agg_dict['intensity'] = max
         # agg_dict['iops'] = max
-        agg_dict['size_min'] = min
-        agg_dict['size_max'] = max
+
+        for agg_col in agg_dict:
+            if agg_col.endswith('_max'):
+                agg_dict[agg_col] = 'max'
+            elif agg_col.endswith('_min'):
+                agg_dict[agg_col] = 'min'
+            elif agg_col.endswith('_mean'):
+                agg_dict[agg_col] = 'mean'
+            elif agg_col.endswith('_unique'):
+                agg_dict[agg_col] = unique_set_flatten()
 
         unwanted_agg_cols = ['id', for_view_type]
         for agg_col in unwanted_agg_cols:

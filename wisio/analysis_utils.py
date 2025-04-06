@@ -94,6 +94,16 @@ def set_proc_name_parts(df: pd.DataFrame):
     ).drop(columns=['proc_name_parts'])
 
 
+def set_unique_counts(df: pd.DataFrame, layer: str):
+    unique_cols = [col for col in df.columns if col.endswith('_unique')]
+    for unique_col in unique_cols:
+        if COL_FILE_NAME in unique_col and 'posix' not in layer:
+            continue
+        nunique_col = unique_col.replace('_unique', '_nunique')
+        df[nunique_col] = df[unique_col].map(len).astype('uint64[pyarrow]')
+    return df.drop(columns=unique_cols)
+
+
 def split_duration_records_vectorized(
     df: pd.DataFrame,
     time_granularity: float,
