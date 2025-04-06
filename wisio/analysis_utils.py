@@ -9,6 +9,7 @@ from .constants import (
     COL_COUNT,
     COL_FILE_NAME,
     COL_PROC_NAME,
+    COL_SIZE,
     COL_TIME,
     COL_TIME_RANGE,
     FILE_PATTERN_PLACEHOLDER,
@@ -146,5 +147,10 @@ def split_duration_records_vectorized(
     expanded_counts = counts.repeat(n_chunks)
     # Divide counts by number of chunks for each original row
     result_df[COL_COUNT] = expanded_counts / n_chunks.repeat(n_chunks)
+
+    sizes = df[COL_SIZE].to_numpy()
+    expanded_sizes = sizes.repeat(n_chunks)
+    # Divide sizes by number of chunks for each original row
+    result_df[COL_SIZE] = expanded_sizes / n_chunks.repeat(n_chunks)
 
     return result_df.reset_index(drop=True)
