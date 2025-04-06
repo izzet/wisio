@@ -1,10 +1,12 @@
 import abc
+import copy
 import dask.dataframe as dd
 import hashlib
 import itertools as it
 import json
 import logging
 import math
+import numpy as np
 import operator
 import os
 import pandas as pd
@@ -22,16 +24,25 @@ from .analysis import (
     metric_time_column,
     # set_metric_scores,
 )
-from .analysis_utils import set_file_dir, set_file_pattern, set_proc_name_parts
+from .analysis_utils import (
+    set_file_dir,
+    set_file_pattern,
+    set_proc_name_parts,
+    set_unique_counts,
+    split_duration_records_vectorized,
+)
 from .config import CHECKPOINT_VIEWS, HASH_CHECKPOINT_NAMES
 from .constants import (
     ACC_PAT_SUFFIXES,
     COL_CATEGORY,
     COL_FILE_NAME,
+    COL_PROC_ID,
     COL_PROC_NAME,
+    COL_TIME,
     COL_TIME_RANGE,
     DERIVED_MD_OPS,
     LOGICAL_VIEW_TYPES,
+    VIEW_TYPES,
     AccessPattern,
     EventType,
     IOCategory,
@@ -51,6 +62,7 @@ from .types import (
     Views,
     view_name as format_view_name,
 )
+from .utils.dask_agg import unique_set, unique_set_flatten
 from .utils.dask_utils import event_logger, flatten_column_names
 from .utils.expr_utils import extract_numerator_and_denominators
 from .utils.file_utils import ensure_dir
@@ -64,14 +76,9 @@ CHECKPOINT_HLM = '_hlm'
 CHECKPOINT_RAW_STATS = '_raw_stats'
 CHECKPOINT_VIEW = '_view'
 HLM_AGG = {
-    'time': [sum],
-    'count': [sum],
-    'size': [min, max, sum],
-}
-HLM_COLS = {
-    'count_sum': 'count',
-    'size_sum': 'size',
-    'time_sum': 'time',
+    'time': [sum, 'mean'],
+    'count': [sum, 'mean'],
+    'size': [sum, min, max, 'mean'],
 }
 HLM_EXTRA_COLS = ['cat', 'io_cat', 'acc_pat', 'func_name']
 VERSION_HLM = "v3"
@@ -80,6 +87,7 @@ VERSION_MAIN_VIEW = "v3"
 VERSION_METRIC_BOUNDARIES = "v5"
 VERSION_STATS = "v1"
 VERSION_VIEWS = "v1"
+VIEW_PERMUTATIONS = False
 WAIT_ENABLED = True
 
 
@@ -93,10 +101,13 @@ class Analyzer(abc.ABC):
         checkpoint: bool = True,
         checkpoint_dir: str = "",
         debug: bool = False,
+        discarded_metric_patterns: Optional[List[str]] = [],
         layer_deps: Optional[Dict[Layer, Optional[Layer]]] = {},
         logical_views: Optional[Dict[ViewType, Dict[ViewType, str]]] = {},
+        threaded_layers: Optional[List[str]] = [],
         time_approximate: bool = True,
         time_granularity: float = 1e6,
+        unscored_metrics: Optional[List[str]] = [],
         verbose: bool = False,
     ):
         if checkpoint:
@@ -108,14 +119,17 @@ class Analyzer(abc.ABC):
         self.checkpoint_dir = checkpoint_dir
         self.debug = debug
         self.derived_metrics = derived_metrics
+        self.discarded_metric_patterns = '|'.join(discarded_metric_patterns)
         self.layer_defs = layer_defs
         self.layer_deps = layer_deps
         self.logical_views = logical_views
         self.root_layers = [
             layer for layer, parent_layer in self.layer_deps.items() if not parent_layer
         ]
+        self.threaded_layers = threaded_layers
         self.time_approximate = time_approximate
         self.time_granularity = time_granularity
+        self.unscored_metrics = unscored_metrics
         self.verbose = verbose
 
         # Setup directories
@@ -126,8 +140,7 @@ class Analyzer(abc.ABC):
         self,
         trace_path: str,
         bottleneck_rules: BottleneckRules,
-        metrics: Dict[Layer, List[Metric]],
-        view_types: Dict[Layer, List[ViewType]],
+        view_types: List[ViewType],
         exclude_bottlenecks: List[str] = [],
         exclude_characteristics: List[str] = [],
         logical_view_types: bool = False,
@@ -142,9 +155,10 @@ class Analyzer(abc.ABC):
         is_slope_based = threshold is not None
 
         # Check if high-level metrics are checkpointed
-        hlm_view_types = list(sorted(set(reduce(operator.concat, view_types.values()))))
+        hlm_view_types = list(sorted(view_types))
         hlm_checkpoint_name = self.get_hlm_checkpoint_name(view_types=hlm_view_types)
         traces = None
+        time_sliced_traces = None
         raw_stats = None
         if not self.checkpoint or not self.has_checkpoint(name=hlm_checkpoint_name):
             # Read trace & stats
@@ -153,6 +167,12 @@ class Analyzer(abc.ABC):
             raw_stats = self.read_stats(traces=traces)
             traces = self.postread_trace(traces=traces, view_types=hlm_view_types)
             # return traces
+            # time_sliced_traces = traces
+            time_sliced_traces = traces.map_partitions(
+                split_duration_records_vectorized,
+                time_granularity=self.time_granularity / 1e6,
+                time_resolution=1e6,
+            )
         else:
             # Restore stats
             raw_stats = self.restore_extra_data(
@@ -163,7 +183,7 @@ class Analyzer(abc.ABC):
         # Compute high-level metrics
         hlm = self.compute_high_level_metrics(
             checkpoint_name=hlm_checkpoint_name,
-            traces=traces,
+            traces=time_sliced_traces,
             view_types=hlm_view_types,
         )
         (hlm, raw_stats) = persist(hlm, raw_stats)
@@ -176,45 +196,37 @@ class Analyzer(abc.ABC):
         hlms = {}
         main_views = {}
         main_indexes = {}
-        metric_boundaries = {}
         views = {}
         bottlenecks = {}
         for layer, layer_condition in self.layer_defs.items():
-            layer_hlm = hlm.query(layer_condition)
+            layer_hlm = hlm.copy()
+            if layer_condition:
+                layer_hlm = hlm.query(layer_condition)
             layer_main_view = self.compute_main_view(
                 layer=layer,
                 hlm=layer_hlm,
-                view_types=view_types[layer],
+                view_types=view_types,
             )
             layer_main_index = layer_main_view.index.to_frame().reset_index(drop=True)
-            layer_metric_boundaries = self.compute_metric_boundaries(
-                layer=layer,
-                main_view=layer_main_view,
-                metrics=metrics[layer],
-                view_types=view_types[layer],
-            )
             layer_views = self.compute_views(
                 layer=layer,
                 main_view=layer_main_view,
-                view_types=view_types[layer],
-                metric_boundaries=layer_metric_boundaries,
-                metrics=metrics[layer],
+                view_types=view_types,
                 percentile=percentile,
                 threshold=threshold,
                 is_slope_based=is_slope_based,
             )
-            layer_logical_views = self.compute_logical_views(
-                layer=layer,
-                main_view=layer_main_view,
-                views=layer_views,
-                view_types=view_types[layer],
-                metric_boundaries=layer_metric_boundaries,
-                metrics=metrics[layer],
-                percentile=percentile,
-                threshold=threshold,
-                is_slope_based=is_slope_based,
-            )
-            layer_views.update(layer_logical_views)
+            if logical_view_types:
+                layer_logical_views = self.compute_logical_views(
+                    layer=layer,
+                    main_view=layer_main_view,
+                    views=layer_views,
+                    view_types=view_types,
+                    percentile=percentile,
+                    threshold=threshold,
+                    is_slope_based=is_slope_based,
+                )
+                layer_views.update(layer_logical_views)
             # layer_bottlenecks = self.detect_bottlenecks(
             #     views=layer_views,
             #     metrics=metrics[layer],
@@ -226,7 +238,6 @@ class Analyzer(abc.ABC):
             hlms[layer] = layer_hlm
             main_views[layer] = layer_main_view
             main_indexes[layer] = layer_main_index
-            metric_boundaries[layer] = layer_metric_boundaries
             views[layer] = layer_views
             # bottlenecks[layer] = layer_bottlenecks
 
@@ -250,7 +261,7 @@ class Analyzer(abc.ABC):
                     )
                 else:
                     flat_views[view_key] = view
-                time_boundary_col = f"{layer.lower()}_time"
+                time_boundary_col = f"{layer.lower()}_time_sum"
                 if layer.lower() not in self.root_layers:
                     time_boundary_col = f"d_{time_boundary_col}"
                 time_boundary_cols[view_key].append(time_boundary_col)
@@ -287,12 +298,26 @@ class Analyzer(abc.ABC):
                         layer_deps=self.layer_deps,
                         time_boundary=time_boundaries[view_key],
                     )
-                )
+                ),
+                unscored_metrics=self.unscored_metrics,
             )
             for view_key in flat_views
         }
 
-        return traces, hlms, main_views, time_boundaries, views, flat_views
+        for view_key in flat_views:
+            view_file_name = '_'.join(list(view_key))
+            flat_views[view_key].to_csv(f"{self.checkpoint_dir}/{view_file_name}.csv")
+
+        return (
+            traces,
+            time_sliced_traces,
+            raw_stats,
+            hlms,
+            main_views,
+            time_boundaries,
+            views,
+            flat_views,
+        )
 
         characteristics = {}
         for layer in self.layer_defs:
@@ -343,7 +368,7 @@ class Analyzer(abc.ABC):
             layers=self.layer_defs.keys(),
             main_indexes=main_indexes,
             main_views=main_views,
-            metric_boundaries=metric_boundaries,
+            metric_boundaries={},
             raw_stats=raw_stats,
             traces=traces,
             view_types=hlm_view_types,
@@ -390,9 +415,6 @@ class Analyzer(abc.ABC):
     ) -> dd.DataFrame:
         return traces
 
-    def additional_high_level_metrics(self) -> Tuple[Dict[str, Any], Dict[str, str]]:
-        return {}, {}
-
     def compute_job_time(self, traces: dd.DataFrame) -> float:
         return traces['tend'].max() - traces['tstart'].min()
 
@@ -430,7 +452,7 @@ class Analyzer(abc.ABC):
                 CHECKPOINT_MAIN_VIEW,
                 str(layer),
                 *sorted(view_types),
-                str(self.time_granularity),
+                str(int(self.time_granularity)),
                 VERSION_MAIN_VIEW + VERSION_HLM,
             ),
             fallback=lambda: self._compute_main_view(
@@ -457,7 +479,7 @@ class Analyzer(abc.ABC):
                 str(layer),
                 *sorted(metrics),
                 *sorted(view_types),
-                str(self.time_granularity),
+                str(int(self.time_granularity)),
                 VERSION_METRIC_BOUNDARIES + VERSION_MAIN_VIEW + VERSION_HLM,
             ),
             fallback=lambda: self._compute_metric_boundaries(
@@ -473,8 +495,6 @@ class Analyzer(abc.ABC):
         layer: Layer,
         main_view: dd.DataFrame,
         view_types: List[ViewType],
-        metrics: List[Metric],
-        metric_boundaries: Dict[ViewType, Dict[Metric, dd.core.Scalar]],
         percentile: Optional[float],
         threshold: Optional[int],
         is_slope_based: bool,
@@ -492,8 +512,6 @@ class Analyzer(abc.ABC):
             views[view_key] = self.compute_view(
                 is_slope_based=is_slope_based,
                 layer=layer,
-                metric_boundaries=metric_boundaries[view_type],
-                metrics=metrics,
                 records=parent_records,
                 view_key=view_key,
                 view_type=view_type,
@@ -506,8 +524,6 @@ class Analyzer(abc.ABC):
         main_view: dd.DataFrame,
         views: Dict[ViewKey, dd.DataFrame],
         view_types: List[ViewType],
-        metrics: List[Metric],
-        metric_boundaries: Dict[Metric, dd.core.Scalar],
         percentile: Optional[float],
         threshold: Optional[int],
         is_slope_based: bool,
@@ -540,8 +556,6 @@ class Analyzer(abc.ABC):
                 logical_views[view_key] = self.compute_view(
                     is_slope_based=is_slope_based,
                     layer=layer,
-                    metric_boundaries=metric_boundaries[parent_view_type],
-                    metrics=metrics,
                     records=parent_records,
                     view_key=view_key,
                     view_type=view_type,
@@ -623,8 +637,6 @@ class Analyzer(abc.ABC):
         view_key: ViewKey,
         view_type: str,
         records: dd.DataFrame,
-        metrics: List[Metric],
-        metric_boundaries: Dict[Metric, dd.core.Scalar],
         is_slope_based: bool,
     ) -> dd.DataFrame:
         return self.restore_view(
@@ -632,14 +644,12 @@ class Analyzer(abc.ABC):
                 CHECKPOINT_VIEW,
                 str(layer),
                 *list(view_key),
-                str(self.time_granularity),
+                str(int(self.time_granularity)),
                 VERSION_VIEWS + VERSION_MAIN_VIEW + VERSION_HLM,
             ),
             fallback=lambda: self._compute_view(
                 is_slope_based=is_slope_based,
                 layer=layer,
-                metric_boundaries=metric_boundaries,
-                metrics=metrics,
                 records=records,
                 view_type=view_type,
             ),
@@ -728,7 +738,7 @@ class Analyzer(abc.ABC):
         return self.get_checkpoint_name(
             CHECKPOINT_HLM,
             *sorted(view_types),
-            str(self.time_granularity),
+            str(int(self.time_granularity)),
             VERSION_HLM,
         )
 
@@ -736,7 +746,7 @@ class Analyzer(abc.ABC):
         return self.get_checkpoint_name(
             CHECKPOINT_RAW_STATS,
             VERSION_STATS,
-            str(self.time_granularity),
+            str(int(self.time_granularity)),
         )
 
     def has_checkpoint(self, name: str):
@@ -803,17 +813,17 @@ class Analyzer(abc.ABC):
         for metric, mask_value in self.derived_metrics[layer].items():
             mask_condition = mask_value[0]
             mask_col = mask_value[1]
-            metric_dtype = 'double[pyarrow]'
+            # metric_dtype = 'double[pyarrow]'
             hlm[metric] = 0.0
-            if (
-                mask_col in ['count', 'size']
-                or mask_col.endswith('_max')
-                or mask_col.endswith('_min')
-            ):
-                hlm[metric] = 0
-                metric_dtype = 'uint64[pyarrow]'
+            # if (
+            #     mask_col in ['count', 'size']
+            #     or mask_col.endswith('_max')
+            #     or mask_col.endswith('_min')
+            # ):
+            #     hlm[metric] = 0
+            #     metric_dtype = 'uint64[pyarrow]'
             hlm[metric] = hlm[metric].mask(hlm.eval(mask_condition), hlm[mask_col])
-            hlm[metric] = hlm[metric].astype(metric_dtype)
+            # hlm[metric] = hlm[metric].astype(metric_dtype)
         return hlm
 
     @staticmethod
@@ -841,6 +851,9 @@ class Analyzer(abc.ABC):
 
     @staticmethod
     def view_permutations(view_types: List[ViewType]):
+        if not VIEW_PERMUTATIONS:
+            return it.permutations(view_types, 1)
+
         def _iter_permutations(r: int):
             return it.permutations(view_types, r + 1)
 
@@ -869,16 +882,19 @@ class Analyzer(abc.ABC):
     ) -> dd.DataFrame:
         # Add layer columns
         groupby = list(set(view_types).union(HLM_EXTRA_COLS))
+        # Build agg_dict
+        agg_dict = copy.deepcopy(HLM_AGG)
+        for view_type in VIEW_TYPES:
+            if view_type in traces.columns:
+                agg_dict[view_type] = [unique_set()]
         hlm = (
             traces.groupby(groupby)
-            .agg(HLM_AGG, split_out=math.ceil(math.sqrt(traces.npartitions)))
+            .agg(agg_dict, split_out=math.ceil(math.sqrt(traces.npartitions)))
             .persist()
-            .reset_index()
             .repartition(partition_size=partition_size)
         )
         hlm = flatten_column_names(hlm)
-        renamed_columns = {col: col.replace('_sum', '') for col in hlm.columns}
-        return hlm.rename(columns=renamed_columns).persist()
+        return hlm.persist()
 
     def _compute_main_view(
         self,
@@ -888,14 +904,18 @@ class Analyzer(abc.ABC):
         partition_size: str,
     ) -> dd.DataFrame:
         # Set derived columns depending on layer
-        hlm_with_metrics = self.set_layer_metrics(layer=layer, hlm=hlm.copy())
+        hlm_with_metrics = self.set_layer_metrics(layer=layer, hlm=hlm.copy()).drop(
+            columns=HLM_EXTRA_COLS, errors='ignore'
+        )
+        agg_dict = {col: sum for col in hlm_with_metrics.columns}
+        for agg_col in agg_dict:
+            if agg_col.endswith('_unique'):
+                agg_dict[agg_col] = unique_set_flatten()
         # Set groupby
         groupby = list(view_types)
         # Compute agg_view
-        main_view = (
-            hlm_with_metrics.drop(columns=HLM_EXTRA_COLS, errors='ignore')
-            .groupby(groupby)
-            .sum(split_out=hlm_with_metrics.npartitions)
+        main_view = hlm_with_metrics.groupby(groupby).agg(
+            agg_dict, split_out=hlm_with_metrics.npartitions
         )
         # Return main_view
         return main_view.persist()
@@ -1030,62 +1050,6 @@ class Analyzer(abc.ABC):
                 agg_dict.pop(agg_col)
 
         return agg_dict
-
-    def _set_posix_columns(self, hlm: dd.DataFrame) -> dd.DataFrame:
-        # Derive `io_cat` columns
-        for col in ['time', 'size', 'count']:
-            for io_cat in list(IOCategory):
-                col_name = f"{io_cat.name.lower()}_{col}"
-                hlm[col_name] = 0.0 if col == 'time' else 0
-                hlm[col_name] = hlm[col_name].mask(
-                    hlm['io_cat'] == io_cat.value, hlm[col]
-                )
-        for io_cat in list(IOCategory):
-            # if io_cat not in [IOCategory.READ, IOCategory.WRITE]:
-            #     continue
-            min_name, max_name = (
-                f"{io_cat.name.lower()}_min",
-                f"{io_cat.name.lower()}_max",
-            )
-            hlm[min_name] = 0
-            hlm[max_name] = 0
-            hlm[min_name] = hlm[min_name].mask(
-                hlm['io_cat'] == io_cat.value, hlm['size_min']
-            )
-            hlm[max_name] = hlm[max_name].mask(
-                hlm['io_cat'] == io_cat.value, hlm['size_max']
-            )
-        # Derive `data` columns
-        hlm['data_count'] = hlm['write_count'] + hlm['read_count']
-        hlm['data_size'] = hlm['write_size'] + hlm['read_size']
-        hlm['data_time'] = hlm['write_time'] + hlm['read_time']
-        # Derive `acc_pat` columns
-        for col_suffix, col_value in zip(
-            ACC_PAT_SUFFIXES, ['data_time', 'data_size', 'data_count']
-        ):
-            for acc_pat in list(AccessPattern):
-                col_name = f"{acc_pat.name.lower()}_{col_suffix}"
-                hlm[col_name] = 0.0 if col_suffix == 'time' else 0
-                hlm[col_name] = hlm[col_name].mask(
-                    hlm['acc_pat'] == acc_pat.value, hlm[col_value]
-                )
-        # Derive metadata operation columns
-        for col in ['time', 'count']:
-            for md_op in DERIVED_MD_OPS:
-                col_name = f"{md_op}_{col}"
-                hlm[col_name] = 0.0 if col == 'time' else 0
-                if md_op in ['close', 'open']:
-                    hlm[col_name] = hlm[col_name].mask(
-                        hlm['func_name'].str.contains(md_op)
-                        & ~hlm['func_name'].str.contains('dir'),
-                        hlm[col],
-                    )
-                else:
-                    hlm[col_name] = hlm[col_name].mask(
-                        hlm['func_name'].str.contains(md_op), hlm[col]
-                    )
-        # Return ddf
-        return hlm
 
     @staticmethod
     def _wait_all(tasks: Union[dd.DataFrame, Delayed, dict]):

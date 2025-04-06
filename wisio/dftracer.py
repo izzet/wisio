@@ -16,6 +16,7 @@ from .analyzer import Analyzer
 from .constants import (
     COL_ACC_PAT,
     COL_COUNT,
+    COL_EPOCH,
     COL_FILE_NAME,
     COL_FUNC_NAME,
     COL_HOST_NAME,
@@ -56,44 +57,61 @@ IGNORED_FILE_PATTERNS = [
     "/lib/python",
     "/proc/",
     "/software/",
+    "/sys/",
     "/usr/lib",
+    "/usr/tce/backend",
+    "/usr/tce/packages",
     "/venv",
+    "__pycache__",
 ]
 IGNORED_FUNC_NAMES = [
     'DLIOBenchmark.__init__',
-    'DLIOBenchmark._train',
+    # 'DLIOBenchmark._train',
     'DLIOBenchmark.initialize',
-    'DLIOBenchmark.run',
+    # 'DLIOBenchmark.run',
     'FileStorage.__init__',
     'IndexedBinaryMMapReader.__init__',
     'IndexedBinaryMMapReader.load_index',
+    'IndexedBinaryMMapReader.next',
     'IndexedBinaryMMapReader.read_index',
     'NPZReader.__init__',
     'NPZReader.next',
+    'NPZReader.read_index',
     'PyTorchCheckpointing.__init__',
     'PyTorchCheckpointing.finalize',
+    'PyTorchCheckpointing.get_tensor',
     'SCRPyTorchCheckpointing.__init__',
     'SCRPyTorchCheckpointing.finalize',
+    'SCRPyTorchCheckpointing.get_tensor',
     'TFCheckpointing.__init__',
     'TFCheckpointing.finalize',
+    'TFCheckpointing.get_tensor',
     'TFDataLoader.__init__',
     'TFDataLoader.finalize',
     'TFDataLoader.next',
+    'TFDataLoader.read',
     'TFFramework.get_loader',
     'TFFramework.init_loader',
     'TFFramework.is_nativeio_available',
     'TFFramework.trace_object',
     'TFReader.__init__',
     'TFReader.next',
+    'TFReader.read_index',
     'TorchDataLoader.__init__',
     'TorchDataLoader.finalize',
     'TorchDataLoader.next',
+    'TorchDataLoader.read',
     'TorchDataset.__init__',
-    'TorchDataset.worker_init',
+    # 'TorchDataset.worker_init',
     'TorchFramework.get_loader',
     'TorchFramework.init_loader',
     'TorchFramework.is_nativeio_available',
     'TorchFramework.trace_object',
+]
+IGNORED_FUNC_PATTERNS = [
+    ".save_state",
+    "checkpoint_end_",
+    "checkpoint_start_",
 ]
 PFW_COL_MAPPING = {
     'name': COL_FUNC_NAME,
@@ -192,8 +210,8 @@ def get_io_cat(func_name: str):
 
 def io_columns(time_approximate=True):
     columns = {
-        'fhash': "uint64[pyarrow]",
-        'hhash': "uint64[pyarrow]",
+        'fhash': "string[pyarrow]",
+        'hhash': "string[pyarrow]",
         'image_id': "uint64[pyarrow]",
         'io_cat': "uint8[pyarrow]",
         'phase': "uint16[pyarrow]",
@@ -249,10 +267,7 @@ def io_function(json_object, current_dict, time_approximate, condition_fn):
             d["phase"] = 3
     if "args" in json_object:
         if "fhash" in json_object["args"]:
-            if type(json_object["args"]["fhash"]) is str:
-                d["fhash"] = int(json_object["args"]["fhash"], 16)
-            else:
-                d["fhash"] = json_object["args"]["fhash"]
+            d["fhash"] = str(json_object["args"]["fhash"])
         if json_object["cat"] in [CAT_POSIX, CAT_STDIO]:
             name = json_object["name"]
             io_cat = get_io_cat(name)
@@ -268,9 +283,12 @@ def io_function(json_object, current_dict, time_approximate, condition_fn):
                 if image_id > 0:
                     d["image_id"] = image_id
             if "image_size" in json_object["args"]:
-                size = int(json_object["args"]["image_size"])
-                if size > 0:
-                    d["size"] = size
+                name = json_object["name"].lower()
+                # e.g. NPZReader.open image_size is not correct
+                if 'reader.open' not in name:
+                    size = int(json_object["args"]["image_size"])
+                    if size > 0:
+                        d["size"] = size
     return d
 
 
@@ -312,28 +330,24 @@ def load_objects(line, fn, time_granularity, time_approximate, condition_fn, loa
             if "name" in val:
                 d["name"] = val["name"]
             if "cat" in val:
-                d["cat"] = val["cat"]
+                d["cat"] = val["cat"].lower()
             if "pid" in val:
                 d["pid"] = val["pid"]
             if "tid" in val:
                 d["tid"] = val["tid"]
             if "args" in val:
                 if "hhash" in val["args"]:
-                    if type(val["args"]["hhash"]) is str:
-                        d["hhash"] = int(val["args"]["hhash"], 16)
-                    else:
-                        d["hhash"] = val["args"]["hhash"]
-
-                if "level" in val["args"]:
-                    d["level"] = int(val["args"]["level"])
-                if (
-                    "epoch" in val["args"]
-                    and val["args"]["epoch"] != "train"
-                    and val["args"]["epoch"] != "valid"
-                ):
-                    epoch = int(val["args"]["epoch"])
-                    if epoch > 0:
-                        d["epoch"] = epoch
+                    d["hhash"] = str(val["args"]["hhash"])
+                # if "level" in val["args"]:
+                #     d["level"] = int(val["args"]["level"])
+                # if (
+                #     "epoch" in val["args"]
+                #     and val["args"]["epoch"] != "train"
+                #     and val["args"]["epoch"] != "valid"
+                # ):
+                #     epoch = int(val["args"]["epoch"])
+                #     if epoch > 0:
+                #         d["epoch"] = epoch
                 if "step" in val["args"]:
                     step = int(val["args"]["step"])
                     if step > 0:
@@ -347,11 +361,7 @@ def load_objects(line, fn, time_granularity, time_approximate, condition_fn, loa
                         and "value" in val["args"]
                     ):
                         d["name"] = val["args"]["name"]
-                        if type(val["args"]["value"]) is str:
-                            d["hash"] = int(val["args"]["value"], 16)
-                        else:
-                            d["hash"] = val["args"]["value"]
-                            # TODO(izzet): maybe add hash here
+                        d["hash"] = str(val["args"]["value"])
                 elif d["name"] == "HH":
                     d["type"] = 2  # 2-> hostname hash
                     if (
@@ -360,10 +370,7 @@ def load_objects(line, fn, time_granularity, time_approximate, condition_fn, loa
                         and "value" in val["args"]
                     ):
                         d["name"] = val["args"]["name"]
-                        if type(val["args"]["value"]) is str:
-                            d["hash"] = int(val["args"]["value"], 16)
-                        else:
-                            d["hash"] = val["args"]["value"]
+                        d["hash"] = str(val["args"]["value"])
                 elif d["name"] == "SH":
                     d["type"] = 3  # 3-> string hash
                     if (
@@ -372,10 +379,7 @@ def load_objects(line, fn, time_granularity, time_approximate, condition_fn, loa
                         and "value" in val["args"]
                     ):
                         d["name"] = val["args"]["name"]
-                        if type(val["args"]["value"]) is str:
-                            d["hash"] = int(val["args"]["value"], 16)
-                        else:
-                            d["hash"] = val["args"]["value"]
+                        d["hash"] = str(val["args"]["value"])
                 elif d["name"] == "PR":
                     d["type"] = 5  # 5-> process metadata
                     if (
@@ -384,10 +388,7 @@ def load_objects(line, fn, time_granularity, time_approximate, condition_fn, loa
                         and "value" in val["args"]
                     ):
                         d["name"] = val["args"]["name"]
-                        if type(val["args"]["value"]) is str:
-                            d["hash"] = int(val["args"]["value"], 16)
-                        else:
-                            d["hash"] = val["args"]["value"]
+                        d["hash"] = str(val["args"]["value"])
                 else:
                     d["type"] = 4  # 4-> others
                     if (
@@ -530,8 +531,8 @@ class DFTracerAnalyzer(Analyzer):
             columns = {
                 'cat': "string[pyarrow]",
                 'dur': "uint64[pyarrow]",
-                'epoch': "uint64[pyarrow]",
-                'level': "uint8[pyarrow]",
+                # 'epoch': "uint64[pyarrow]",
+                # 'level': "uint8[pyarrow]",
                 'name': "string[pyarrow]",
                 'pid': "uint64[pyarrow]",
                 'step': "uint64[pyarrow]",
@@ -549,31 +550,31 @@ class DFTracerAnalyzer(Analyzer):
             columns.update(load_cols)
             file_hash_columns = {
                 'name': "string[pyarrow]",
-                'hash': "uint64[pyarrow]",
+                'hash': "string[pyarrow]",
                 'pid': "uint64[pyarrow]",
                 'tid': "uint64[pyarrow]",
-                'hhash': "uint64[pyarrow]",
+                'hhash': "string[pyarrow]",
             }
             hostname_hash_columns = {
                 'name': "string[pyarrow]",
-                'hash': "uint64[pyarrow]",
+                'hash': "string[pyarrow]",
                 'pid': "uint64[pyarrow]",
                 'tid': "uint64[pyarrow]",
-                'hhash': "uint64[pyarrow]",
+                'hhash': "string[pyarrow]",
             }
             string_hash_columns = {
                 'name': "string[pyarrow]",
-                'hash': "uint64[pyarrow]",
+                'hash': "string[pyarrow]",
                 'pid': "uint64[pyarrow]",
                 'tid': "uint64[pyarrow]",
-                'hhash': "uint64[pyarrow]",
+                'hhash': "string[pyarrow]",
             }
             other_metadata_columns = {
                 'name': "string[pyarrow]",
                 'value': "string[pyarrow]",
                 'pid': "uint64[pyarrow]",
                 'tid': "uint64[pyarrow]",
-                'hhash': "uint64[pyarrow]",
+                'hhash': "string[pyarrow]",
             }
             if "FH" in metadata_cols:
                 file_hash_columns.update(metadata_cols["FH"])
@@ -680,8 +681,43 @@ class DFTracerAnalyzer(Analyzer):
             | ~traces[COL_FILE_NAME].str.contains("|".join(IGNORED_FILE_PATTERNS))
         ]
 
-        # Ignore redundant calls
+        # Set proc names
+        if COL_PROC_NAME in view_types:
+            traces[COL_PROC_NAME] = (
+                'app#'
+                + traces[COL_HOST_NAME].astype(str)
+                + '#'
+                + traces['pid'].astype(str)
+                + '#'
+                + traces['tid'].astype(str)
+            )
+
+        # Set epochs
+        # epochs = (
+        #     traces.query('func_name == "DLIOBenchmark._train"')
+        #     .groupby([COL_PROC_NAME, COL_FUNC_NAME])
+        #     .agg({COL_TIME_RANGE: list})
+        # )
+        # epochs[COL_EPOCH] = epochs[COL_TIME_RANGE].apply(
+        #     lambda x: list(range(1, len(x) + 1))
+        # )
+        # epochs = (
+        #     epochs.explode([COL_TIME_RANGE, COL_EPOCH])
+        #     .groupby(COL_EPOCH)
+        #     .min()
+        #     .reset_index()
+        #     .astype('uint64[pyarrow]')
+        # )
+        # traces = traces.map_partitions(self._set_epochs, epochs=epochs)
+        # traces[COL_EPOCH] = (
+        #     traces[COL_EPOCH].replace({0: pd.NA}).astype('uint64[pyarrow]')
+        # )
+
+        # Ignore redundant function calls
         traces = traces[~traces[COL_FUNC_NAME].isin(IGNORED_FUNC_NAMES)]
+        traces = traces[
+            ~traces[COL_FUNC_NAME].str.contains("|".join(IGNORED_FUNC_PATTERNS))
+        ]
 
         # traces['compute_time'] = traces['compute_time'] / DFTRACER_TIME_RESOLUTION
         # traces['checkpoint_time'] = traces['checkpoint_time'] / DFTRACER_TIME_RESOLUTION
@@ -698,16 +734,6 @@ class DFTracerAnalyzer(Analyzer):
 
         traces[COL_ACC_PAT] = 0
         traces[COL_COUNT] = 1
-
-        if COL_PROC_NAME in view_types:
-            traces[COL_PROC_NAME] = (
-                'app#'
-                + traces[COL_HOST_NAME].astype(str)
-                + '#'
-                + traces['pid'].astype(str)
-                + '#'
-                + traces['tid'].astype(str)
-            )
 
         # drop columns that are not needed
         # if COL_FILE_NAME not in view_types:
@@ -737,12 +763,26 @@ class DFTracerAnalyzer(Analyzer):
         # )
 
         traces['cat'] = traces['cat'].mask(
-            traces['cat'].isin(['POSIX', 'STDIO'])
+            traces['cat'].str.contains('posix|stdio')
+            & ~traces['file_name'].isna()
+            & traces['file_name'].str.contains('/checkpoint'),
+            traces['cat'] + '_checkpoint',
+        )
+        traces['cat'] = traces['cat'].mask(
+            traces['cat'].str.contains('posix|stdio')
+            & ~traces['file_name'].isna()
+            & traces['file_name'].str.contains('/data'),
+            traces['cat'] + '_reader',
+        )
+        traces['cat'] = traces['cat'].mask(
+            traces['cat'].str.contains('posix|stdio')
+            & ~traces['file_name'].isna()
             & traces['file_name'].str.contains('/lustre'),
             traces['cat'] + '_lustre',
         )
         traces['cat'] = traces['cat'].mask(
-            traces['cat'].isin(['POSIX', 'STDIO'])
+            traces['cat'].str.contains('posix|stdio')
+            & ~traces['file_name'].isna()
             & traces['file_name'].str.contains('/ssd'),
             traces['cat'] + '_ssd',
         )
@@ -751,6 +791,12 @@ class DFTracerAnalyzer(Analyzer):
 
     def compute_job_time(self, traces: dd.DataFrame) -> float:
         return (traces['te'].max() - traces['ts'].min()) / DFTRACER_TIME_RESOLUTION
+
+    @staticmethod
+    def _set_epochs(df: pd.DataFrame, epochs: pd.DataFrame):
+        return df.assign(
+            epoch=np.digitize(df['time_range'], bins=epochs['time_range'], right=False)
+        )
 
     @staticmethod
     def _set_steps(df: pd.DataFrame, step_time_ranges: pd.DataFrame):
