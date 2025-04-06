@@ -6,24 +6,28 @@ from hydra.conf import HelpConf, JobConf
 from omegaconf import MISSING
 from typing import Any, Dict, List, Optional
 
-from .constants import VIEW_TYPES, Layer
+from .constants import COL_TIME_RANGE, VIEW_TYPES, Layer
 from .rules import KNOWN_RULES, Rule
 from .utils.env_utils import get_bool_env_var
 
 
 CHECKPOINT_VIEWS = get_bool_env_var("WISIO_CHECKPOINT_VIEWS", False)
-HASH_CHECKPOINT_NAMES = get_bool_env_var("WISIO_HASH_CHECKPOINT_NAMES", True)
+HASH_CHECKPOINT_NAMES = get_bool_env_var("WISIO_HASH_CHECKPOINT_NAMES", False)
 
 
 @dataclass
 class AnalyzerConfig:
+    additional_metrics: Optional[Dict[str, Optional[str]]] = MISSING
     bottleneck_dir: Optional[str] = "${hydra:runtime.output_dir}/bottlenecks"
     checkpoint: Optional[bool] = True
     checkpoint_dir: Optional[str] = "${hydra:runtime.output_dir}/checkpoints"
-    layer_defs: Dict[str, str] = MISSING
+    derived_metrics: Optional[Dict[str, Dict[str, list]]] = MISSING
+    layer_defs: Dict[str, Optional[str]] = MISSING
     layer_deps: Optional[Dict[str, Optional[str]]] = MISSING
+    threaded_layers: Optional[List[str]] = MISSING
     time_approximate: Optional[bool] = True
     time_granularity: Optional[float] = MISSING
+    unscored_metrics: Optional[List[str]] = MISSING
 
 
 @dataclass
@@ -32,185 +36,241 @@ class DarshanAnalyzerConfig(AnalyzerConfig):
     time_granularity: Optional[float] = 1e3
 
 
+DERIVED_POSIX_METRICS = {
+    # 'data_count_sum': ['io_cat == 1 or io_cat == 2', 'count_sum'],
+    # 'data_size_sum': ['io_cat == 1 or io_cat == 2', 'size_sum'],
+    # 'data_size_max': ['io_cat == 1 or io_cat == 2', 'size_max'],
+    # 'data_size_min': ['io_cat == 1 or io_cat == 2', 'size_min'],
+    # 'data_time_sum': ['io_cat == 1 or io_cat == 2', 'time_sum'],
+    # 'ipc_count_sum': ['io_cat == 5', 'count_sum'],
+    # 'ipc_count_mean': ['io_cat == 5', 'count_mean'],
+    # 'ipc_time_sum': ['io_cat == 5', 'time_sum'],
+    # 'ipc_time_mean': ['io_cat == 5', 'time_mean'],
+    # 'metadata_count_sum': ['io_cat == 3', 'count_sum'],
+    # 'metadata_time_sum': ['io_cat == 3', 'time_sum'],
+    'other_count_sum': ['io_cat == 6', 'count_sum'],
+    # 'other_count_mean': ['io_cat == 6', 'count_mean'],
+    'other_time_sum': ['io_cat == 6', 'time_sum'],
+    # 'other_time_mean': ['io_cat == 6', 'time_mean'],
+    # 'pctl_count_sum': ['io_cat == 4', 'count_sum'],
+    # 'pctl_count_mean': ['io_cat == 4', 'count_mean'],
+    # 'pctl_time_sum': ['io_cat == 4', 'time_sum'],
+    # 'pctl_time_mean': ['io_cat == 4', 'time_mean'],
+    'read_count_sum': ['io_cat == 1', 'count_sum'],
+    # 'read_count_mean': ['io_cat == 1', 'count_mean'],
+    'read_size_sum': ['io_cat == 1', 'size_sum'],
+    # 'read_size_mean': ['io_cat == 1', 'size_mean'],
+    'read_size_max': ['io_cat == 1', 'size_max'],
+    'read_size_min': ['io_cat == 1', 'size_min'],
+    'read_time_sum': ['io_cat == 1', 'time_sum'],
+    # 'read_time_mean': ['io_cat == 1', 'time_mean'],
+    'sync_count_sum': ['io_cat == 7', 'count_sum'],
+    # 'sync_count_mean': ['io_cat == 7', 'count_mean'],
+    'sync_time_sum': ['io_cat == 7', 'time_sum'],
+    # 'sync_time_mean': ['io_cat == 7', 'time_mean'],
+    'write_count_sum': ['io_cat == 2', 'count_sum'],
+    # 'write_count_mean': ['io_cat == 2', 'count_mean'],
+    'write_size_sum': ['io_cat == 2', 'size_sum'],
+    # 'write_size_mean': ['io_cat == 2', 'size_mean'],
+    'write_size_max': ['io_cat == 2', 'size_max'],
+    'write_size_min': ['io_cat == 2', 'size_min'],
+    'write_time_sum': ['io_cat == 2', 'time_sum'],
+    # 'write_time_mean': ['io_cat == 2', 'time_mean'],
+    'close_count_sum': [
+        'io_cat == 3 and func_name.str.contains("close") and ~func_name.str.contains("dir")',
+        'count_sum',
+    ],
+    # 'close_count_mean': [
+    #     'io_cat == 3 and func_name.str.contains("close") and ~func_name.str.contains("dir")',
+    #     'count_mean',
+    # ],
+    'close_time_sum': [
+        'io_cat == 3 and func_name.str.contains("close") and ~func_name.str.contains("dir")',
+        'time_sum',
+    ],
+    # 'close_time_mean': [
+    #     'io_cat == 3 and func_name.str.contains("close") and ~func_name.str.contains("dir")',
+    #     'time_mean',
+    # ],
+    'open_count_sum': [
+        'io_cat == 3 and func_name.str.contains("open") and ~func_name.str.contains("dir")',
+        'count_sum',
+    ],
+    # 'open_count_mean': [
+    #     'io_cat == 3 and func_name.str.contains("open") and ~func_name.str.contains("dir")',
+    #     'count_mean',
+    # ],
+    'open_time_sum': [
+        'io_cat == 3 and func_name.str.contains("open") and ~func_name.str.contains("dir")',
+        'time_sum',
+    ],
+    # 'open_time_mean': [
+    #     'io_cat == 3 and func_name.str.contains("open") and ~func_name.str.contains("dir")',
+    #     'time_mean',
+    # ],
+    'seek_count_sum': [
+        'io_cat == 3 and func_name.str.contains("seek")',
+        'count_sum',
+    ],
+    # 'seek_count_mean': [
+    #     'io_cat == 3 and func_name.str.contains("seek")',
+    #     'count_mean',
+    # ],
+    'seek_time_sum': [
+        'io_cat == 3 and func_name.str.contains("seek")',
+        'time_sum',
+    ],
+    # 'seek_time_mean': [
+    #     'io_cat == 3 and func_name.str.contains("seek")',
+    #     'time_mean',
+    # ],
+    'stat_count_sum': [
+        'io_cat == 3 and func_name.str.contains("stat")',
+        'count_sum',
+    ],
+    # 'stat_count_mean': [
+    #     'io_cat == 3 and func_name.str.contains("stat")',
+    #     'count_mean',
+    # ],
+    'stat_time_sum': [
+        'io_cat == 3 and func_name.str.contains("stat")',
+        'time_sum',
+    ],
+    # 'stat_time_mean': [
+    #     'io_cat == 3 and func_name.str.contains("stat")',
+    #     'time_mean',
+    # ],
+}
+
+
 @dataclass
 class DFTracerAnalyzerConfig(AnalyzerConfig):
     _target_: str = "wisio.dftracer.DFTracerAnalyzer"
-    layer_defs: Dict[str, str] = field(
+    layer_defs: Dict[str, Optional[str]] = field(
         default_factory=lambda: {
-            'dlio': 'cat.isin(["dlio_benchmark"])',
-            'compute': 'cat.isin(["ai_framework"])',
-            'dataloader': 'cat.isin(["data_loader"])',
-            'image': 'func_name.str.contains(".__getitem__")',
-            'reader': 'cat.isin(["reader"])',
-            'posix': 'cat.isin(["POSIX", "STDIO", "POSIX_lustre", "POSIX_ssd", "STDIO_lustre", "STDIO_ssd"])',
-            'checkpoint': 'cat.isin(["checkpoint"]) & ~func_name.str.contains("checkpoint_start_|checkpoint_end_|.save_state")',
+            'app': 'func_name == "DLIOBenchmark.run"',
+            'training': 'func_name == "DLIOBenchmark._train"',
+            'compute': 'cat == "ai_framework"',
+            'fetch_data': 'func_name.isin(["<module>.iter", "fetch-data.iter", "loop.iter"])',
+            'data_loader': 'cat == "data_loader" & ~func_name.isin(["loop.iter", "loop.yield"])',
+            'data_loader_fork': 'cat == "posix" & func_name == "fork"',
+            'reader': 'cat == "reader"',
+            'reader_posix': 'cat.str.contains("posix|stdio") & cat.str.contains("_reader")',
+            'reader_posix_lustre': 'cat.str.contains("posix|stdio") & cat.str.contains("_reader_lustre")',
+            # 'reader_posix_ssd': 'cat.str.contains("posix|stdio") & cat.str.contains("_reader_ssd")',
+            'checkpoint': 'cat == "checkpoint"',
+            'checkpoint_posix': 'cat.str.contains("posix|stdio") & cat.str.contains("_checkpoint")',
+            'checkpoint_posix_lustre': 'cat.str.contains("posix|stdio") & cat.str.contains("_checkpoint_lustre")',
+            'checkpoint_posix_ssd': 'cat.str.contains("posix|stdio") & cat.str.contains("_checkpoint_ssd")',
+            'other_posix': 'cat.isin(["posix", "stdio"])',
+            'other_posix_lustre': 'cat.isin(["posix_lustre", "stdio_lustre"])',
+            # 'other_posix_ssd': 'cat.isin(["posix_ssd", "stdio_ssd"])',
         }
     )
     layer_deps: Optional[Dict[str, Optional[str]]] = field(
         default_factory=lambda: {
-            'dlio': None,
-            'compute': 'dlio',
-            'dataloader': None,
-            'image': 'dataloader',
-            'reader': 'image',
-            'posix': 'reader',
-            'checkpoint': None,
+            'app': None,
+            'training': 'app',
+            'compute': 'training',
+            'fetch_data': 'training',
+            'data_loader': 'fetch_data',
+            'data_loader_fork': 'fetch_data',
+            'reader': 'data_loader',
+            'reader_posix': 'reader',
+            'reader_posix_lustre': 'reader_posix',
+            # 'reader_posix_ssd': 'reader_posix',
+            'checkpoint': 'training',
+            'checkpoint_posix': 'checkpoint',
+            'checkpoint_posix_lustre': 'checkpoint_posix',
+            'checkpoint_posix_ssd': 'checkpoint_posix',
+            'other_posix': None,
+            'other_posix_lustre': 'other_posix',
+            # 'other_posix_ssd': 'other_posix',
         }
     )
-    derived_metrics: Dict[str, Dict[str, list]] = field(
+    threaded_layers: Optional[List[str]] = field(
+        default_factory=lambda: [
+            'data_loader',
+            'data_loader_fork',
+            'reader',
+            'reader_posix',
+            'reader_posix_lustre',
+            # 'reader_posix_ssd',
+        ]
+    )
+    derived_metrics: Optional[Dict[str, Dict[str, list]]] = field(
         default_factory=lambda: {
-            'dlio': {
-                'compute_time': [
-                    'func_name.isin(["<module>.yield"])',
-                    'time',
-                ],
-                'stall_time': [
-                    'func_name.isin(["<module>.iter"])',
-                    'time',
-                ],
-            },
+            'app': {},
+            'training': {},
             'compute': {},
-            'dataloader': {
-                'sample_time': [
-                    'func_name.str.contains(".__getitem__|._parse_image")',
-                    'time',
+            'fetch_data': {},
+            'data_loader': {
+                'init_time_sum': [
+                    'func_name.str.contains("init")',
+                    'time_sum',
+                ],
+                'item_count_sum': [
+                    'func_name.str.contains("__getitem__")',
+                    'count_sum',
+                ],
+                'item_time_sum': [
+                    'func_name.str.contains("__getitem__")',
+                    'time_sum',
                 ],
             },
-            'image': {},
+            'data_loader_fork': {},
             'reader': {
-                'preprocess_time': [
+                'close_count_sum': [
+                    'func_name.str.contains(".close")',
+                    'count_sum',
+                ],
+                'close_time_sum': [
+                    'func_name.str.contains(".close")',
+                    'time_sum',
+                ],
+                'open_count_sum': [
+                    'func_name.str.contains(".open")',  # e.g. NPZReader.open
+                    'count_sum',
+                ],
+                'open_time_sum': [
+                    'func_name.str.contains(".open")',  # e.g. NPZReader.open
+                    'time_sum',
+                ],
+                'preprocess_count_sum': [
                     'func_name.str.contains(".preprocess")',
-                    'time',
+                    'count_sum',
                 ],
-                'sample_size': [
+                'preprocess_time_sum': [
+                    'func_name.str.contains(".preprocess")',
+                    'time_sum',
+                ],
+                'sample_count_sum': [
                     'func_name.str.contains(".get_sample")',
-                    'size',
+                    'count_sum',
                 ],
-                'sample_size_max': [
+                'sample_time_sum': [
                     'func_name.str.contains(".get_sample")',
-                    'size_max',
-                ],
-                'sample_size_min': [
-                    'func_name.str.contains(".get_sample")',
-                    'size_min',
-                ],
-                'sample_time': [
-                    'func_name.str.contains(".get_sample")',  # for unet3d check open
-                    'time',
+                    'time_sum',
                 ],
             },
-            'posix': {
-                'data_count': ['io_cat == 1 or io_cat == 2', 'count'],
-                'data_size': ['io_cat == 1 or io_cat == 2', 'size'],
-                'data_size_max': ['io_cat == 1 or io_cat == 2', 'size_max'],
-                'data_size_min': ['io_cat == 1 or io_cat == 2', 'size_min'],
-                'data_time': ['io_cat == 1 or io_cat == 2', 'time'],
-                'ipc_count': ['io_cat == 5', 'count'],
-                'ipc_time': ['io_cat == 5', 'time'],
-                'metadata_count': ['io_cat == 3', 'count'],
-                'metadata_time': ['io_cat == 3', 'time'],
-                'metadata_lustre_count': [
-                    'io_cat == 3 and cat.str.endswith("_lustre")',
-                    'count',
-                ],
-                'metadata_ssd_count': [
-                    'io_cat == 3 and cat.str.endswith("_ssd")',
-                    'count',
-                ],
-                'metadata_lustre_time': [
-                    'io_cat == 3 and cat.str.endswith("_lustre")',
-                    'time',
-                ],
-                'metadata_ssd_time': [
-                    'io_cat == 3 and cat.str.endswith("_ssd")',
-                    'time',
-                ],
-                'other_count': ['io_cat == 6', 'count'],
-                'other_time': ['io_cat == 6', 'time'],
-                'pctl_count': ['io_cat == 4', 'count'],
-                'pctl_time': ['io_cat == 4', 'time'],
-                'read_count': ['io_cat == 1', 'count'],
-                'read_lustre_count': [
-                    'io_cat == 1 and cat.str.endswith("_lustre")',
-                    'count',
-                ],
-                'read_ssd_count': ['io_cat == 1 and cat.str.endswith("_ssd")', 'count'],
-                'read_size': ['io_cat == 1', 'size'],
-                'read_lustre_size': [
-                    'io_cat == 1 and cat.str.endswith("_lustre")',
-                    'size',
-                ],
-                'read_ssd_size': ['io_cat == 1 and cat.str.endswith("_ssd")', 'size'],
-                'read_size_max': ['io_cat == 1', 'size_max'],
-                'read_size_min': ['io_cat == 1', 'size_min'],
-                'read_time': ['io_cat == 1', 'time'],
-                'read_lustre_time': [
-                    'io_cat == 1 and cat.str.endswith("_lustre")',
-                    'time',
-                ],
-                'read_ssd_time': ['io_cat == 1 and cat.str.endswith("_ssd")', 'time'],
-                'write_count': ['io_cat == 2', 'count'],
-                'write_lustre_count': [
-                    'io_cat == 2 and cat.str.endswith("_lustre")',
-                    'count',
-                ],
-                'write_ssd_count': [
-                    'io_cat == 2 and cat.str.endswith("_ssd")',
-                    'count',
-                ],
-                'write_size': ['io_cat == 2', 'size'],
-                'write_lustre_size': [
-                    'io_cat == 2 and cat.str.endswith("_lustre")',
-                    'size',
-                ],
-                'write_ssd_size': ['io_cat == 2 and cat.str.endswith("_ssd")', 'size'],
-                'write_size_max': ['io_cat == 2', 'size_max'],
-                'write_size_min': ['io_cat == 2', 'size_min'],
-                'write_time': ['io_cat == 2', 'time'],
-                'write_lustre_time': [
-                    'io_cat == 2 and cat.str.endswith("_lustre")',
-                    'time',
-                ],
-                'write_ssd_time': ['io_cat == 2 and cat.str.endswith("_ssd")', 'time'],
-                'close_count': [
-                    'io_cat == 3 and func_name.str.contains("close") and ~func_name.str.contains("dir")',
-                    'count',
-                ],
-                'close_time': [
-                    'io_cat == 3 and func_name.str.contains("close") and ~func_name.str.contains("dir")',
-                    'time',
-                ],
-                'open_count': [
-                    'io_cat == 3 and func_name.str.contains("open") and ~func_name.str.contains("dir")',
-                    'count',
-                ],
-                'open_time': [
-                    'io_cat == 3 and func_name.str.contains("open") and ~func_name.str.contains("dir")',
-                    'time',
-                ],
-                'seek_count': [
-                    'io_cat == 3 and func_name.str.contains("seek")',
-                    'count',
-                ],
-                'seek_time': [
-                    'io_cat == 3 and func_name.str.contains("seek")',
-                    'time',
-                ],
-                'stat_count': [
-                    'io_cat == 3 and func_name.str.contains("stat")',
-                    'count',
-                ],
-                'stat_time': [
-                    'io_cat == 3 and func_name.str.contains("stat")',
-                    'time',
-                ],
-            },
+            'reader_posix': {},
+            'reader_posix_lustre': DERIVED_POSIX_METRICS,
+            # 'reader_posix_ssd': DERIVED_POSIX_METRICS,
             'checkpoint': {},
+            'checkpoint_posix': {},
+            'checkpoint_posix_lustre': DERIVED_POSIX_METRICS,
+            'checkpoint_posix_ssd': DERIVED_POSIX_METRICS,
+            'other_posix': {},
+            'other_posix_lustre': DERIVED_POSIX_METRICS,
+            # 'other_posix_ssd': DERIVED_POSIX_METRICS,
         }
     )
     additional_metrics: Optional[Dict[str, Optional[str]]] = field(
         default_factory=lambda: {
-            'dlio_compute_util': 'dlio_compute_time / (dlio_compute_time + dlio_stall_time + checkpoint_time.fillna(0))',
+            'compute_util': 'compute_time_sum.fillna(0) / (compute_time_sum.fillna(0) + fetch_data_time_sum.fillna(0) + checkpoint_time_sum.fillna(0))',
+            'consumer_rate': 'data_loader_item_count_sum / compute_time_sum',
+            'producer_rate': 'data_loader_item_count_sum / data_loader_item_time_sum',
+            'producer_consumer_rate': 'producer_rate / consumer_rate',
         }
     )
     logical_views: Dict[str, Dict[str, Optional[str]]] = field(
@@ -227,6 +287,12 @@ class DFTracerAnalyzerConfig(AnalyzerConfig):
         }
     )
     time_granularity: Optional[float] = 1e6
+    unscored_metrics: Optional[List[str]] = field(
+        default_factory=lambda: [
+            'consumer_rate',
+            'producer_rate',
+        ]
+    )
 
 
 @dataclass
@@ -407,19 +473,14 @@ class Config:
     exclude_bottlenecks: Optional[List[str]] = field(default_factory=list)
     exclude_characteristics: Optional[List[str]] = field(default_factory=list)
     logical_view_types: Optional[bool] = False
-    metrics: Optional[Dict[Layer, List[str]]] = field(
-        default_factory=lambda: {Layer.POSIX: ["iops"]}
-    )
     output: OutputConfig = MISSING
     percentile: Optional[float] = None
     threshold: Optional[int] = None
     time_granularity: Optional[float] = 1e6
-    time_view_type: Optional[str] = None
+    time_view_type: Optional[str] = COL_TIME_RANGE
     trace_path: str = MISSING
     verbose: Optional[bool] = False
-    view_types: Optional[Dict[Layer, List[str]]] = field(
-        default_factory=lambda: {Layer.POSIX: VIEW_TYPES}
-    )
+    view_types: Optional[List[str]] = field(default_factory=lambda: VIEW_TYPES)
     unoverlapped_posix_only: Optional[bool] = False
 
 
