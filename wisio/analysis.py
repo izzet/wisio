@@ -79,7 +79,7 @@ def compute_time_boundaries(view: dd.DataFrame, view_type: str):
 
 def is_metric_time_bound(metric: Metric):
     return (
-        metric in ['iops', 'ops', 'bw', 'time']
+        metric in ['iops', 'ops', 'bw', 'time_sum']
         or 'time_' in metric
         or '_bw' in metric
         or '_time' in metric
@@ -87,8 +87,8 @@ def is_metric_time_bound(metric: Metric):
 
 
 def metric_time_column(metric: Metric):
-    metric_col = metric.replace('_norm', '').replace('_per', '')
-    return metric_col if '_time' in metric_col else 'time'
+    metric_col = metric.replace('_norm', '_sum').replace('_per', '_sum')
+    return metric_col if '_time_sum' in metric_col else 'time_sum'
 
 
 def set_bound_columns(ddf: Union[dd.DataFrame, pd.DataFrame], is_initial=False):
