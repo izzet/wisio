@@ -30,6 +30,7 @@ def override_hydra_config():
 @pytest.mark.parametrize(
     "analyzer, trace_path",
     [
+        ("darshan", "tests/data/extracted/darshan-dxt"),
         ("dftracer", "tests/data/extracted/dftracer-raw"),
         ("recorder", "tests/data/extracted/recorder-parquet"),
     ],
