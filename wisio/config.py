@@ -92,7 +92,7 @@ class OutputConfig:
     compact: Optional[bool] = False
     group_behavior: Optional[bool] = False
     name: Optional[str] = ""
-    root_only: Optional[bool] = False
+    root_only: Optional[bool] = True
     view_names: Optional[List[str]] = field(default_factory=list)
 
 
