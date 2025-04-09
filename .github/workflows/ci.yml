@@ -4,8 +4,15 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main]
+    branches: [main, dev]
+    tags:
+      - "v*.*.*" # Match version tags like v1.0.0, v0.1.2, etc.
   workflow_dispatch:
+    inputs:
+      run_full_tests:
+        description: "Run full test suite"
+        type: boolean
+        default: false
 
 jobs:
   build-and-test:
@@ -23,15 +30,7 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         with:
-          submodules: recursive
-          fetch-depth: 0
-      - name: Checkout PR
-        uses: actions/checkout@v4
-        if: github.event_name == 'pull_request'
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
           submodules: recursive
           fetch-depth: 0
 
@@ -83,6 +82,8 @@ jobs:
           key: ${{ runner.os }}-py${{ matrix.python }}-build-${{ hashFiles('**/*.py', '**/*.cpp', '**/*.hpp', '**/*.h', 'pyproject.toml') }}
           restore-keys: |
             ${{ runner.os }}-py${{ matrix.python }}-build-
+            ${{ runner.os }}-py${{ matrix.python }}-
+            ${{ runner.os }}-
 
       - name: Install Python dependencies
         run: |
@@ -97,9 +98,31 @@ jobs:
             -Csetup-args="-Denable_tests=true" \
             -Csetup-args="-Denable_tools=true"
 
+      - name: Determine test type
+        id: test-type
+        run: |
+          # Check if this is a tagged release (v*.*.*)
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "Run full test suite for release tag"
+            echo "run_full=true" >> $GITHUB_OUTPUT
+          # Check if this is a manual run requesting full tests
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ github.event.inputs.run_full_tests }}" == "true" ]]; then
+            echo "Run full test suite due to manual request"
+            echo "run_full=true" >> $GITHUB_OUTPUT
+          else
+            echo "Run smoke tests for regular development"
+            echo "run_full=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Run Python tests with coverage
         run: |
-          pytest --verbose --cov=wisio --cov-report=xml
+          if [[ "${{ steps.test-type.outputs.run_full }}" == "true" ]]; then
+            echo "Running FULL test suite"
+            pytest -m full --verbose --cov=wisio --cov-report=xml
+          else
+            echo "Running SMOKE test suite"
+            pytest -m smoke --verbose --cov=wisio --cov-report=xml
+          fi
 
       - name: Run C++ tests
         run: |

@@ -61,6 +61,12 @@ install = ["--skip-subprojects"]
 [tool.pyright]
 exclude = ["assets/", "build/", "scripts/", "subprojects/", "tmp/"]
 
+[tool.pytest.ini_options]
+markers = [
+    "smoke: minimal test subset for quick validation (select with '-m smoke')",
+    "full: comprehensive test suite with all parameter combinations (select with '-m full')",
+]
+
 [tool.ruff]
 line-length = 88
 

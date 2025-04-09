@@ -1,5 +1,6 @@
 import pathlib
 import pytest
+import random
 from glob import glob
 from hydra import compose, initialize
 from hydra.core.hydra_config import HydraConfig
@@ -27,18 +28,29 @@ def override_hydra_config():
     _override_hydra_config([])
 
 
-@pytest.mark.parametrize(
-    "analyzer, trace_path",
-    [
-        ("darshan", "tests/data/extracted/darshan-dxt"),
-        ("dftracer", "tests/data/extracted/dftracer-raw"),
-        ("recorder", "tests/data/extracted/recorder-parquet"),
-    ],
-)
-@pytest.mark.parametrize("checkpoint", [True, False])
-@pytest.mark.parametrize("metric", ["time", "iops"])
-@pytest.mark.parametrize("percentile", [0.95])
-def test_e2e(
+# Full test matrix for comprehensive testing
+full_analyzer_trace_params = [
+    ("darshan", "tests/data/extracted/darshan-dxt"),
+    ("dftracer", "tests/data/extracted/dftracer-raw"),
+    ("recorder", "tests/data/extracted/recorder-parquet"),
+]
+full_checkpoint_params = [True, False]
+full_metric_params = ["time", "iops"]
+full_percentile_params = [0.95]
+
+# Reduced matrix for smoke testing (fast runs)
+smoke_analyzer_trace_params = [random.choice(full_analyzer_trace_params)]
+smoke_checkpoint_params = [False]  # Skip checkpoint to make tests faster
+smoke_metric_params = ["time"]  # Most common metric
+smoke_percentile_params = [0.95]
+
+
+@pytest.mark.full
+@pytest.mark.parametrize("analyzer, trace_path", full_analyzer_trace_params)
+@pytest.mark.parametrize("checkpoint", full_checkpoint_params)
+@pytest.mark.parametrize("metric", full_metric_params)
+@pytest.mark.parametrize("percentile", full_percentile_params)
+def test_e2e_full(
     analyzer: str,
     trace_path: str,
     checkpoint: bool,
@@ -47,6 +59,54 @@ def test_e2e(
     tmp_path: pathlib.Path,
     override_hydra_config,
 ) -> None:
+    """Full test suite with all parameter combinations."""
+    _test_e2e(
+        analyzer,
+        trace_path,
+        checkpoint,
+        metric,
+        percentile,
+        tmp_path,
+        override_hydra_config,
+    )
+
+
+@pytest.mark.smoke
+@pytest.mark.parametrize("analyzer, trace_path", smoke_analyzer_trace_params)
+@pytest.mark.parametrize("checkpoint", smoke_checkpoint_params)
+@pytest.mark.parametrize("metric", smoke_metric_params)
+@pytest.mark.parametrize("percentile", smoke_percentile_params)
+def test_e2e_smoke(
+    analyzer: str,
+    trace_path: str,
+    checkpoint: bool,
+    metric: str,
+    percentile: float,
+    tmp_path: pathlib.Path,
+    override_hydra_config,
+) -> None:
+    """Smoke test with minimal parameter combinations for quick validation."""
+    _test_e2e(
+        analyzer,
+        trace_path,
+        checkpoint,
+        metric,
+        percentile,
+        tmp_path,
+        override_hydra_config,
+    )
+
+
+def _test_e2e(
+    analyzer: str,
+    trace_path: str,
+    checkpoint: bool,
+    metric: str,
+    percentile: float,
+    tmp_path: pathlib.Path,
+    override_hydra_config,
+) -> None:
+    """Common test logic extracted to avoid duplication."""
     bottleneck_dir = f"{tmp_path}/bottlenecks"
     checkpoint_dir = f"{tmp_path}/checkpoints"
 
