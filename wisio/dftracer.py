@@ -1,6 +1,6 @@
 import dask
 import dask.dataframe as dd
-import intervals as I
+import portion as P
 import math
 import json
 import logging
@@ -150,8 +150,8 @@ def io_function(json_object, current_dict, time_approximate, condition_fn):
             d["total_time"] = current_dict["tinterval"]
             d["phase"] = 3
         else:
-            d["total_time"] = I.to_string(I.empty())
-            d["io_time"] = I.to_string(I.empty())
+            d["total_time"] = P.to_string(P.empty())
+            d["io_time"] = P.to_string(P.empty())
     if "args" in json_object:
         if "fhash" in json_object["args"]:
             if type(json_object["args"]["fhash"]) is str:
@@ -295,8 +295,8 @@ def load_objects(line, fn, time_granularity, time_approximate, condition_fn, loa
                     d["dur"] = val["dur"]
                     d["te"] = d["ts"] + d["dur"]
                     if not time_approximate:
-                        d["tinterval"] = I.to_string(
-                            I.closed(val["ts"], val["ts"] + val["dur"])
+                        d["tinterval"] = P.to_string(
+                            P.closed(val["ts"], val["ts"] + val["dur"])
                         )
                     d["trange"] = int(
                         ((val["ts"] + val["dur"]) / 2.0) / time_granularity
