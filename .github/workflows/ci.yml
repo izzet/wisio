@@ -38,14 +38,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-          cache: "pip"
-
-      - name: Cache system dependencies
-        id: cache-apt
-        uses: actions/cache@v3
-        with:
-          path: /var/cache/apt
-          key: ${{ runner.os }}-apt-${{ hashFiles('.github/workflows/ci.yml') }}
 
       - name: Install system dependencies
         run: |
@@ -72,18 +64,6 @@ jobs:
             nlohmann-json3-dev \
             openmpi-bin \
             openmpi-common
-
-      - name: Cache build directories
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cache/pip
-            build/
-          key: ${{ runner.os }}-py${{ matrix.python }}-build-${{ hashFiles('**/*.py', '**/*.cpp', '**/*.hpp', '**/*.h', 'pyproject.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-py${{ matrix.python }}-build-
-            ${{ runner.os }}-py${{ matrix.python }}-
-            ${{ runner.os }}-
 
       - name: Install Python dependencies
         run: |
