@@ -257,9 +257,14 @@ class Output(abc.ABC):
             perspective_critical_per = perspective_critical_avg / raw_count
             per_records_discarded[metric] = 1 - perspective_critical_per
             per_records_retained[metric] = perspective_critical_per
+                
+            perspective_skewness[metric] = 0.0
+            if len(perspective_counts) > 1 and np.std(perspective_counts) > 1e-10:
+                perspective_skewness[metric] = abs(skew(perspective_counts))
 
-            perspective_skewness[metric] = abs(skew(perspective_counts))
-            root_perspective_skewness[metric] = abs(skew(root_view_type_counts[metric]))
+            root_perspective_skewness[metric] = 0.0
+            if len(root_view_type_counts[metric]) > 1 and np.std(root_view_type_counts[metric]) > 1e-10:
+                root_perspective_skewness[metric] = abs(skew(root_view_type_counts[metric]))
 
         num_rules = len(result.bottleneck_rules)
         view_names = list(bottlenecks['view_name'].unique())
