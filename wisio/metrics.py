@@ -354,16 +354,16 @@ def set_metrics(
     # Set bandwidth metrics
     for size_col, time_col in _find_metric_pairs(df.columns, '_size_sum', '_time_sum'):
         bw_col = size_col.replace('_size_sum', '_bw')
-        df[bw_col] = df[size_col] / df[time_col]
-        df[bw_col] = df[bw_col].mask(df[size_col] == 0, pd.NA)
+        df[bw_col] = np.where(df[size_col] > 0, df[size_col] / df[time_col], np.nan)
         metric_cols.append(bw_col)
     # Set intensity metrics
     for count_col, size_col in _find_metric_pairs(
         df.columns, '_count_sum', '_size_sum'
     ):
         intensity_col = count_col.replace('_count_sum', '_intensity')
-        df[intensity_col] = df[count_col] / df[size_col]
-        df[intensity_col] = df[intensity_col].mask(df[size_col] == 0, pd.NA)
+        df[intensity_col] = np.where(
+            df[size_col] > 0, df[count_col] / df[size_col], np.nan
+        )
         metric_cols.append(intensity_col)
     # Set ops metrics
     for count_col, time_col in _find_metric_pairs(
@@ -378,7 +378,7 @@ def set_metrics(
         ops_slope_col = count_per_col.replace('_count_per', '_ops_slope')
         ops_rank_col = count_per_col.replace('_count_per', '_ops_rank')
         df[ops_slope_col] = df[count_per_col] / df[time_per_col]
-        df[ops_slope_col] = np.where(np.isnan, df[ops_slope_col], 0)
+        df[ops_slope_col] = np.where(np.isnan(df[ops_slope_col]), 0, df[ops_slope_col])
         df[ops_rank_col] = (1 / df[ops_slope_col]).rank(pct=True)
         # metric_cols.append(ops_slope_col)
         metric_cols.append(ops_rank_col)
