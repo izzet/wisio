@@ -903,22 +903,18 @@ class Analyzer(abc.ABC):
         view_types: List[ViewType],
         partition_size: str,
     ) -> dd.DataFrame:
-        # Set derived columns depending on layer
-        hlm_with_metrics = self.set_layer_metrics(layer=layer, hlm=hlm.copy()).drop(
-            columns=HLM_EXTRA_COLS, errors='ignore'
-        )
-        agg_dict = {col: sum for col in hlm_with_metrics.columns}
+        hlm = self.set_layer_metrics(layer=layer, hlm=hlm)
+        agg_dict = {col: sum for col in hlm.columns if col not in HLM_EXTRA_COLS}
         for agg_col in agg_dict:
             if agg_col.endswith('_unique'):
                 agg_dict[agg_col] = unique_set_flatten()
-        # Set groupby
-        groupby = list(view_types)
-        # Compute agg_view
-        main_view = hlm_with_metrics.groupby(groupby).agg(
-            agg_dict, split_out=hlm_with_metrics.npartitions
+        main_view = (
+            hlm.groupby(list(view_types))
+            .agg(agg_dict, split_out=hlm.npartitions)
+            .map_partitions(fix_size_values)
+            .persist()
         )
-        # Return main_view
-        return main_view.persist()
+        return main_view
 
     def _compute_metric_boundaries(
         self,
