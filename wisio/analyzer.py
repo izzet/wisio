@@ -25,6 +25,7 @@ from .analysis import (
     # set_metric_scores,
 )
 from .analysis_utils import (
+    fix_size_values,
     set_file_dir,
     set_file_pattern,
     set_proc_name_parts,
@@ -892,6 +893,7 @@ class Analyzer(abc.ABC):
             .agg(agg_dict, split_out=math.ceil(math.sqrt(traces.npartitions)))
             .persist()
             .repartition(partition_size=partition_size)
+            .map_partitions(fix_size_values)
         )
         hlm = flatten_column_names(hlm)
         return hlm.persist()
@@ -997,6 +999,7 @@ class Analyzer(abc.ABC):
                 .agg(non_proc_agg_dict)
                 .groupby([view_type])
                 .agg(proc_agg_dict)
+                .map_partitions(fix_size_values)
                 .map_partitions(set_unique_counts, layer=layer)
             )
         else:
@@ -1004,6 +1007,7 @@ class Analyzer(abc.ABC):
                 records.reset_index()
                 .groupby([view_type])
                 .agg(non_proc_agg_dict)
+                .map_partitions(fix_size_values)
                 .map_partitions(set_unique_counts, layer=layer)
             )
 

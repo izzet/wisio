@@ -17,6 +17,12 @@ from .constants import (
 )
 
 
+def fix_size_values(df: pd.DataFrame):
+    size_cols = [col for col in df.columns if 'size' in col]
+    df[size_cols] = df[size_cols].replace(0, np.nan)
+    return df
+
+
 def set_app_name(df: pd.DataFrame):
     return df.assign(
         app_name=lambda df: df.index.get_level_values(COL_PROC_NAME)
