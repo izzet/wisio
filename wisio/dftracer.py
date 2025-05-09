@@ -1,12 +1,12 @@
 import dask
 import dask.bag as db
 import dask.dataframe as dd
-import pandas as pd
 import portion as P
 import math
 import json
 import logging
 import os
+import sys
 import zindex_py as zindex
 from dask.distributed import wait
 from glob import glob
@@ -185,11 +185,7 @@ def io_function(json_object, current_dict, time_approximate, condition_fn):
 
 
 def is_pyarrow_dtype_supported() -> bool:
-    try:
-        pd.Series([1.0, 2.0], dtype='double[pyarrow]')
-        return True
-    except (TypeError, ImportError):
-        return False
+    return sys.version_info >= (3, 9)
 
 
 def load_indexed_gzip_files(filename, start, end):
