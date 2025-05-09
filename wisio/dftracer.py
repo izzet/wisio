@@ -97,26 +97,26 @@ def get_conditions_default(json_obj):
 def io_columns(time_approximate=True):
     if is_pyarrow_dtype_supported():
         cols = {
-            'compute_time': 'uint64[pyarrow]',
-            'io_time': 'uint64[pyarrow]',
-            'app_io_time': 'uint64[pyarrow]',
-            'total_time': 'uint64[pyarrow]',
+            'compute_time': 'string[pyarrow]',
+            'io_time': 'string[pyarrow]',
+            'app_io_time': 'string[pyarrow]',
+            'total_time': 'string[pyarrow]',
             'fhash': 'uint64[pyarrow]',
             'hhash': 'uint64[pyarrow]',
             'phase': 'uint16[pyarrow]',
             'size': 'uint64[pyarrow]',
         }
         if time_approximate:
-            cols['compute_time'] = 'string[pyarrow]'
-            cols['io_time'] = 'string[pyarrow]'
-            cols['app_io_time'] = 'string[pyarrow]'
-            cols['total_time'] = 'string[pyarrow]'
+            cols['compute_time'] = 'uint64[pyarrow]'
+            cols['io_time'] = 'uint64[pyarrow]'
+            cols['app_io_time'] = 'uint64[pyarrow]'
+            cols['total_time'] = 'uint64[pyarrow]'
         return cols
     return {
-        'compute_time': 'string' if not time_approximate else 'float64',
-        'io_time': 'string' if not time_approximate else 'float64',
-        'app_io_time': 'string' if not time_approximate else 'float64',
-        'total_time': 'string' if not time_approximate else 'float64',
+        'compute_time': 'float64' if time_approximate else 'string',
+        'io_time': 'float64' if time_approximate else 'string',
+        'app_io_time': 'float64' if time_approximate else 'string',
+        'total_time': 'float64' if time_approximate else 'string',
         'fhash': 'int64',
         'hhash': 'int64',
         'phase': 'int16',
@@ -412,92 +412,92 @@ class DFTracerAnalyzer(Analyzer):
             main_bag = pfw_bag
         if main_bag:
             columns = {
-                'name': "string",
-                'cat': "string",
-                'type': "int8",
-                'pid': "int64",
-                'tid': "int64",
-                'ts': "int64",
-                'te': "int64",
-                'dur': "int64",
-                'tinterval': "int64" if self.time_approximate else "string",
-                'trange': "int64",
-                'level': "int8",
+                'name': 'string',
+                'cat': 'string',
+                'type': 'int8',
+                'pid': 'int64',
+                'tid': 'int64',
+                'ts': 'int64',
+                'te': 'int64',
+                'dur': 'int64',
+                'tinterval': 'int64' if self.time_approximate else 'string',
+                'trange': 'int64',
+                'level': 'int8',
             }
             if is_pyarrow_dtype_supported():
                 columns = {
-                    'name': "string[pyarrow]",
-                    'cat': "string[pyarrow]",
-                    'type': "uint8[pyarrow]",
-                    'pid': "uint64[pyarrow]",
-                    'tid': "uint64[pyarrow]",
-                    'ts': "uint64[pyarrow]",
-                    'te': "uint64[pyarrow]",
-                    'dur': "uint64[pyarrow]",
-                    'tinterval': "uint64[pyarrow]",
-                    'trange': "uint64[pyarrow]",
-                    'level': "uint8[pyarrow]",
+                    'name': 'string[pyarrow]',
+                    'cat': 'string[pyarrow]',
+                    'type': 'uint8[pyarrow]',
+                    'pid': 'uint64[pyarrow]',
+                    'tid': 'uint64[pyarrow]',
+                    'ts': 'uint64[pyarrow]',
+                    'te': 'uint64[pyarrow]',
+                    'dur': 'uint64[pyarrow]',
+                    'tinterval': 'uint64[pyarrow]',
+                    'trange': 'uint64[pyarrow]',
+                    'level': 'uint8[pyarrow]',
                 }
                 if self.time_approximate:
-                    columns['tinterval'] = "string[pyarrow]"
+                    columns['tinterval'] = 'string[pyarrow]'
             columns.update(io_columns())
             columns.update(load_cols)
             file_hash_columns = {
-                'name': "string",
-                'hash': "int64",
-                'pid': "int64",
-                'tid': "int64",
-                'hhash': "int64",
+                'name': 'string',
+                'hash': 'int64',
+                'pid': 'int64',
+                'tid': 'int64',
+                'hhash': 'int64',
             }
             hostname_hash_columns = {
-                'name': "string",
-                'hash': "int64",
-                'pid': "int64",
-                'tid': "int64",
-                'hhash': "int64",
+                'name': 'string',
+                'hash': 'int64',
+                'pid': 'int64',
+                'tid': 'int64',
+                'hhash': 'int64',
             }
             string_hash_columns = {
-                'name': "string",
-                'hash': "int64",
-                'pid': "int64",
-                'tid': "int64",
-                'hhash': "int64",
+                'name': 'string',
+                'hash': 'int64',
+                'pid': 'int64',
+                'tid': 'int64',
+                'hhash': 'int64',
             }
             other_metadata_columns = {
-                'name': "string",
-                'value': "string",
-                'pid': "int64",
-                'tid': "int64",
-                'hhash': "int64",
+                'name': 'string',
+                'value': 'string',
+                'pid': 'int64',
+                'tid': 'int64',
+                'hhash': 'int64',
             }
             if is_pyarrow_dtype_supported():
                 file_hash_columns = {
-                    'name': "string[pyarrow]",
-                    'hash': "uint64[pyarrow]",
-                    'pid': "uint64[pyarrow]",
-                    'tid': "uint64[pyarrow]",
-                    'hhash': "uint64[pyarrow]",
+                    'name': 'string[pyarrow]',
+                    'hash': 'uint64[pyarrow]',
+                    'pid': 'uint64[pyarrow]',
+                    'tid': 'uint64[pyarrow]',
+                    'hhash': 'uint64[pyarrow]',
                 }
                 hostname_hash_columns = {
-                    'name': "string[pyarrow]",
-                    'hash': "uint64[pyarrow]",
-                    'pid': "uint64[pyarrow]",
-                    'tid': "uint64[pyarrow]",
-                    'hhash': "uint64[pyarrow]",
+                    'name': 'string[pyarrow]',
+                    'hash': 'uint64[pyarrow]',
+                    'pid': 'uint64[pyarrow]',
+                    'tid': 'uint64[pyarrow]',
+                    'hhash': 'uint64[pyarrow]',
                 }
                 string_hash_columns = {
-                    'name': "string[pyarrow]",
-                    'hash': "uint64[pyarrow]",
-                    'pid': "uint64[pyarrow]",
-                    'tid': "uint64[pyarrow]",
-                    'hhash': "uint64[pyarrow]",
+                    'name': 'string[pyarrow]',
+                    'hash': 'uint64[pyarrow]',
+                    'pid': 'uint64[pyarrow]',
+                    'tid': 'uint64[pyarrow]',
+                    'hhash': 'uint64[pyarrow]',
                 }
                 other_metadata_columns = {
-                    'name': "string[pyarrow]",
-                    'value': "string[pyarrow]",
-                    'pid': "uint64[pyarrow]",
-                    'tid': "uint64[pyarrow]",
-                    'hhash': "uint64[pyarrow]",
+                    'name': 'string[pyarrow]',
+                    'value': 'string[pyarrow]',
+                    'pid': 'uint64[pyarrow]',
+                    'tid': 'uint64[pyarrow]',
+                    'hhash': 'uint64[pyarrow]',
                 }
             if "FH" in metadata_cols:
                 file_hash_columns.update(metadata_cols["FH"])
@@ -539,26 +539,17 @@ class DFTracerAnalyzer(Analyzer):
             logging.debug(f"Number of partitions used are {self.n_partition}")
             self.events = events.repartition(npartitions=self.n_partition).persist()
             _ = wait(self.events)
+            self.events['ts'] = self.events['ts'] - self.events['ts'].min()
+            self.events['te'] = self.events['ts'] + self.events['dur']
+            self.events['trange'] = self.events['ts'] // self.time_granularity
             if is_pyarrow_dtype_supported():
-                self.events['ts'] = (
-                    self.events['ts'] - self.events['ts'].min()
-                ).astype('uint64[pyarrow]')
-                self.events['te'] = (self.events['ts'] + self.events['dur']).astype(
-                    'uint64[pyarrow]'
-                )
-                self.events['trange'] = (
-                    self.events['ts'] // self.time_granularity
-                ).astype('uint16[pyarrow]')
+                self.events['ts'] = self.events['ts'].astype('uint64[pyarrow]')
+                self.events['te'] = self.events['te'].astype('uint64[pyarrow]')
+                self.events['trange'] = self.events['trange'].astype('uint16[pyarrow]')
             else:
-                self.events['ts'] = (
-                    self.events['ts'] - self.events['ts'].min()
-                ).astype('int64')
-                self.events['te'] = (self.events['ts'] + self.events['dur']).astype(
-                    'int64'
-                )
-                self.events['trange'] = (
-                    self.events['ts'] // self.time_granularity
-                ).astype('int16')
+                self.events['ts'] = self.events['ts'].astype('int64')
+                self.events['te'] = self.events['te'].astype('int64')
+                self.events['trange'] = self.events['trange'].astype('int16')
             self.events = self.events.persist()
             _ = wait(
                 [
