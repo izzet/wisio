@@ -1,6 +1,7 @@
 import dask
 import dask.bag as db
 import dask.dataframe as dd
+import pandas as pd
 import portion as P
 import math
 import json
@@ -94,25 +95,32 @@ def get_conditions_default(json_obj):
 
 
 def io_columns(time_approximate=True):
+    if is_pyarrow_dtype_supported():
+        cols = {
+            'compute_time': 'uint64[pyarrow]',
+            'io_time': 'uint64[pyarrow]',
+            'app_io_time': 'uint64[pyarrow]',
+            'total_time': 'uint64[pyarrow]',
+            'fhash': 'uint64[pyarrow]',
+            'hhash': 'uint64[pyarrow]',
+            'phase': 'uint16[pyarrow]',
+            'size': 'uint64[pyarrow]',
+        }
+        if time_approximate:
+            cols['compute_time'] = 'string[pyarrow]'
+            cols['io_time'] = 'string[pyarrow]'
+            cols['app_io_time'] = 'string[pyarrow]'
+            cols['total_time'] = 'string[pyarrow]'
+        return cols
     return {
-        # "compute_time": "string" if not time_approximate else np.float64,
-        # "io_time": "string" if not time_approximate else np.float64,
-        # "app_io_time": "string" if not time_approximate else np.float64,
-        # "total_time": "string" if not time_approximate else np.float64,
-        # "fhash": "string",
-        # # "hostname": "string",
-        # "phase": np.int16,
-        # "size": np.int64,
-        'compute_time': "string[pyarrow]"
-        if not time_approximate
-        else "uint64[pyarrow]",
-        'io_time': "string[pyarrow]" if not time_approximate else "uint64[pyarrow]",
-        'app_io_time': "string[pyarrow]" if not time_approximate else "uint64[pyarrow]",
-        'total_time': "string[pyarrow]" if not time_approximate else "uint64[pyarrow]",
-        'fhash': "uint64[pyarrow]",
-        'hhash': "uint64[pyarrow]",
-        'phase': "uint16[pyarrow]",
-        'size': "uint64[pyarrow]",
+        'compute_time': 'string' if not time_approximate else 'float64',
+        'io_time': 'string' if not time_approximate else 'float64',
+        'app_io_time': 'string' if not time_approximate else 'float64',
+        'total_time': 'string' if not time_approximate else 'float64',
+        'fhash': 'int64',
+        'hhash': 'int64',
+        'phase': 'int16',
+        'size': 'int64',
     }
 
 
@@ -136,7 +144,6 @@ def io_function(json_object, current_dict, time_approximate, condition_fn):
             d["total_time"] = current_dict["dur"]
             d["app_io_time"] = current_dict["dur"]
             d["phase"] = 3
-
     else:
         if compute_cond:
             d["compute_time"] = current_dict["tinterval"]
@@ -177,6 +184,14 @@ def io_function(json_object, current_dict, time_approximate, condition_fn):
     return d
 
 
+def is_pyarrow_dtype_supported() -> bool:
+    try:
+        pd.Series([1.0, 2.0], dtype='double[pyarrow]')
+        return True
+    except (TypeError, ImportError):
+        return False
+
+
 def load_indexed_gzip_files(filename, start, end):
     index_file = f"{filename}.zindex"
     json_lines = zindex.zquery(
@@ -188,13 +203,6 @@ def load_indexed_gzip_files(filename, start, end):
     )
     logging.debug(f"Read {len(json_lines)} json lines for [{start}, {end}]")
     return json_lines
-
-
-# IGNORE_FILES_PREFIX = [
-#     "/g/g92/haridev/.nv",
-#     "/usr/WS2/haridev/iopp/venvs",
-
-# ]
 
 
 def load_objects(line, fn, time_granularity, time_approximate, condition_fn, load_data):
@@ -403,65 +411,94 @@ class DFTracerAnalyzer(Analyzer):
         elif len(pfw_pattern) > 0:
             main_bag = pfw_bag
         if main_bag:
-            # columns = {
-            #     'name': "string",
-            #     'cat': "string",
-            #     'pid': np.int64,  # 'Int64',
-            #     'tid': np.int64,  # 'Int64',
-            #     'ts': np.float64,  # 'Int64',
-            #     'te': np.float64,  # 'Int64',
-            #     'dur': np.float64,  # 'Int64',
-            #     # 'tinterval': "string" if not time_approximate else np.int64, # 'Int64',
-            #     # 'trange': np.float64,  # 'Int64'
-            # }
-            # columns.update(io_columns())
-            # # columns.update(load_cols)
-            # traces = main_bag.to_dataframe(meta=columns)
             columns = {
-                'name': "string[pyarrow]",
-                'cat': "string[pyarrow]",
-                'type': "uint8[pyarrow]",
-                'pid': "uint64[pyarrow]",
-                'tid': "uint64[pyarrow]",
-                'ts': "uint64[pyarrow]",
-                'te': "uint64[pyarrow]",
-                'dur': "uint64[pyarrow]",
-                'tinterval': "string[pyarrow]"
-                if not self.time_approximate
-                else "uint64[pyarrow]",
-                'trange': "uint64[pyarrow]",
-                'level': "uint8[pyarrow]",
+                'name': "string",
+                'cat': "string",
+                'type': "int8",
+                'pid': "int64",
+                'tid': "int64",
+                'ts': "int64",
+                'te': "int64",
+                'dur': "int64",
+                'tinterval': "int64" if self.time_approximate else "string",
+                'trange': "int64",
+                'level': "int8",
             }
+            if is_pyarrow_dtype_supported():
+                columns = {
+                    'name': "string[pyarrow]",
+                    'cat': "string[pyarrow]",
+                    'type': "uint8[pyarrow]",
+                    'pid': "uint64[pyarrow]",
+                    'tid': "uint64[pyarrow]",
+                    'ts': "uint64[pyarrow]",
+                    'te': "uint64[pyarrow]",
+                    'dur': "uint64[pyarrow]",
+                    'tinterval': "uint64[pyarrow]",
+                    'trange': "uint64[pyarrow]",
+                    'level': "uint8[pyarrow]",
+                }
+                if self.time_approximate:
+                    columns['tinterval'] = "string[pyarrow]"
             columns.update(io_columns())
             columns.update(load_cols)
             file_hash_columns = {
-                'name': "string[pyarrow]",
-                'hash': "uint64[pyarrow]",
-                'pid': "uint64[pyarrow]",
-                'tid': "uint64[pyarrow]",
-                'hhash': "uint64[pyarrow]",
+                'name': "string",
+                'hash': "int64",
+                'pid': "int64",
+                'tid': "int64",
+                'hhash': "int64",
             }
             hostname_hash_columns = {
-                'name': "string[pyarrow]",
-                'hash': "uint64[pyarrow]",
-                'pid': "uint64[pyarrow]",
-                'tid': "uint64[pyarrow]",
-                'hhash': "uint64[pyarrow]",
+                'name': "string",
+                'hash': "int64",
+                'pid': "int64",
+                'tid': "int64",
+                'hhash': "int64",
             }
             string_hash_columns = {
-                'name': "string[pyarrow]",
-                'hash': "uint64[pyarrow]",
-                'pid': "uint64[pyarrow]",
-                'tid': "uint64[pyarrow]",
-                'hhash': "uint64[pyarrow]",
+                'name': "string",
+                'hash': "int64",
+                'pid': "int64",
+                'tid': "int64",
+                'hhash': "int64",
             }
             other_metadata_columns = {
-                'name': "string[pyarrow]",
-                'value': "string[pyarrow]",
-                'pid': "uint64[pyarrow]",
-                'tid': "uint64[pyarrow]",
-                'hhash': "uint64[pyarrow]",
+                'name': "string",
+                'value': "string",
+                'pid': "int64",
+                'tid': "int64",
+                'hhash': "int64",
             }
+            if is_pyarrow_dtype_supported():
+                file_hash_columns = {
+                    'name': "string[pyarrow]",
+                    'hash': "uint64[pyarrow]",
+                    'pid': "uint64[pyarrow]",
+                    'tid': "uint64[pyarrow]",
+                    'hhash': "uint64[pyarrow]",
+                }
+                hostname_hash_columns = {
+                    'name': "string[pyarrow]",
+                    'hash': "uint64[pyarrow]",
+                    'pid': "uint64[pyarrow]",
+                    'tid': "uint64[pyarrow]",
+                    'hhash': "uint64[pyarrow]",
+                }
+                string_hash_columns = {
+                    'name': "string[pyarrow]",
+                    'hash': "uint64[pyarrow]",
+                    'pid': "uint64[pyarrow]",
+                    'tid': "uint64[pyarrow]",
+                    'hhash': "uint64[pyarrow]",
+                }
+                other_metadata_columns = {
+                    'name': "string[pyarrow]",
+                    'value': "string[pyarrow]",
+                    'pid': "uint64[pyarrow]",
+                    'tid': "uint64[pyarrow]",
+                    'hhash': "uint64[pyarrow]",
+                }
             if "FH" in metadata_cols:
                 file_hash_columns.update(metadata_cols["FH"])
             if "HH" in metadata_cols:
@@ -502,15 +539,26 @@ class DFTracerAnalyzer(Analyzer):
             logging.debug(f"Number of partitions used are {self.n_partition}")
             self.events = events.repartition(npartitions=self.n_partition).persist()
             _ = wait(self.events)
-            self.events['ts'] = (self.events['ts'] - self.events['ts'].min()).astype(
-                'uint64[pyarrow]'
-            )
-            self.events['te'] = (self.events['ts'] + self.events['dur']).astype(
-                'uint64[pyarrow]'
-            )
-            self.events['trange'] = (self.events['ts'] // self.time_granularity).astype(
-                'uint16[pyarrow]'
-            )
+            if is_pyarrow_dtype_supported():
+                self.events['ts'] = (
+                    self.events['ts'] - self.events['ts'].min()
+                ).astype('uint64[pyarrow]')
+                self.events['te'] = (self.events['ts'] + self.events['dur']).astype(
+                    'uint64[pyarrow]'
+                )
+                self.events['trange'] = (
+                    self.events['ts'] // self.time_granularity
+                ).astype('uint16[pyarrow]')
+            else:
+                self.events['ts'] = (
+                    self.events['ts'] - self.events['ts'].min()
+                ).astype('int64')
+                self.events['te'] = (self.events['ts'] + self.events['dur']).astype(
+                    'int64'
+                )
+                self.events['trange'] = (
+                    self.events['ts'] // self.time_granularity
+                ).astype('int16')
             self.events = self.events.persist()
             _ = wait(
                 [
