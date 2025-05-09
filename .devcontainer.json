@@ -13,7 +13,7 @@
                 "charliermarsh.ruff",
                 "foxundermoon.shell-format",
                 "mesonbuild.mesonbuild",
-                "ms-azuretools.vscode-docker",
+                "ms-azuretools.vscode-containers",
                 "ms-python.debugpy",
                 "ms-python.python",
                 "ms-toolsai.jupyter",
