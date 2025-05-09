@@ -24,7 +24,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "dask[dataframe,distributed]~=2023.12.0",
+    "dask[bag,dataframe,distributed]~=2024.2.1",
     "dask_jobqueue~=0.8.0",
     "hydra-core~=1.3.0",
     "inflect==7.0",
@@ -43,7 +43,7 @@ dependencies = [
 
 [project.optional-dependencies]
 darshan = ["darshan>=3.4"]
-dftracer = ["zindex_py==0.0.2"]
+dftracer = ["zindex_py==0.0.5"]
 
 [project.scripts]
 wisio = "wisio.__main__:main"
@@ -63,6 +63,9 @@ exclude = ["assets/", "build/", "scripts/", "subprojects/", "tmp/"]
 markers = [
     "smoke: minimal test subset for quick validation (select with '-m smoke')",
     "full: comprehensive test suite with all parameter combinations (select with '-m full')",
+]
+filterwarnings = [
+    "ignore:The distutils package is deprecated and slated for removal.*:DeprecationWarning",
 ]
 
 [tool.ruff]

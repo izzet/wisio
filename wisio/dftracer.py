@@ -1,4 +1,5 @@
 import dask
+import dask.bag as db
 import dask.dataframe as dd
 import portion as P
 import math
@@ -83,7 +84,7 @@ def get_size(filename):
             verbose=False,
         )
         size = line_number * 256
-    logging.debug(f" The {filename} has {size/1024**3} GB size")
+    logging.debug(f" The {filename} has {size / 1024**3} GB size")
     return int(size)
 
 
@@ -331,22 +332,22 @@ class DFTracerAnalyzer(Analyzer):
                 pfw_gz_pattern.append(file)
                 all_files.append(file)
             else:
-                logging.warn(f"Ignoring unsuported file {file}")
+                logging.warning(f"Ignoring unsuported file {file}")
         if len(all_files) == 0:
             logging.error(f"No files selected for .pfw and .pfw.gz")
             exit(1)
         logging.debug(f"Processing files {all_files}")
         delayed_indices = []
         if len(pfw_gz_pattern) > 0:
-            dask.bag.from_sequence(pfw_gz_pattern).map(create_index).compute()
+            db.from_sequence(pfw_gz_pattern).map(create_index).compute()
         logging.info(f"Created index for {len(pfw_gz_pattern)} files")
-        total_size = dask.bag.from_sequence(all_files).map(get_size).sum().compute()
+        total_size = db.from_sequence(all_files).map(get_size).sum().compute()
         logging.info(f"Total size of all files are {total_size} bytes")
         gz_bag = None
         pfw_bag = None
         if len(pfw_gz_pattern) > 0:
             max_line_numbers = (
-                dask.bag.from_sequence(pfw_gz_pattern).map(get_linenumber).compute()
+                db.from_sequence(pfw_gz_pattern).map(get_linenumber).compute()
             )
             logging.debug(f"Max lines per file are {max_line_numbers}")
             json_line_delayed = []
@@ -367,7 +368,7 @@ class DFTracerAnalyzer(Analyzer):
                         filename, start, end
                     )
                 )
-            json_lines = dask.bag.concat(json_line_bags)
+            json_lines = db.concat(json_line_bags)
             gz_bag = (
                 json_lines.map(
                     load_objects,
@@ -383,7 +384,7 @@ class DFTracerAnalyzer(Analyzer):
         main_bag = None
         if len(pfw_pattern) > 0:
             pfw_bag = (
-                dask.bag.read_text(pfw_pattern)
+                db.read_text(pfw_pattern)
                 .map(
                     load_objects,
                     fn=load_fn,
@@ -396,7 +397,7 @@ class DFTracerAnalyzer(Analyzer):
                 .filter(lambda x: "name" in x)
             )
         if len(pfw_gz_pattern) > 0 and len(pfw_pattern) > 0:
-            main_bag = dask.bag.concat([pfw_bag, gz_bag])
+            main_bag = db.concat([pfw_bag, gz_bag])
         elif len(pfw_gz_pattern) > 0:
             main_bag = gz_bag
         elif len(pfw_pattern) > 0:

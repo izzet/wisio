@@ -195,7 +195,7 @@ class RuleEngine(object):
 
         view_types = scored_view.index.names
 
-        details = records_index.to_frame(index=False)
+        details = records_index.to_frame().reset_index(drop=True)
 
         # Logical view type fix
         if COL_FILE_DIR in view_types:
@@ -212,8 +212,9 @@ class RuleEngine(object):
                 df=details.set_index(COL_PROC_NAME)
             ).reset_index()
 
-        # TODO unique instead of nunique
-        details = details.groupby(view_types).nunique()
+        # TODO(izzet): unique instead of nunique
+        details_agg = {col: 'nunique' for col in details.columns}
+        details = details.groupby(view_types).agg(details_agg)
         details.columns = details.columns.map(lambda col: f"num_{col}")
 
         # Create bottlenecks

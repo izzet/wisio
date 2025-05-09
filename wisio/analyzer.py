@@ -1,4 +1,6 @@
 import abc
+import dask
+dask.config.set({'dataframe.query-planning-warning': False})
 import dask.dataframe as dd
 import hashlib
 import itertools as it
@@ -330,11 +332,16 @@ class Analyzer(abc.ABC):
     ) -> dd.DataFrame:
         # Set derived columns
         hlm = self._set_derived_columns(ddf=hlm)
+        hlm_agg = {col: sum for col in hlm.columns if col not in EXTRA_COLS}
+        for view_type in view_types:
+            if view_type in hlm_agg:
+                hlm_agg.pop(view_type)
         # Compute agg_view
         main_view = (
-            hlm.drop(columns=EXTRA_COLS)
-            .groupby(list(view_types))
-            .sum(split_out=hlm.npartitions)
+            hlm.groupby(list(view_types))
+            .agg(hlm_agg, split_out=hlm.npartitions)
+            .persist()
+            .repartition(partition_size=partition_size)
         )
         # main_view = hlm \
         #     .drop(columns=EXTRA_COLS) \
@@ -344,9 +351,9 @@ class Analyzer(abc.ABC):
         #     .repartition(partition_size)
         # Set hashed ids
         # main_view['id'] = main_view.index.map(set_id)
-        main_view['id'] = main_view.index.map(hash)
+        # main_view['id'] = main_view.index.map(hash)
         # Return main_view
-        return main_view.persist()
+        return main_view
 
     def compute_metric_boundaries(
         self,
