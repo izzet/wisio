@@ -220,6 +220,13 @@ class RuleEngine(object):
         # Create bottlenecks
         bottlenecks = scored_view.join(details)
 
+        # Convert pandas extension dtypes to float for pandas.eval compatibility.
+        for col_name in list(bottlenecks.columns): # Iterate over a copy
+            col_dtype = bottlenecks[col_name].dtype
+            if isinstance(col_dtype, (pd.Float64Dtype, pd.Int64Dtype)):
+                # NA becomes NaN, which eval handles.
+                bottlenecks[col_name] = bottlenecks[col_name].astype(float)
+
         for view_type in view_types:
             bottlenecks[f"num_{view_type}"] = 1  # current view type fix
 

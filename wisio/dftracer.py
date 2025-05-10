@@ -113,14 +113,14 @@ def io_columns(time_approximate=True):
             cols['total_time'] = 'uint64[pyarrow]'
         return cols
     return {
-        'compute_time': 'float64' if time_approximate else 'string',
-        'io_time': 'float64' if time_approximate else 'string',
-        'app_io_time': 'float64' if time_approximate else 'string',
-        'total_time': 'float64' if time_approximate else 'string',
-        'fhash': 'int64',
-        'hhash': 'int64',
-        'phase': 'int16',
-        'size': 'int64',
+        'compute_time': 'Int64' if time_approximate else 'string',
+        'io_time': 'Int64' if time_approximate else 'string',
+        'app_io_time': 'Int64' if time_approximate else 'string',
+        'total_time': 'Int64' if time_approximate else 'string',
+        'fhash': 'Int64',
+        'hhash': 'Int64',
+        'phase': 'Int16',
+        'size': 'Int64',
     }
 
 
@@ -410,15 +410,15 @@ class DFTracerAnalyzer(Analyzer):
             columns = {
                 'name': 'string',
                 'cat': 'string',
-                'type': 'int8',
-                'pid': 'int64',
-                'tid': 'int64',
-                'ts': 'int64',
-                'te': 'int64',
-                'dur': 'int64',
-                'tinterval': 'int64' if self.time_approximate else 'string',
-                'trange': 'int64',
-                'level': 'int8',
+                'type': 'Int8',
+                'pid': 'Int64',
+                'tid': 'Int64',
+                'ts': 'Int64',
+                'te': 'Int64',
+                'dur': 'Int64',
+                'tinterval': 'Int64' if self.time_approximate else 'string',
+                'trange': 'Int64',
+                'level': 'Int8',
             }
             if is_pyarrow_dtype_supported():
                 columns = {
@@ -440,31 +440,31 @@ class DFTracerAnalyzer(Analyzer):
             columns.update(load_cols)
             file_hash_columns = {
                 'name': 'string',
-                'hash': 'int64',
-                'pid': 'int64',
-                'tid': 'int64',
-                'hhash': 'int64',
+                'hash': 'Int64',
+                'pid': 'Int64',
+                'tid': 'Int64',
+                'hhash': 'Int64',
             }
             hostname_hash_columns = {
                 'name': 'string',
-                'hash': 'int64',
-                'pid': 'int64',
-                'tid': 'int64',
-                'hhash': 'int64',
+                'hash': 'Int64',
+                'pid': 'Int64',
+                'tid': 'Int64',
+                'hhash': 'Int64',
             }
             string_hash_columns = {
                 'name': 'string',
-                'hash': 'int64',
-                'pid': 'int64',
-                'tid': 'int64',
-                'hhash': 'int64',
+                'hash': 'Int64',
+                'pid': 'Int64',
+                'tid': 'Int64',
+                'hhash': 'Int64',
             }
             other_metadata_columns = {
                 'name': 'string',
                 'value': 'string',
-                'pid': 'int64',
-                'tid': 'int64',
-                'hhash': 'int64',
+                'pid': 'Int64',
+                'tid': 'Int64',
+                'hhash': 'Int64',
             }
             if is_pyarrow_dtype_supported():
                 file_hash_columns = {
@@ -543,9 +543,9 @@ class DFTracerAnalyzer(Analyzer):
                 self.events['te'] = self.events['te'].astype('uint64[pyarrow]')
                 self.events['trange'] = self.events['trange'].astype('uint16[pyarrow]')
             else:
-                self.events['ts'] = self.events['ts'].astype('int64')
-                self.events['te'] = self.events['te'].astype('int64')
-                self.events['trange'] = self.events['trange'].astype('int16')
+                self.events['ts'] = self.events['ts'].astype('Int64')
+                self.events['te'] = self.events['te'].astype('Int64')
+                self.events['trange'] = self.events['trange'].astype('Int16')
             self.events = self.events.persist()
             _ = wait(
                 [
