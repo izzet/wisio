@@ -3,10 +3,7 @@
 .vscode/* export-ignore
 
 assets/* export-ignore
-docs/* export-ignore
 notebooks/* export-ignore
-results/* export-ignore
-scripts/* export-ignore
 tests/* export-ignore
 
 .wakatime-project export-ignore
