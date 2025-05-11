@@ -50,14 +50,14 @@ wisio = "wisio.__main__:main"
 
 [project.urls]
 documentation = "https://grc.iit.edu/docs/category/wisio/"
-source = "https://github.com/izzet/wisio"
-tracker = "https://github.com/izzet/wisio/issues"
+source = "https://github.com/grc-iit/wisio"
+tracker = "https://github.com/grc-iit/wisio/issues"
 
 [tool.meson-python.args]
 install = ["--skip-subprojects"]
 
 [tool.pyright]
-exclude = ["assets/", "build/", "scripts/", "subprojects/", "tmp/"]
+exclude = ["assets/", "build/", "subprojects/", "tmp/"]
 
 [tool.pytest.ini_options]
 markers = [
