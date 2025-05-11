@@ -5,104 +5,106 @@ from ..constants import PROC_NAME_SEPARATOR, IOCategory
 
 
 def create_dxt_dataframe(trace_path: str, time_granularity=1e3):
+    """
+    Create a DataFrame from Darshan DXT_POSIX trace data with optimized performance.
+    
+    Args:
+        trace_path: Path to the Darshan trace file
+        time_granularity: Time granularity for time_range calculation
+        
+    Returns:
+        Tuple of (DataFrame with DXT data, job execution time)
+    """
+    # Load the darshan report
+    report = darshan.DarshanReport(trace_path, read_all=True)
 
-    rep = darshan.DarshanReport(trace_path, read_all=True)
-
-    job = rep.metadata['job']
+    # Calculate job time
+    job = report.metadata['job']
     if 'start_time' in job:
         job_time = job['end_time'] - job['start_time']
     else:
         job_time = job['end_time_sec'] - job['start_time_sec']
-
-    df = rep.records['DXT_POSIX'].to_df()
-
-    dxt_posix = pd.DataFrame(df)
-
-    read_id = []
-    read_rank = []
-    read_length = []
-    read_offsets = []
-    read_end_time = []
-    read_start_time = []
-    read_operation = []
-    read_hostname = []
-    read_io_cat = []
-
-    write_id = []
-    write_rank = []
-    write_length = []
-    write_offsets = []
-    write_end_time = []
-    write_start_time = []
-    write_operation = []
-    write_hostname = []
-    write_io_cat = []
-
-    # start = time.time()
-    for r in zip(dxt_posix['rank'], dxt_posix['read_segments'], dxt_posix['write_segments'], dxt_posix['id'], dxt_posix['hostname']):
-        if not r[1].empty:
-            read_id.append([r[3]] * len((r[1]['length'].to_list())))
-            read_rank.append([r[0]] * len((r[1]['length'].to_list())))
-            read_length.append(r[1]['length'].to_list())
-            read_end_time.append(r[1]['end_time'].to_list())
-            read_start_time.append(r[1]['start_time'].to_list())
-            read_operation.append(['read'] * len((r[1]['length'].to_list())))
-            read_offsets.append(r[1]['offset'].to_list())
-            read_hostname.append([r[4]] * len((r[1]['length'].to_list())))
-            read_io_cat.append([IOCategory.READ.value]*len((r[1]['length'].to_list())))
-
-        if not r[2].empty:
-            write_id.append([r[3]] * len((r[2]['length'].to_list())))     
-            write_rank.append([r[0]] * len((r[2]['length'].to_list())))
-            write_length.append(r[2]['length'].to_list())
-            write_end_time.append(r[2]['end_time'].to_list())
-            write_start_time.append(r[2]['start_time'].to_list())
-            write_operation.append(['write'] * len((r[2]['length'].to_list())))
-            write_offsets.append(r[2]['offset'].to_list())
-            write_hostname.append([r[4]] * len((r[2]['length'].to_list())))
-            write_io_cat.append([IOCategory.WRITE.value]*len((r[2]['length'].to_list())))
-
-    file_name = [rep.data['name_records'][element] for nestedlist in read_id for element in nestedlist]
-    rank = [f"app#localhost#{element}#0" for nestedlist in read_rank for element in nestedlist]
-    length = [element for nestedlist in read_length for element in nestedlist]
-    offsets = [element for nestedlist in read_offsets for element in nestedlist]
-    end_time = [element for nestedlist in read_end_time for element in nestedlist]
-    operation = [element for nestedlist in read_operation for element in nestedlist]
-    start_time = [element for nestedlist in read_start_time for element in nestedlist]
-    time_range = [int(element*time_granularity) for nestedlist in read_start_time for element in nestedlist]
-    hostname = [element for nestedlist in read_hostname for element in nestedlist]
-    io_cat = [element for nestedlist in read_io_cat for element in nestedlist]
-
-    file_name.extend([rep.data['name_records'][element] for nestedlist in write_id for element in nestedlist])
-    rank.extend([f"app#localhost#{element}#0" for nestedlist in write_rank for element in nestedlist])
-    length.extend([element for nestedlist in write_length for element in nestedlist])
-    offsets.extend([element for nestedlist in write_offsets for element in nestedlist])
-    end_time.extend([element for nestedlist in write_end_time for element in nestedlist])
-    operation.extend([element for nestedlist in write_operation for element in nestedlist])
-    start_time.extend([element for nestedlist in write_start_time for element in nestedlist])
-    time_range.extend([int(element*time_granularity) for nestedlist in write_start_time for element in nestedlist])
-    hostname.extend([element for nestedlist in write_hostname for element in nestedlist])
-    io_cat.extend([element for nestedlist in write_io_cat for element in nestedlist])
-
-    dxt_posix_df = pd.DataFrame(
-        {
-        'file_name': file_name,
-        'proc_name': rank,
-        'size': length,
-        'end_time': end_time,
-        'start_time': start_time,
-        'func_id': operation,
-        # 'offsets': offsets,
-        'hostname': hostname,
-        'io_cat': io_cat,
-        'time_range': time_range,
-        })
-
-    dxt_posix_df['cat'] = 0
-    dxt_posix_df['acc_pat'] = 0
-    dxt_posix_df['count'] = 1
-    dxt_posix_df['time'] = dxt_posix_df['end_time'] - dxt_posix_df['start_time']
-
+    
+    # Get the DXT_POSIX records
+    dxt_posix = pd.DataFrame(report.records['DXT_POSIX'].to_df())
+    
+    # Initialize data structures
+    data_rows = []
+    
+    # Process each record
+    for _, record in dxt_posix.iterrows():
+        file_id = record['id']
+        rank = record['rank']
+        hostname = record['hostname']
+        file_name = report.data['name_records'][file_id]
+        proc_name = f"app#localhost#{rank}#0"
+        
+        # Process read segments
+        if not record['read_segments'].empty:
+            read_segments = record['read_segments']
+            
+            # Convert dataframe to dict of lists for faster processing
+            lengths = read_segments['length'].tolist()
+            start_times = read_segments['start_time'].tolist()
+            end_times = read_segments['end_time'].tolist()
+            offsets = read_segments['offset'].tolist()
+            
+            # Create a batch of rows
+            for i in range(len(lengths)):
+                data_rows.append({
+                    'file_name': file_name,
+                    'proc_name': proc_name,
+                    'size': lengths[i],
+                    'end_time': end_times[i],
+                    'start_time': start_times[i],
+                    'func_id': 'read',
+                    'hostname': hostname,
+                    'io_cat': IOCategory.READ.value,
+                    'time_range': int(start_times[i] * time_granularity),
+                    'cat': 0,
+                    'acc_pat': 0,  # Would need more logic for random access patterns
+                    'count': 1,
+                    'time': end_times[i] - start_times[i]
+                })
+        
+        # Process write segments
+        if not record['write_segments'].empty:
+            write_segments = record['write_segments']
+            
+            # Convert dataframe to dict of lists for faster processing
+            lengths = write_segments['length'].tolist()
+            start_times = write_segments['start_time'].tolist()
+            end_times = write_segments['end_time'].tolist()
+            offsets = write_segments['offset'].tolist()
+            
+            # Create a batch of rows
+            for i in range(len(lengths)):
+                data_rows.append({
+                    'file_name': file_name,
+                    'proc_name': proc_name,
+                    'size': lengths[i],
+                    'end_time': end_times[i],
+                    'start_time': start_times[i],
+                    'func_id': 'write',
+                    'hostname': hostname,
+                    'io_cat': IOCategory.WRITE.value,
+                    'time_range': int(start_times[i] * time_granularity),
+                    'cat': 0,
+                    'acc_pat': 0,  # Would need more logic for random access patterns
+                    'count': 1,
+                    'time': end_times[i] - start_times[i]
+                })
+    
+    # Create the final dataframe in one go
+    if data_rows:
+        dxt_posix_df = pd.DataFrame(data_rows)
+    else:
+        # Empty dataframe with the required columns
+        dxt_posix_df = pd.DataFrame(columns=[
+            'file_name', 'proc_name', 'size', 'end_time', 'start_time', 'func_id',
+            'hostname', 'io_cat', 'time_range', 'cat', 'acc_pat', 'count', 'time'
+        ])
+    
     return dxt_posix_df, job_time  
 
 
