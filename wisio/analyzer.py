@@ -1,5 +1,6 @@
 import abc
 import dask
+
 dask.config.set({'dataframe.query-planning-warning': False})
 import dask.dataframe as dd
 import hashlib
@@ -88,6 +89,17 @@ class Analyzer(abc.ABC):
         time_granularity: float = 1e6,
         verbose: bool = False,
     ):
+        """Initializes the Analyzer instance.
+
+        Args:
+            bottleneck_dir: Directory to save identified bottlenecks.
+            checkpoint: Whether to enable checkpointing of intermediate results.
+            checkpoint_dir: Directory to store checkpoint data.
+            debug: Whether to enable debug mode.
+            time_approximate: Whether to use approximate time for I/O operations.
+            time_granularity: The time granularity for analysis, in microseconds.
+            verbose: Whether to enable verbose logging.
+        """
         if checkpoint:
             assert checkpoint_dir != '', 'Checkpoint directory must be defined'
 
@@ -115,6 +127,31 @@ class Analyzer(abc.ABC):
         threshold: Optional[int] = None,
         view_types: List[ViewType] = ['file_name', 'proc_name', 'time_range'],
     ) -> AnalyzerResultType:
+        """Analyzes I/O trace data to identify performance bottlenecks.
+
+        This method orchestrates the entire analysis process, including reading
+        trace data, computing various metrics and views, evaluating these views
+        to detect bottlenecks, and applying rules to characterize them.
+
+        Args:
+            trace_path: Path to the I/O trace file or directory.
+            accuracy: The analysis accuracy mode ('optimistic' or 'pessimistic').
+            exclude_bottlenecks: A list of bottleneck types to exclude from the analysis.
+            exclude_characteristics: A list of I/O characteristics to exclude.
+            logical_view_types: Whether to compute views based on logical relationships.
+            metrics: A list of metrics to analyze (e.g., 'iops', 'bw', 'time').
+            percentile: The percentile to use for identifying critical views.
+                        Mutually exclusive with 'threshold'.
+            threshold: The threshold value for slope-based bottleneck detection.
+                       Mutually exclusive with 'percentile'.
+            view_types: A list of view types to compute (e.g., 'file_name', 'proc_name').
+
+        Returns:
+            An AnalyzerResultType object containing the analysis results.
+
+        Raises:
+            ValueError: If neither 'percentile' nor 'threshold' is defined.
+        """
         # Check if both percentile and threshold are none
         if percentile is None and threshold is None:
             raise ValueError('Either percentile or threshold must be defined')
@@ -232,7 +269,7 @@ class Analyzer(abc.ABC):
             self._wait_all(tasks=evaluated_views)
 
         # Execute rules
-        rule_engine = RuleEngine(rules=[], raw_stats=raw_stats, verbose=self.verbose)
+        rule_engine = RuleEngine(rules={}, raw_stats=raw_stats, verbose=self.verbose)
         with EventLogger(
             key=EVENT_ATT_REASONS, message='Attach reasons to I/O bottlenecks'
         ):
@@ -267,6 +304,19 @@ class Analyzer(abc.ABC):
         )
 
     def read_stats(self, traces: dd.DataFrame) -> RawStats:
+        """Computes and restores raw statistics from the trace data.
+
+        Calculates job time and total event count from the traces.
+        It attempts to restore these stats from a checkpoint if available,
+        otherwise computes them and checkpoints the result.
+
+        Args:
+            traces: A Dask DataFrame containing the I/O trace data.
+
+        Returns:
+            A RawStats dictionary containing 'job_time', 'time_granularity',
+            and 'total_count'.
+        """
         job_time = self.compute_job_time(traces=traces)
         total_count = self.compute_total_count(traces=traces)
         raw_stats: RawStats = self.restore_extra_data(
@@ -280,15 +330,58 @@ class Analyzer(abc.ABC):
         return raw_stats
 
     def read_trace(self, trace_path: str) -> dd.DataFrame:
+        """Reads I/O trace data from the specified path.
+
+        This is an abstract method that must be implemented by subclasses
+        to handle specific trace formats.
+
+        Args:
+            trace_path: Path to the I/O trace file or directory.
+
+        Returns:
+            A Dask DataFrame containing the parsed I/O trace data.
+
+        Raises:
+            NotImplementedError: If the subclass does not implement this method.
+        """
         raise NotImplementedError
 
     def postread_trace(self, traces: dd.DataFrame) -> dd.DataFrame:
+        """Performs any post-processing on the raw trace data.
+
+        This method can be overridden by subclasses to perform additional
+        transformations or filtering on the trace data after it has been read.
+        By default, it returns the traces unmodified.
+
+        Args:
+            traces: A Dask DataFrame containing the I/O trace data.
+
+        Returns:
+            A Dask DataFrame with any post-processing applied.
+        """
         return traces
 
     def compute_job_time(self, traces: dd.DataFrame) -> float:
+        """Computes the total job execution time from the traces.
+
+        Args:
+            traces: A Dask DataFrame containing the I/O trace data,
+                    expected to have 'tstart' and 'tend' columns.
+
+        Returns:
+            The total job time as a float.
+        """
         return traces['tend'].max() - traces['tstart'].min()
 
     def compute_total_count(self, traces: dd.DataFrame) -> int:
+        """Computes the total number of I/O events in the traces.
+
+        Args:
+            traces: A Dask DataFrame containing the I/O trace data.
+
+        Returns:
+            The total count of I/O events as an integer.
+        """
         return traces.index.count().persist()
 
     def compute_high_level_metrics(
@@ -297,6 +390,19 @@ class Analyzer(abc.ABC):
         view_types: list,
         partition_size: str = '256MB',
     ) -> dd.DataFrame:
+        """Computes high-level metrics by aggregating trace data.
+
+        Groups the trace data by the specified view types and extra columns
+        (io_cat, acc_pat, func_id) and aggregates metrics like time, count, and size.
+
+        Args:
+            traces: A Dask DataFrame containing the I/O trace data.
+            view_types: A list of column names to group by for aggregation.
+            partition_size: The desired partition size for the resulting Dask DataFrame.
+
+        Returns:
+            A Dask DataFrame containing the computed high-level metrics.
+        """
         # Add `io_cat`, `acc_pat`, and `func_id` to groupby
         groupby = list(view_types)
         groupby.extend(EXTRA_COLS)
@@ -330,6 +436,20 @@ class Analyzer(abc.ABC):
         view_types: List[ViewType],
         partition_size: str = '256MB',
     ) -> dd.DataFrame:
+        """Computes the main aggregated view from high-level metrics.
+
+        This method takes the high-level metrics, sets derived columns,
+        and then groups by the specified view_types to create a primary
+        aggregated view of the I/O performance data.
+
+        Args:
+            hlm: A Dask DataFrame containing high-level metrics.
+            view_types: A list of view types to group by for the main view.
+            partition_size: The desired partition size for the resulting Dask DataFrame.
+
+        Returns:
+            A Dask DataFrame representing the main aggregated view.
+        """
         # Set derived columns
         hlm = self._set_derived_columns(ddf=hlm)
         hlm_agg = {col: sum for col in hlm.columns if col not in EXTRA_COLS}
@@ -361,6 +481,20 @@ class Analyzer(abc.ABC):
         metrics: List[Metric],
         view_types: List[ViewType],
     ) -> Dict[Metric, dd.core.Scalar]:
+        """Computes the upper boundary for each specified metric.
+
+        For metrics like 'iops' or 'time', it calculates the maximum time
+        either per process (if 'proc_name' is in view_types) or the total sum.
+        Other metrics like 'bw' are currently passed through.
+
+        Args:
+            main_view: The main aggregated Dask DataFrame.
+            metrics: A list of metrics for which to compute boundaries.
+            view_types: A list of view types present in the main_view.
+
+        Returns:
+            A dictionary mapping each metric to its computed boundary (a Dask Scalar).
+        """
         metric_boundaries = {}
         for metric in metrics:
             metric_boundary = None
@@ -385,6 +519,24 @@ class Analyzer(abc.ABC):
         threshold: Optional[int],
         view_types: List[ViewType],
     ):
+        """Computes multifaceted views for each specified metric.
+
+        Iterates through all permutations of view_types for each metric,
+        generating different "perspectives" on the data. Each perspective
+        is a ViewResult, containing the filtered data and critical items.
+
+        Args:
+            main_view: The main aggregated Dask DataFrame.
+            metrics: A list of metrics to compute views for.
+            metric_boundaries: A dictionary of precomputed metric boundaries.
+            percentile: The percentile used to identify critical items in views.
+            threshold: The threshold value for slope-based critical item identification.
+            view_types: A list of base view types to permute for creating views.
+
+        Returns:
+            A dictionary where keys are metrics and values are dictionaries
+            mapping ViewKey to ViewResult.
+        """
         # Keep view results
         view_results = {}
 
@@ -428,6 +580,23 @@ class Analyzer(abc.ABC):
         view_results: Dict[Metric, Dict[ViewKey, ViewResult]],
         view_types: List[ViewType],
     ):
+        """Computes views based on predefined logical relationships in the data.
+
+        This method extends the existing view_results by adding new views
+        derived from logical columns (e.g., file directory from file name).
+
+        Args:
+            main_view: The main aggregated Dask DataFrame.
+            metric_boundaries: A dictionary of precomputed metric boundaries.
+            metrics: A list of metrics to compute logical views for.
+            percentile: The percentile used to identify critical items in views.
+            threshold: The threshold value for slope-based critical item identification.
+            view_results: The existing dictionary of computed views to be updated.
+            view_types: A list of base view types available in the main_view.
+
+        Returns:
+            The updated view_results dictionary including the computed logical views.
+        """
         for metric in metrics:
             for view_key in LOGICAL_VIEW_TYPES:
                 view_type = view_key[-1]
@@ -476,6 +645,25 @@ class Analyzer(abc.ABC):
         view_key: ViewKey,
         view_type: str,
     ) -> ViewResult:
+        """Computes a single view based on the provided parameters.
+
+        This involves restoring a view from a checkpoint or computing it,
+        then filtering it to identify critical items based on percentile or threshold.
+
+        Args:
+            metrics: The list of all metrics being analyzed.
+            metric: The specific metric for this view.
+            metric_boundary: The precomputed boundary for the current metric.
+            percentile: The percentile to identify critical items.
+            records: The Dask DataFrame (parent records) to compute the view from.
+            threshold: The threshold for slope-based critical item identification.
+            view_key: The key identifying this specific view.
+            view_type: The primary dimension/column for this view.
+
+        Returns:
+            A ViewResult object containing the computed view, critical items,
+            and filtered records.
+        """
         # Restore view
         view = self.restore_view(
             name=self.get_checkpoint_name(CHECKPOINT_VIEW, metric, *list(view_key)),
@@ -519,22 +707,66 @@ class Analyzer(abc.ABC):
             view_type=view_type,
         )
 
-    def get_checkpoint_name(self, *args):
+    def get_checkpoint_name(self, *args) -> str:
+        """Generates a standardized name for a checkpoint.
+
+        Joins the provided arguments with underscores. If HASH_CHECKPOINT_NAMES
+        is True, it returns an MD5 hash of the name.
+
+        Args:
+            *args: String components to form the checkpoint name.
+
+        Returns:
+            A string representing the checkpoint name.
+        """
         checkpoint_name = "_".join(args)
         if HASH_CHECKPOINT_NAMES:
             return hashlib.md5(checkpoint_name.encode("utf-8")).hexdigest()
         return checkpoint_name
 
-    def get_checkpoint_path(self, name: str):
+    def get_checkpoint_path(self, name: str) -> str:
+        """Constructs the full path for a given checkpoint name.
+
+        Args:
+            name: The name of the checkpoint.
+
+        Returns:
+            The absolute path to the checkpoint directory/file.
+        """
         return f"{self.checkpoint_dir}/{name}"
 
-    def has_checkpoint(self, name: str):
+    def has_checkpoint(self, name: str) -> bool:
+        """Checks if a checkpoint with the given name exists.
+
+        A checkpoint is considered to exist if its `_metadata` file is present.
+
+        Args:
+            name: The name of the checkpoint.
+
+        Returns:
+            True if the checkpoint exists, False otherwise.
+        """
         checkpoint_path = self.get_checkpoint_path(name=name)
         return os.path.exists(f"{checkpoint_path}/_metadata")
 
     def restore_extra_data(
         self, name: str, fallback: Callable[[], dict], force=False, persist=False
-    ):
+    ) -> dict:
+        """Restores extra (non-DataFrame) data from a JSON checkpoint.
+
+        If checkpointing is enabled and the checkpoint file exists (unless 'force'
+        is True), it loads the data from the JSON file. Otherwise, it calls the
+        'fallback' function to compute the data and then stores it asynchronously.
+
+        Args:
+            name: The name of the checkpoint.
+            fallback: A callable function that returns the data if not found or forced.
+            force: If True, forces recomputation even if a checkpoint exists.
+            persist: (Currently unused in the method body, but part of signature)
+
+        Returns:
+            A dictionary containing the restored or computed data.
+        """
         if self.checkpoint:
             data_path = f"{self.get_checkpoint_path(name=name)}.json"
             if force or not os.path.exists(data_path):
@@ -557,7 +789,23 @@ class Analyzer(abc.ABC):
         fallback: Callable[[], dd.DataFrame],
         force=False,
         write_to_disk=True,
-    ):
+    ) -> dd.DataFrame:
+        """Restores a Dask DataFrame view from a Parquet checkpoint.
+
+        If checkpointing is enabled and the checkpoint exists (unless 'force' is True),
+        it reads the DataFrame from the Parquet store. Otherwise, it calls the
+        'fallback' function to compute the DataFrame. If 'write_to_disk' is True,
+        the computed DataFrame is then stored as a checkpoint.
+
+        Args:
+            name: The name of the checkpoint.
+            fallback: A callable function that returns the DataFrame if not found or forced.
+            force: If True, forces recomputation even if a checkpoint exists.
+            write_to_disk: If True, saves the computed view to disk if it was recomputed.
+
+        Returns:
+            A Dask DataFrame representing the restored or computed view.
+        """
         if self.checkpoint:
             view_path = self.get_checkpoint_path(name=name)
             if force or not self.has_checkpoint(name=name):
@@ -570,18 +818,52 @@ class Analyzer(abc.ABC):
         return fallback()
 
     def save_bottlenecks(self, bottlenecks: dd.DataFrame, partition_size='64MB'):
+        """Saves the identified bottlenecks to Parquet files.
+
+        The bottlenecks DataFrame is repartitioned and then written to the
+        `bottleneck_dir` specified during Analyzer initialization.
+
+        Args:
+            bottlenecks: A Dask DataFrame containing the identified bottlenecks.
+            partition_size: The desired partition size for the output Parquet files.
+
+        Returns:
+            The result of the Dask `to_parquet` operation (typically None or a Dask future).
+        """
         return bottlenecks.repartition(partition_size=partition_size).to_parquet(
             self.bottleneck_dir, compute=True, write_metadata_file=True
         )
 
     @staticmethod
     def store_extra_data(data: Tuple[Dict], data_path: str):
+        """Saves extra (non-DataFrame) data to a JSON file.
+
+        This static method is typically used by Dask workers to persist data.
+
+        Args:
+            data: A tuple containing a single dictionary of data to be saved.
+            data_path: The full path to the JSON file where data will be stored.
+        """
         with open(data_path, 'w') as f:
             return json.dump(data[0], f, cls=NpEncoder)
 
     def store_view(
         self, name: str, view: dd.DataFrame, compute=True, partition_size='64MB'
     ):
+        """Stores a Dask DataFrame view to a Parquet checkpoint.
+
+        The view DataFrame is repartitioned and then written to a subdirectory
+        named `name` within the `checkpoint_dir`.
+
+        Args:
+            name: The name of the checkpoint.
+            view: The Dask DataFrame to store.
+            compute: Whether to compute the DataFrame before writing (Dask default is True).
+            partition_size: The desired partition size for the output Parquet files.
+
+        Returns:
+            The result of the Dask `to_parquet` operation.
+        """
         return view.repartition(partition_size=partition_size).to_parquet(
             self.get_checkpoint_path(name=name),
             compute=compute,
@@ -590,6 +872,18 @@ class Analyzer(abc.ABC):
 
     @staticmethod
     def view_permutations(view_types: List[ViewType]):
+        """Generates all permutations of view_types for creating multifaceted views.
+
+        For a list of view_types [vt1, vt2, vt3], it will generate permutations
+        of length 1, 2, and 3, e.g., (vt1,), (vt2,), (vt1, vt2), (vt2, vt1), ...
+
+        Args:
+            view_types: A list of ViewType elements.
+
+        Returns:
+            An iterator yielding tuples, where each tuple is a permutation of view_types.
+        """
+
         def _iter_permutations(r: int):
             return it.permutations(view_types, r + 1)
 
