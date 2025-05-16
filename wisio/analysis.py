@@ -96,9 +96,7 @@ def set_bound_columns(ddf: Union[dd.DataFrame, pd.DataFrame], is_initial=False):
 
     # records which tend towards 1 >> 0.9
     ddf['intensity'] = 0.0
-    ddf['intensity'] = ddf['intensity'].mask(
-        ddf['size'] > 0, ddf['count'] / ddf['size']
-    )
+    ddf['intensity'] = ddf['intensity'].mask(ddf['size'] > 0, ddf['count'] / ddf['size'])
 
     if not is_initial:
         return ddf.drop(columns=['bw_intensity'])
@@ -136,11 +134,20 @@ def set_metric_scores(
     #     df = df.query(f"{metric} > 0")
 
     if is_slope_based:
-        df[bin_col] = np.digitize(df[slope_col], bins=bins, right=True)
+        # Handle NA values before using np.digitize
+        valid_mask = df[slope_col].notna()
+        df.loc[valid_mask, bin_col] = np.digitize(df.loc[valid_mask, slope_col], bins=bins, right=True)
+        # Set a default bin for NA values
+        df.loc[~valid_mask, bin_col] = 0  # None
     else:
-        df[bin_col] = np.digitize(df[pth_col], bins=bins, right=True)
+        # Handle NA values before using np.digitize
+        valid_mask = df[pth_col].notna()
+        df.loc[valid_mask, bin_col] = np.digitize(df.loc[valid_mask, pth_col], bins=bins, right=True)
+        # Set a default bin for NA values
+        df.loc[~valid_mask, bin_col] = 0  # None
 
-    df[score_col] = np.choose(df[bin_col] - 1, choices=names, mode='clip')
+    # Ensure bin values are valid indices for the choices
+    df[score_col] = np.choose(np.maximum(df[bin_col].fillna(0).astype(int) - 1, 0), choices=names, mode='clip')
 
     return df
 
