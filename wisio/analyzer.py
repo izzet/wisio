@@ -1011,6 +1011,12 @@ class Analyzer(abc.ABC):
                     ddf[col_name] = ddf[col_name].mask(
                         ddf['func_id'].str.contains(md_op), ddf[col]
                     )
+        # Cast columns to correct types
+        for col in ddf.columns:
+            if col.endswith('_size') or col.endswith('_count'):
+                ddf[col] = ddf[col].astype('int64')
+            elif col.endswith('_time'):
+                ddf[col] = ddf[col].astype('float64')
         # Return ddf
         return ddf
 
