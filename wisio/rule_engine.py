@@ -219,6 +219,12 @@ class RuleEngine(object):
 
         # Create bottlenecks
         bottlenecks = scored_view.join(details)
+        # Convert pandas extension dtypes to float for pandas.eval compatibility
+        for col_name in list(bottlenecks.columns):  
+            col = bottlenecks[col_name]
+            if isinstance(col.dtype, (pd.Float64Dtype, pd.Int64Dtype)):
+                # NA becomes NaN, which eval handles.
+                bottlenecks[col_name] = col.astype(float)
         for view_type in view_types:
             bottlenecks[f"num_{view_type}"] = 1  # current view type fix
         bottlenecks['metric'] = metric
