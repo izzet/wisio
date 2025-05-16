@@ -219,64 +219,19 @@ class RuleEngine(object):
 
         # Create bottlenecks
         bottlenecks = scored_view.join(details)
-
-        # Convert pandas extension dtypes to float for pandas.eval compatibility.
-        for col_name in list(bottlenecks.columns):  # Iterate over a copy
-            col = bottlenecks[col_name]
-            if isinstance(col.dtype, (pd.Float64Dtype, pd.Int64Dtype)):
-                # NA becomes NaN, which eval handles.
-                bottlenecks[col_name] = col.astype(float)
-
-        print(f"WISIO DEBUG: === In _assign_bottlenecks after type conversion (object conversion removed) ===")
-        print(f"WISIO DEBUG: View Key: {view_key}, Metric: {metric}")
-        print(f"WISIO DEBUG: bottlenecks.info():")
-        bottlenecks.info(verbose=True) # verbose=True to show all columns if many
-        if f"{metric}_score" in bottlenecks.columns:
-            print(f"WISIO DEBUG: Column '{metric}_score' dtype: {bottlenecks[f'{metric}_score'].dtype}")
-            print(f"WISIO DEBUG: Column '{metric}_score' head:\\n{bottlenecks[f'{metric}_score'].head()}")
-        else:
-            print(f"WISIO DEBUG: Column '{metric}_score' not found in bottlenecks.")
-        print(f"WISIO DEBUG: bottlenecks.head():\\n{bottlenecks.head()}")
-        print(f"WISIO DEBUG: =======================================================================")
-
         for view_type in view_types:
             bottlenecks[f"num_{view_type}"] = 1  # current view type fix
-
         bottlenecks['metric'] = metric
         bottlenecks['view_depth'] = len(view_key) if isinstance(view_key, tuple) else 1
         bottlenecks['view_name'] = format_view_name(view_key, '.')
 
         for rule, impl in rule_dict.items():
-            print(f"WISIO DEBUG: === Evaluating RULE condition for rule: {rule} ===")
-            print(f"WISIO DEBUG: Condition: {impl.rule.condition}")
-            print(f"WISIO DEBUG: bottlenecks.info() before rule eval:")
-            bottlenecks.info(verbose=True)
-            print(f"WISIO DEBUG: bottlenecks.head() before rule eval:\\n{bottlenecks.head()}")
-            print(f"WISIO DEBUG: =======================================================")
-            try:
-                rule_result = bottlenecks.eval(impl.rule.condition)
-            except Exception as e:
-                print(f"WISIO ERROR: Exception during rule_result = bottlenecks.eval(impl.rule.condition): {e}")
-                print(f"WISIO ERROR: Rule: {rule}, Condition: {impl.rule.condition}")
-                # Potentially re-raise or handle, for now just printing
-                raise # Re-raise to see the original traceback
+            rule_result = bottlenecks.eval(impl.rule.condition)
             rule_result.name = rule
             bottlenecks = bottlenecks.join(rule_result)
 
             for i, reason in enumerate(impl.rule.reasons):
-                print(f"WISIO DEBUG: === Evaluating REASON condition for rule: {rule}, reason index: {i} ===")
-                print(f"WISIO DEBUG: Condition: {reason.condition}")
-                print(f"WISIO DEBUG: bottlenecks.info() before reason eval:")
-                bottlenecks.info(verbose=True)
-                print(f"WISIO DEBUG: bottlenecks.head() before reason eval:\\n{bottlenecks.head()}")
-                print(f"WISIO DEBUG: ===========================================================")
-                try:
-                    reason_result = bottlenecks.eval(reason.condition)
-                except Exception as e:
-                    print(f"WISIO ERROR: Exception during reason_result = bottlenecks.eval(reason.condition): {e}")
-                    print(f"WISIO ERROR: Rule: {rule}, Reason Index: {i}, Condition: {reason.condition}")
-                    # Potentially re-raise or handle
-                    raise # Re-raise to see the original traceback
+                reason_result = bottlenecks.eval(reason.condition)
                 reason_result.name = f"{rule}.reason.{i}"
                 bottlenecks = bottlenecks.join(reason_result)
 
