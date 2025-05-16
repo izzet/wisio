@@ -57,7 +57,7 @@ def _assign_behavior(bottlenecks: pd.DataFrame, metric: str):
     for view_name, score in it.product(view_names, scores):
         behavior_key = (view_name, score)
 
-        if not behavior_key in bottlenecks.index:
+        if behavior_key not in bottlenecks.index:
             continue
 
         behaviors = bottlenecks.loc[[behavior_key]]
@@ -221,11 +221,21 @@ class RuleEngine(object):
         bottlenecks = scored_view.join(details)
 
         # Convert pandas extension dtypes to float for pandas.eval compatibility.
-        for col_name in list(bottlenecks.columns): # Iterate over a copy
-            col_dtype = bottlenecks[col_name].dtype
-            if isinstance(col_dtype, (pd.Float64Dtype, pd.Int64Dtype)):
+        # Also, attempt to convert object dtypes that might be numeric.
+        for col_name in list(bottlenecks.columns):  # Iterate over a copy
+            col = bottlenecks[col_name]
+            if isinstance(col.dtype, (pd.Float64Dtype, pd.Int64Dtype)):
                 # NA becomes NaN, which eval handles.
-                bottlenecks[col_name] = bottlenecks[col_name].astype(float)
+                bottlenecks[col_name] = col.astype(float)
+            elif col.dtype == object:
+                try:
+                    # Attempt to convert to numeric, coercing errors to NaN
+                    bottlenecks[col_name] = pd.to_numeric(col, errors='coerce')
+                except Exception:
+                    # If conversion fails for any reason, leave as is or handle as needed
+                    # For now, we'll leave it, but logging a warning might be useful
+                    pass
+
 
         for view_type in view_types:
             bottlenecks[f"num_{view_type}"] = 1  # current view type fix
