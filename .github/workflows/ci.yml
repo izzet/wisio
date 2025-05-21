@@ -113,6 +113,7 @@ jobs:
 
       - name: Run WisIO
         run: |
+          wisio +analyzer=darshan percentile=0.99 trace_path=tests/data/extracted/darshan-raw view_types=[file_name,proc_name] metrics=[time]
           wisio +analyzer=darshan percentile=0.99 trace_path=tests/data/extracted/darshan-dxt
           wisio +analyzer=dftracer percentile=0.99 trace_path=tests/data/extracted/dftracer-raw
           wisio +analyzer=recorder percentile=0.99 trace_path=tests/data/extracted/recorder-parquet

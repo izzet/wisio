@@ -228,9 +228,7 @@ class BottleneckRule(RuleHandler):
         details = (
             scoring_result.records_index.to_frame()
             .reset_index(drop=True)
-            .query(
-                f"{view_type} in @indices", local_dict={'indices': bottlenecks.index}
-            )
+            .query(f"{view_type} in @indices", local_dict={'indices': bottlenecks.index})
         )
 
         tasks = {}
@@ -297,9 +295,7 @@ class BottleneckRule(RuleHandler):
                 if col in [COL_APP_NAME, COL_NODE_NAME, COL_PROC_NAME, COL_RANK]:
                     num_processes = details.groupby(view_type)[col].nunique().to_dict()
                 if col == COL_TIME_RANGE:
-                    num_time_periods = (
-                        details.groupby(view_type)[col].nunique().to_dict()
-                    )
+                    num_time_periods = details.groupby(view_type)[col].nunique().to_dict()
 
         # print('handle_task_results t1', time.perf_counter() - t0)
 
@@ -356,18 +352,10 @@ class BottleneckRule(RuleHandler):
             reasons = []
             for i, reason in enumerate(self.rule.reasons):
                 if reasoning[i][row.Index]:
-                    reasons.append(
-                        RuleResultReason(
-                            description=reasoning_templates[i].render(row_dict).strip()
-                        )
-                    )
+                    reasons.append(RuleResultReason(description=reasoning_templates[i].render(row_dict).strip()))
 
             if len(reasons) == 0:
-                reasons.append(
-                    RuleResultReason(
-                        description='No reason found, further investigation needed.'
-                    )
-                )
+                reasons.append(RuleResultReason(description='No reason found, further investigation needed.'))
 
             result = RuleResult(
                 compact_desc=None,
@@ -432,9 +420,7 @@ class BottleneckRule(RuleHandler):
             accessor_verb = self.pluralize.plural_verb('accesses', num_processes)
             accessed_noun = self.pluralize.plural_noun(accessed, num_files)
             time_period_name = f" ({subject}) " if view_type == COL_TIME_RANGE else ' '
-            time_period_noun = self.pluralize.plural_noun(
-                'time period', num_time_periods
-            )
+            time_period_noun = self.pluralize.plural_noun('time period', num_time_periods)
 
             if self.verbose:
                 time_intervals = get_intervals(values=time_periods)
@@ -444,7 +430,7 @@ class BottleneckRule(RuleHandler):
                     f"{accessed_noun} {self.pluralize.join(files)} "
                     f"during the {join_with_and(values=time_intervals)}th {time_period_noun} "
                     f"and {self.pluralize.plural_verb('has', num_processes)} an I/O time of {time:.2f} seconds which is "
-                    f"{time_overall*100:.2f}% of overall I/O time of the workload."
+                    f"{time_overall * 100:.2f}% of overall I/O time of the workload."
                 )
             else:
                 # 32 processes access 1 file pattern within 6 time periods and have an I/O time of 2.92 seconds which
@@ -455,7 +441,7 @@ class BottleneckRule(RuleHandler):
                     f"within {num_time_periods:,} {time_period_noun}{time_period_name}"
                     f"across {num_ops:,} I/O {self.pluralize.plural_noun('operation', num_ops)} "
                     f"and {self.pluralize.plural_verb('has', num_processes)} an I/O time of {time:.2f} seconds which is "
-                    f"{time_overall*100:.2f}% of overall I/O time of the workload."
+                    f"{time_overall * 100:.2f}% of overall I/O time of the workload."
                 )
 
         else:
@@ -476,7 +462,7 @@ class BottleneckRule(RuleHandler):
                 f"{count:,} {self.pluralize.plural_noun(nice_view_type, count)} ({nice_subject}) "
                 f"{self.pluralize.plural_verb('has', count)} an I/O time of {time:.2f} seconds "
                 f"across {num_ops:,} I/O {self.pluralize.plural_noun('operation', num_ops)} "
-                f"which is {time_overall*100:.2f}% of overall I/O time of the workload."
+                f"which is {time_overall * 100:.2f}% of overall I/O time of the workload."
             )
 
         return description
@@ -507,14 +493,10 @@ class BottleneckRule(RuleHandler):
         return bottlenecks.reset_index().groupby(behavior_col).agg(agg_dict)
 
     @staticmethod
-    def _union_details(
-        details: pd.DataFrame, behavior: int, indices: list, view_type: str
-    ):
+    def _union_details(details: pd.DataFrame, behavior: int, indices: list, view_type: str):
         view_types = details.index.names
 
-        filtered_details = details.query(
-            f"{view_type} in @indices", local_dict={'indices': indices}
-        )
+        filtered_details = details.query(f"{view_type} in @indices", local_dict={'indices': indices})
 
         if len(view_types) == 1:
             # This means there is only one view type
@@ -531,9 +513,7 @@ class BottleneckRule(RuleHandler):
                 if agg_key not in view_types:
                     agg_dict.pop(agg_key)
 
-            detail_groups = (
-                filtered_details.reset_index().groupby(view_type).agg(agg_dict)
-            )
+            detail_groups = filtered_details.reset_index().groupby(view_type).agg(agg_dict)
 
             # Then create unions for other view types
             agg_dict = {col: lambda x: set.union(*x) for col in agg_dict}
@@ -595,31 +575,26 @@ class CharacteristicAccessPatternRule(CharacteristicRule):
         acc_pat_sum = result['acc_pat_sum']
 
         sequential_count = int(acc_pat_sum['sequential_count'])
-        random_count = (
-            int(acc_pat_sum['random_count']) if 'random_count' in acc_pat_sum else 0
-        )
+        random_count = int(acc_pat_sum['random_count']) if 'random_count' in acc_pat_sum else 0
         total_count = sequential_count + random_count
 
         sequential_title = '[bold]Sequential[/bold]'
         random_title = '[bold]Random[/bold]'
 
         if total_count > 0:
-            sequential_per_fmt = f"{sequential_count/total_count*100:.2f}"
-            random_per_fmt = f"{random_count/total_count*100:.2f}"
+            sequential_per_fmt = f"{sequential_count / total_count * 100:.2f}"
+            random_per_fmt = f"{random_count / total_count * 100:.2f}"
 
-            compact_desc = (
-                f"{sequential_title}: {sequential_per_fmt}% - "
-                f"{random_title}: {random_per_fmt}% "
-            )
+            compact_desc = f"{sequential_title}: {sequential_per_fmt}% - {random_title}: {random_per_fmt}% "
 
             value_fmt = (
                 f"{sequential_title}: {sequential_count:,} ops ({sequential_per_fmt}%) - "
                 f"{random_title}: {random_count:,} ops ({random_per_fmt}%) "
             )
         else:
-            compact_desc = f"{sequential_title}: N/A - " f"{random_title}: N/A "
+            compact_desc = f"{sequential_title}: N/A - {random_title}: N/A "
 
-            value_fmt = f"{sequential_title}: N/A - " f"{random_title}: N/A "
+            value_fmt = f"{sequential_title}: N/A - {random_title}: N/A "
 
         return RuleResult(
             compact_desc=compact_desc,
@@ -728,14 +703,12 @@ class CharacteristicFileCountRule(CharacteristicRule):
             detail_list.append(f"{shared_title}: N/A")
             detail_list.append(f"{fpp_title}: N/A")
         else:
-            fpp_per = f"{fpp_count/total_count*100:.2f}%"
+            fpp_per = f"{fpp_count / total_count * 100:.2f}%"
 
             shared_count = total_count - fpp_count
-            shared_per = f"{shared_count/total_count*100:.2f}%"
+            shared_per = f"{shared_count / total_count * 100:.2f}%"
 
-            shared_fmt = (
-                f"{shared_count:,} {self.pluralize.plural_noun('file', shared_count)}"
-            )
+            shared_fmt = f"{shared_count:,} {self.pluralize.plural_noun('file', shared_count)}"
             fpp_fmt = f"{fpp_count:,} {self.pluralize.plural_noun('file', fpp_count)}"
 
             compact_desc.append(f"[bold]{shared_title}[/bold]: {shared_per}")
@@ -786,7 +759,7 @@ class CharacteristicIOOpsRule(CharacteristicRule):
         for i, io_type in enumerate(IO_TYPES):
             count_col = f"{io_type}_count"
             count = int(result[count_col])
-            percent = f"{count/total_count*100:.2f}%"
+            percent = f"{count / total_count * 100:.2f}%"
             compact_desc.append(f"[bold]{COMPACT_IO_TYPES[i]}[/bold]: {percent}")
             detail_list.append(f"{io_type.capitalize()} - {count:,} ops ({percent})")
 
@@ -837,18 +810,9 @@ class CharacteristicIOSizeRule(CharacteristicRule):
                 if io_type != 'metadata':
                     size_col = f"{io_type}_size"
                     size = int(result[size_col])
-                    compact_desc.append(
-                        (
-                            f"[bold]{COMPACT_IO_TYPES[i]}[/bold]: "
-                            f"{size/total_size*100:.2f}%"
-                        )
-                    )
+                    compact_desc.append((f"[bold]{COMPACT_IO_TYPES[i]}[/bold]: {size / total_size * 100:.2f}%"))
                     detail_list.append(
-                        (
-                            f"{io_type.capitalize()} - "
-                            f"{format_bytes(size)} "
-                            f"({size/total_size*100:.2f}%)"
-                        )
+                        (f"{io_type.capitalize()} - {format_bytes(size)} ({size / total_size * 100:.2f}%)")
                     )
 
         return RuleResult(
@@ -906,11 +870,9 @@ class CharacteristicIOTimeRule(CharacteristicRule):
         for i, io_type in enumerate(IO_TYPES):
             time_col = f"{io_type}_time"
             time = result[time_col]
-            time_per = f"{time/total_time*100:.2f}%"
+            time_per = f"{time / total_time * 100:.2f}%"
             compact_desc.append(f"[bold]{COMPACT_IO_TYPES[i]}[/bold]: {time_per}")
-            detail_list.append(
-                f"{io_type.capitalize()} - {time:.2f} seconds ({time_per})"
-            )
+            detail_list.append(f"{io_type.capitalize()} - {time:.2f} seconds ({time_per})")
 
         return RuleResult(
             compact_desc=' - '.join(compact_desc),
@@ -1046,13 +1008,9 @@ class CharacteristicProcessCount(CharacteristicRule):
         num_nodes_apps = len(nodes_apps)
 
         if self.col == COL_NODE_NAME:
-            value_fmt = (
-                f"{num_nodes_apps} {self.pluralize.plural_noun('node', num_nodes_apps)}"
-            )
+            value_fmt = f"{num_nodes_apps} {self.pluralize.plural_noun('node', num_nodes_apps)}"
         else:
-            value_fmt = (
-                f"{num_nodes_apps} {self.pluralize.plural_noun('app', num_nodes_apps)}"
-            )
+            value_fmt = f"{num_nodes_apps} {self.pluralize.plural_noun('app', num_nodes_apps)}"
 
         return RuleResult(
             compact_desc=value_fmt,
@@ -1094,7 +1052,7 @@ class CharacteristicTimePeriodCountRule(CharacteristicRule):
     ) -> RuleResult:
         num_time_periods = int(result["total_count"])
         compact_desc = f"{num_time_periods:,} {self.pluralize.plural_noun('time period', num_time_periods)}"
-        time_granularity = raw_stats["time_granularity"]
+        time_granularity = getattr(raw_stats, 'time_granularity')
         return RuleResult(
             compact_desc=compact_desc,
             description='Time Periods',
@@ -1110,11 +1068,7 @@ class CharacteristicTimePeriodCountRule(CharacteristicRule):
 class CharacteristicXferSizeRule(CharacteristicRule):
     def __init__(self, rule_key: str) -> None:
         super().__init__(rule_key)
-        self.io_op = (
-            'write'
-            if rule_key is KnownCharacteristics.WRITE_XFER_SIZE.value
-            else 'read'
-        )
+        self.io_op = 'write' if rule_key is KnownCharacteristics.WRITE_XFER_SIZE.value else 'read'
 
     def define_tasks(
         self,
@@ -1169,12 +1123,7 @@ class CharacteristicXferSizeRule(CharacteristicRule):
             labels=XFER_SIZE_BIN_LABELS,
             right=True,
         )
-        xfer_bins = (
-            xfer_sizes.groupby([xfer_col], observed=True)
-            .sum()
-            .replace(0, np.nan)
-            .dropna()
-        )
+        xfer_bins = xfer_sizes.groupby([xfer_col], observed=True).sum().replace(0, np.nan).dropna()
         xfer_bins.loc[:, per_col] = xfer_bins[count_col] / xfer_bins[count_col].sum()
 
         total_ops = int(xfer_bins[count_col].sum())
@@ -1183,18 +1132,13 @@ class CharacteristicXferSizeRule(CharacteristicRule):
 
         if min_xfer_size > 0 and max_xfer_size > 0:
             if min_xfer_size == max_xfer_size:
-                compact_desc = (
-                    f"{self._get_xfer_size(min_xfer_size, True)}-"
-                    f"{self._get_xfer_size(max_xfer_size)}"
-                )
+                compact_desc = f"{self._get_xfer_size(min_xfer_size, True)}-{self._get_xfer_size(max_xfer_size)}"
             else:
                 compact_desc = f"{self._get_xfer_size(min_xfer_size)}-{self._get_xfer_size(max_xfer_size)}"
 
         detail_list = []
         for xfer, row in xfer_bins.iterrows():
-            detail_list.append(
-                f"{xfer} - {int(row[count_col]):,} ops ({row['per'] * 100:.2f}%)"
-            )
+            detail_list.append(f"{xfer} - {int(row[count_col]):,} ops ({row['per'] * 100:.2f}%)")
 
         result = RuleResult(
             compact_desc=compact_desc,

@@ -19,5 +19,4 @@ py.install_sources(
     subdir: 'wisio',
 )
 
-subdir('_darshan')
 subdir('utils')

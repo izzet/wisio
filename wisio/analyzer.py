@@ -163,9 +163,7 @@ class Analyzer(abc.ABC):
         traces = self.postread_trace(traces=traces)
 
         # Create checkpoint names
-        main_view_name = self.get_checkpoint_name(
-            CHECKPOINT_MAIN_VIEW, *sorted(view_types)
-        )
+        main_view_name = self.get_checkpoint_name(CHECKPOINT_MAIN_VIEW, *sorted(view_types))
 
         # Check there is a checkpointed main view
         if not self.checkpoint or not self.has_checkpoint(name=main_view_name):
@@ -191,116 +189,20 @@ class Analyzer(abc.ABC):
                 ),
             )
             # TODO remove dropped columns
-            main_view = main_view.drop(
-                columns=['bw', 'intensity', 'iops', 'att_perf'], errors='ignore'
-            ).persist()
+            main_view = main_view.drop(columns=['bw', 'intensity', 'iops', 'att_perf'], errors='ignore').persist()
             self._wait_all(tasks=main_view)
 
         # return traces, main_view
-
-        # Compute upper bounds
-        with EventLogger(key=EVENT_COMP_METBD, message='Compute metric boundaries'):
-            metric_boundaries = self.restore_extra_data(
-                name=self.get_checkpoint_name(
-                    CHECKPOINT_METRIC_BOUNDARIES,
-                    *sorted(metrics),
-                    *sorted(view_types),
-                ),
-                fallback=lambda: self.compute_metric_boundaries(
-                    main_view=main_view,
-                    metrics=metrics,
-                    view_types=view_types,
-                ),
-            )
-            self._wait_all(tasks=metric_boundaries)
-
-        # Compute views
-        with EventLogger(key=EVENT_COMP_PERS, message='Compute perspectives'):
-            view_results = self.compute_views(
-                main_view=main_view,
-                metric_boundaries=metric_boundaries,
-                metrics=metrics,
-                percentile=percentile,
-                threshold=threshold,
-                view_types=view_types,
-            )
-            if logical_view_types:
-                logical_view_results = self.compute_logical_views(
-                    main_view=main_view,
-                    metric_boundaries=metric_boundaries,
-                    metrics=metrics,
-                    percentile=percentile,
-                    threshold=threshold,
-                    view_results=view_results,
-                    view_types=view_types,
-                )
-                view_results.update(logical_view_results)
-            self._wait_all(tasks=view_results)
-
-        if self.checkpoint:
-            with EventLogger(
-                key=EVENT_SAVE_VIEWS, message='Checkpoint views', level=logging.DEBUG
-            ):
-                view_checkpoint_tasks = []
-                for metric, views in view_results.items():
-                    for view_key, view_result in views.items():
-                        view_checkpoint_name = self.get_checkpoint_name(
-                            CHECKPOINT_VIEW, metric, *list(view_key)
-                        )
-                        if not self.has_checkpoint(name=view_checkpoint_name):
-                            view_checkpoint_tasks.append(
-                                self.store_view(
-                                    name=view_checkpoint_name,
-                                    view=view_result.view,
-                                    compute=True,
-                                )
-                            )
-                self._wait_all(tasks=view_checkpoint_tasks)
-
-        # Evaluate views
-        view_evaluator = ViewEvaluator()
-        with EventLogger(key=EVENT_DET_BOT, message='Detect I/O bottlenecks'):
-            evaluated_views = view_evaluator.evaluate_views(
-                metric_boundaries=metric_boundaries,
-                metrics=metrics,
-                view_results=view_results,
-                is_slope_based=is_slope_based,
-            )
-            self._wait_all(tasks=evaluated_views)
-
-        # Execute rules
-        rule_engine = RuleEngine(rules={}, raw_stats=raw_stats, verbose=self.verbose)
-        with EventLogger(
-            key=EVENT_ATT_REASONS, message='Attach reasons to I/O bottlenecks'
-        ):
-            characteristics = rule_engine.process_characteristics(
-                exclude_characteristics=exclude_characteristics,
-                main_view=main_view,
-                view_results=view_results,
-            )
-            bottlenecks, bottleneck_rules = rule_engine.process_bottlenecks(
-                evaluated_views=evaluated_views,
-                exclude_bottlenecks=exclude_bottlenecks,
-                group_behavior=False,
-                metric_boundaries=metric_boundaries,
-            )
-            self._wait_all(tasks=bottlenecks)
-
-        with EventLogger(
-            key=EVENT_SAVE_BOT, message='Save I/O bottlenecks', level=logging.DEBUG
-        ):
-            self.save_bottlenecks(bottlenecks=bottlenecks)
-
-        # Return result
-        return AnalyzerResultType(
-            bottleneck_dir=self.bottleneck_dir,
-            bottleneck_rules=bottleneck_rules,
-            characteristics=characteristics,
-            evaluated_views=evaluated_views,
+        return self._analyze_main_view(
             main_view=main_view,
-            metric_boundaries=metric_boundaries,
+            metrics=metrics,
+            percentile=percentile,
+            threshold=threshold,
+            view_types=view_types,
+            is_slope_based=is_slope_based,
             raw_stats=raw_stats,
-            view_results=view_results,
+            exclude_bottlenecks=exclude_bottlenecks,
+            exclude_characteristics=exclude_characteristics,
         )
 
     def read_stats(self, traces: dd.DataFrame) -> RawStats:
@@ -500,9 +402,7 @@ class Analyzer(abc.ABC):
             metric_boundary = None
             if metric == 'iops' or metric == 'time':
                 if COL_PROC_NAME in view_types:
-                    metric_boundary = (
-                        main_view.groupby([COL_PROC_NAME]).sum()['time'].max().persist()
-                    )
+                    metric_boundary = main_view.groupby([COL_PROC_NAME]).sum()['time'].max().persist()
                 else:
                     metric_boundary = main_view['time'].sum().persist()
             elif metric == 'bw':
@@ -549,11 +449,7 @@ class Analyzer(abc.ABC):
                 parent_view_key = view_key[:-1]
 
                 parent_view_result = view_results[metric].get(parent_view_key, None)
-                parent_records = (
-                    main_view
-                    if parent_view_result is None
-                    else parent_view_result.records
-                )
+                parent_records = main_view if parent_view_result is None else parent_view_result.records
 
                 view_result = self.compute_view(
                     metrics=metrics,
@@ -607,11 +503,7 @@ class Analyzer(abc.ABC):
                     continue
 
                 parent_view_result = view_results[metric].get(parent_view_key, None)
-                parent_records = (
-                    main_view
-                    if parent_view_result is None
-                    else parent_view_result.records
-                )
+                parent_records = main_view if parent_view_result is None else parent_view_result.records
 
                 if view_type not in parent_records.columns:
                     parent_records = self._set_logical_columns(
@@ -678,25 +570,17 @@ class Analyzer(abc.ABC):
         )
 
         # Filter by slope
-        critical_view = view
-        if percentile is not None and percentile > 0:
-            critical_view = view.query(
-                f"{metric}_pth >= @percentile",
-                local_dict={'percentile': percentile},
-            ).persist()
-        elif threshold is not None and threshold > 0:
-            corrected_threshold = THRESHOLD_FUNCTIONS[metric](threshold)
-            critical_view = view.query(
-                f"{metric}_slope <= @threshold",
-                local_dict={'threshold': corrected_threshold},
-            ).persist()
+        critical_view = self._compute_critical_view(
+            view=view,
+            metric=metric,
+            percentile=percentile,
+            threshold=threshold,
+        )
 
         indices = critical_view.index.unique()
 
         # Find filtered records
-        records = records.query(
-            f"{view_type} in @indices", local_dict={'indices': indices}
-        ).persist()
+        records = records.query(f"{view_type} in @indices", local_dict={'indices': indices}).persist()
 
         # Return views & normalization data
         return ViewResult(
@@ -749,9 +633,7 @@ class Analyzer(abc.ABC):
         checkpoint_path = self.get_checkpoint_path(name=name)
         return os.path.exists(f"{checkpoint_path}/_metadata")
 
-    def restore_extra_data(
-        self, name: str, fallback: Callable[[], dict], force=False, persist=False
-    ) -> dict:
+    def restore_extra_data(self, name: str, fallback: Callable[[], dict], force=False, persist=False) -> dict:
         """Restores extra (non-DataFrame) data from a JSON checkpoint.
 
         If checkpointing is enabled and the checkpoint file exists (unless 'force'
@@ -847,9 +729,7 @@ class Analyzer(abc.ABC):
         with open(data_path, 'w') as f:
             return json.dump(data[0], f, cls=NpEncoder)
 
-    def store_view(
-        self, name: str, view: dd.DataFrame, compute=True, partition_size='64MB'
-    ):
+    def store_view(self, name: str, view: dd.DataFrame, compute=True, partition_size='64MB'):
         """Stores a Dask DataFrame view to a Parquet checkpoint.
 
         The view DataFrame is repartitioned and then written to a subdirectory
@@ -888,6 +768,115 @@ class Analyzer(abc.ABC):
             return it.permutations(view_types, r + 1)
 
         return it.chain.from_iterable(map(_iter_permutations, range(len(view_types))))
+
+    def _analyze_main_view(
+        self,
+        main_view: dd.DataFrame,
+        metrics: List[Metric],
+        percentile: Optional[float],
+        threshold: Optional[int],
+        view_types: List[ViewType],
+        is_slope_based: bool,
+        raw_stats: RawStats,
+        exclude_bottlenecks: List[str],
+        exclude_characteristics: List[str],
+        logical_view_types: bool = False,
+    ):
+        # Compute upper bounds
+        with EventLogger(key=EVENT_COMP_METBD, message='Compute metric boundaries'):
+            metric_boundaries = self.restore_extra_data(
+                name=self.get_checkpoint_name(
+                    CHECKPOINT_METRIC_BOUNDARIES,
+                    *sorted(metrics),
+                    *sorted(view_types),
+                ),
+                fallback=lambda: self.compute_metric_boundaries(
+                    main_view=main_view,
+                    metrics=metrics,
+                    view_types=view_types,
+                ),
+            )
+            self._wait_all(tasks=metric_boundaries)
+
+        # Compute views
+        with EventLogger(key=EVENT_COMP_PERS, message='Compute perspectives'):
+            view_results = self.compute_views(
+                main_view=main_view,
+                metric_boundaries=metric_boundaries,
+                metrics=metrics,
+                percentile=percentile,
+                threshold=threshold,
+                view_types=view_types,
+            )
+            if logical_view_types:
+                logical_view_results = self.compute_logical_views(
+                    main_view=main_view,
+                    metric_boundaries=metric_boundaries,
+                    metrics=metrics,
+                    percentile=percentile,
+                    threshold=threshold,
+                    view_results=view_results,
+                    view_types=view_types,
+                )
+                view_results.update(logical_view_results)
+            self._wait_all(tasks=view_results)
+
+        evaluated_views, bottlenecks, bottleneck_rules, characteristics = self._handle_view_results(
+            main_view=main_view,
+            metrics=metrics,
+            metric_boundaries=metric_boundaries,
+            view_results=view_results,
+            is_slope_based=is_slope_based,
+            raw_stats=raw_stats,
+            exclude_bottlenecks=exclude_bottlenecks,
+            exclude_characteristics=exclude_characteristics,
+        )
+
+        # Return result
+        return AnalyzerResultType(
+            bottleneck_dir=self.bottleneck_dir,
+            bottleneck_rules=bottleneck_rules,
+            characteristics=characteristics,
+            evaluated_views=evaluated_views,
+            main_view=main_view,
+            metric_boundaries=metric_boundaries,
+            raw_stats=raw_stats,
+            view_results=view_results,
+        )
+
+    def _compute_critical_view(
+        self,
+        view: dd.DataFrame,
+        metric: Metric,
+        percentile: Optional[float],
+        threshold: Optional[int],
+    ):
+        """Computes the critical view based on the specified metric.
+
+        This method filters the view DataFrame to identify critical items
+        based on either a percentile or a threshold value.
+
+        Args:
+            view: The Dask DataFrame representing the view to be filtered.
+            metric: The specific metric used for filtering.
+            percentile: The percentile to identify critical items.
+            threshold: The threshold for slope-based critical item identification.
+
+        Returns:
+            A Dask DataFrame containing the filtered critical view.
+        """
+        if percentile is not None and percentile > 0:
+            return view.query(
+                f"{metric}_pth >= @percentile",
+                local_dict={'percentile': percentile},
+            ).persist()
+        elif threshold is not None and threshold > 0:
+            corrected_threshold = THRESHOLD_FUNCTIONS[metric](threshold)
+            return view.query(
+                f"{metric}_slope <= @threshold",
+                local_dict={'threshold': corrected_threshold},
+            ).persist()
+        return view
 
     def _compute_view(
         self,
@@ -960,15 +949,72 @@ class Analyzer(abc.ABC):
 
         return agg_dict
 
+    def _handle_view_results(
+        self,
+        main_view: dd.DataFrame,
+        metrics: List[Metric],
+        metric_boundaries: Dict[Metric, dd.core.Scalar],
+        view_results: Dict[Metric, Dict[ViewKey, ViewResult]],
+        is_slope_based: bool,
+        raw_stats: RawStats,
+        exclude_bottlenecks: List[str],
+        exclude_characteristics: List[str],
+    ):
+        if self.checkpoint:
+            with EventLogger(key=EVENT_SAVE_VIEWS, message='Checkpoint views', level=logging.DEBUG):
+                view_checkpoint_tasks = []
+                for metric, views in view_results.items():
+                    for view_key, view_result in views.items():
+                        view_checkpoint_name = self.get_checkpoint_name(CHECKPOINT_VIEW, metric, *list(view_key))
+                        if not self.has_checkpoint(name=view_checkpoint_name):
+                            view_checkpoint_tasks.append(
+                                self.store_view(
+                                    name=view_checkpoint_name,
+                                    view=view_result.view,
+                                    compute=True,
+                                )
+                            )
+                self._wait_all(tasks=view_checkpoint_tasks)
+
+        # Evaluate views
+        view_evaluator = ViewEvaluator()
+        with EventLogger(key=EVENT_DET_BOT, message='Detect I/O bottlenecks'):
+            evaluated_views = view_evaluator.evaluate_views(
+                metric_boundaries=metric_boundaries,
+                metrics=metrics,
+                view_results=view_results,
+                is_slope_based=is_slope_based,
+            )
+            self._wait_all(tasks=evaluated_views)
+
+        # Execute rules
+        rule_engine = RuleEngine(rules={}, raw_stats=raw_stats, verbose=self.verbose)
+        with EventLogger(key=EVENT_ATT_REASONS, message='Attach reasons to I/O bottlenecks'):
+            characteristics = rule_engine.process_characteristics(
+                exclude_characteristics=exclude_characteristics,
+                main_view=main_view,
+                view_results=view_results,
+            )
+            bottlenecks, bottleneck_rules = rule_engine.process_bottlenecks(
+                evaluated_views=evaluated_views,
+                exclude_bottlenecks=exclude_bottlenecks,
+                group_behavior=False,
+                metric_boundaries=metric_boundaries,
+            )
+            self._wait_all(tasks=bottlenecks)
+
+        with EventLogger(key=EVENT_SAVE_BOT, message='Save I/O bottlenecks', level=logging.DEBUG):
+            self.save_bottlenecks(bottlenecks=bottlenecks)
+
+        return evaluated_views, bottlenecks, bottleneck_rules, characteristics
+
     def _set_derived_columns(self, ddf: dd.DataFrame):
         # Derive `io_cat` columns
         for col in ['time', 'size', 'count']:
             for io_cat in list(IOCategory):
                 col_name = f"{io_cat.name.lower()}_{col}"
                 ddf[col_name] = 0.0 if col == 'time' else 0
-                ddf[col_name] = ddf[col_name].mask(
-                    ddf['io_cat'] == io_cat.value, ddf[col]
-                )
+                ddf[col_name] = ddf[col_name].mask(ddf['io_cat'] == io_cat.value, ddf[col])
         for io_cat in list(IOCategory):
             min_name, max_name = (
                 f"{io_cat.name.lower()}_min",
@@ -976,26 +1022,18 @@ class Analyzer(abc.ABC):
             )
             ddf[min_name] = 0
             ddf[max_name] = 0
-            ddf[min_name] = ddf[min_name].mask(
-                ddf['io_cat'] == io_cat.value, ddf['size_min']
-            )
-            ddf[max_name] = ddf[max_name].mask(
-                ddf['io_cat'] == io_cat.value, ddf['size_max']
-            )
+            ddf[min_name] = ddf[min_name].mask(ddf['io_cat'] == io_cat.value, ddf['size_min'])
+            ddf[max_name] = ddf[max_name].mask(ddf['io_cat'] == io_cat.value, ddf['size_max'])
         # Derive `data` columns
         ddf['data_count'] = ddf['write_count'] + ddf['read_count']
         ddf['data_size'] = ddf['write_size'] + ddf['read_size']
         ddf['data_time'] = ddf['write_time'] + ddf['read_time']
         # Derive `acc_pat` columns
-        for col_suffix, col_value in zip(
-            ACC_PAT_SUFFIXES, ['data_time', 'data_size', 'data_count']
-        ):
+        for col_suffix, col_value in zip(ACC_PAT_SUFFIXES, ['data_time', 'data_size', 'data_count']):
             for acc_pat in list(AccessPattern):
                 col_name = f"{acc_pat.name.lower()}_{col_suffix}"
                 ddf[col_name] = 0.0 if col_suffix == 'time' else 0
-                ddf[col_name] = ddf[col_name].mask(
-                    ddf['acc_pat'] == acc_pat.value, ddf[col_value]
-                )
+                ddf[col_name] = ddf[col_name].mask(ddf['acc_pat'] == acc_pat.value, ddf[col_value])
         # Derive metadata operation columns
         for col in ['time', 'count']:
             for md_op in DERIVED_MD_OPS:
@@ -1003,14 +1041,11 @@ class Analyzer(abc.ABC):
                 ddf[col_name] = 0.0 if col == 'time' else 0
                 if md_op in ['close', 'open']:
                     ddf[col_name] = ddf[col_name].mask(
-                        ddf['func_id'].str.contains(md_op)
-                        & ~ddf['func_id'].str.contains('dir'),
+                        ddf['func_id'].str.contains(md_op) & ~ddf['func_id'].str.contains('dir'),
                         ddf[col],
                     )
                 else:
-                    ddf[col_name] = ddf[col_name].mask(
-                        ddf['func_id'].str.contains(md_op), ddf[col]
-                    )
+                    ddf[col_name] = ddf[col_name].mask(ddf['func_id'].str.contains(md_op), ddf[col])
         # Cast columns to correct types
         for col in ddf.columns:
             if col.endswith('_size') or col.endswith('_count'):
@@ -1020,9 +1055,7 @@ class Analyzer(abc.ABC):
         # Return ddf
         return ddf
 
-    def _set_logical_columns(
-        self, view: dd.DataFrame, view_types: List[ViewType]
-    ) -> dd.DataFrame:
+    def _set_logical_columns(self, view: dd.DataFrame, view_types: List[ViewType]) -> dd.DataFrame:
         # Check if view types include `proc_name`
         if COL_PROC_NAME in view_types:
             view = view.map_partitions(set_proc_name_parts)

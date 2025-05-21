@@ -140,7 +140,7 @@ class Output(abc.ABC):
 
         complexity = 0
         io_time = 0
-        job_time = float(raw_stats["job_time"])
+        job_time = float(getattr(raw_stats, 'job_time'))
         num_apps = 0
         num_files = 0
         num_nodes = 0
@@ -184,7 +184,7 @@ class Output(abc.ABC):
         )
 
         main_view_count = len(result.main_view)
-        raw_count = int(raw_stats["total_count"])
+        raw_count = int(getattr(raw_stats, 'total_count'))
 
         perspective_count_tree = {}
         perspective_critical_count_tree = {}
@@ -643,7 +643,7 @@ class ConsoleOutput(Output):
             char_table = self._create_characteristics_table(
                 characteristics=characteristics,
                 compact=self.compact,
-                job_time=float(raw_stats["job_time"]),
+                job_time=float(getattr(raw_stats, 'job_time')),
             )
             char_panel = Panel(
                 renderable=char_table,
