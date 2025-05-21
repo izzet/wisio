@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ["ubuntu-20.04", "ubuntu-22.04", "ubuntu-24.04"]
+        os: ["ubuntu-22.04", "ubuntu-24.04"]
         python: ["3.8", "3.9", "3.10"]
     name: ${{ matrix.python }}-${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -59,7 +59,7 @@ jobs:
       - name: Upload distributions
         uses: actions/upload-artifact@v4
         with:
-          name: release-dists
+          name: release-dists-${{ strategy.job-index }}
           path: dist/
   pypi-publish:
     runs-on: ubuntu-22.04
@@ -69,8 +69,9 @@ jobs:
       - name: Retrieve release distributions
         uses: actions/download-artifact@v4
         with:
-          name: release-dists
+          pattern: release-dists-*
           path: dist/
+          merge-multiple: true
       - name: Publish release distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
