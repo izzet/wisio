@@ -5,6 +5,7 @@ requires = ["meson-python>=0.15.0"]
 [project]
 name = "wisio"
 version = "0.1.0"
+description = "Analyze, visualize, and understand I/O performance issues in HPC workflows"
 authors = [{ name = "Izzet Yildirim", email = "izzetcyildirim@gmail.com" }]
 maintainers = [{ name = "Izzet Yildirim", email = "izzetcyildirim@gmail.com" }]
 requires-python = ">=3.8"
