@@ -200,7 +200,7 @@ class Analyzer(abc.ABC):
             threshold=threshold,
             view_types=view_types,
             is_slope_based=is_slope_based,
-            raw_stats=raw_stats,
+            raw_stats=RawStats(**raw_stats),
             exclude_bottlenecks=exclude_bottlenecks,
             exclude_characteristics=exclude_characteristics,
         )
@@ -834,6 +834,7 @@ class Analyzer(abc.ABC):
 
         # Return result
         return AnalyzerResultType(
+            _bottlenecks=bottlenecks,
             bottleneck_dir=self.bottleneck_dir,
             bottleneck_rules=bottleneck_rules,
             characteristics=characteristics,

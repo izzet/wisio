@@ -1,25 +1,9 @@
 import hydra
-from dask_jobqueue import LSFCluster, PBSCluster, SLURMCluster
-from distributed import Client, LocalCluster
+from distributed import Client
 from hydra.utils import instantiate
-from typing import Union
 
-from .analyzer import Analyzer
+from . import AnalyzerType, ClusterType, OutputType
 from .config import Config, init_hydra_config_store
-from .dftracer import DFTracerAnalyzer
-from .output import ConsoleOutput, CSVOutput, SQLiteOutput
-from .recorder import RecorderAnalyzer
-
-
-try:
-    from .darshan import DarshanAnalyzer
-except ModuleNotFoundError:
-    DarshanAnalyzer = Analyzer
-
-
-AnalyzerType = Union[DarshanAnalyzer, DFTracerAnalyzer, RecorderAnalyzer]
-ClusterType = Union[LocalCluster, LSFCluster, PBSCluster, SLURMCluster]
-OutputType = Union[ConsoleOutput, CSVOutput, SQLiteOutput]
 
 
 init_hydra_config_store()
