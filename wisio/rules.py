@@ -1141,6 +1141,7 @@ class CharacteristicXferSizeRule(CharacteristicRule):
             detail_list.append(f"{xfer} - {int(row[count_col]):,} ops ({row['per'] * 100:.2f}%)")
 
         result = RuleResult(
+            _dataframe=xfer_bins,
             compact_desc=compact_desc,
             description='Write Requests' if self.io_op == 'write' else 'Read Requests',
             detail_list=detail_list,

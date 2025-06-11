@@ -1,4 +1,5 @@
 import dask.dataframe as dd
+import pandas as pd
 from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Literal, Optional, Union, Tuple
@@ -26,9 +27,7 @@ Metric = Literal[
     'time',
 ]
 ViewType = Literal['file_name', 'proc_name', 'time_range']
-ViewKey = Union[
-    Tuple[ViewType], Tuple[ViewType, ViewType], Tuple[ViewType, ViewType, ViewType]
-]
+ViewKey = Union[Tuple[ViewType], Tuple[ViewType, ViewType], Tuple[ViewType, ViewType, ViewType]]
 
 
 @dataclass
@@ -90,6 +89,7 @@ class RuleResult:
     reasons: Optional[List[RuleResultReason]]
     value: Optional[Union[float, int, tuple]]
     value_fmt: Optional[str]
+    _dataframe: Optional[pd.DataFrame] = None
 
 
 @dataclass
@@ -239,6 +239,7 @@ class AnalyzerResultType:
     metric_boundaries: Dict[Metric, Union[int, float]]
     raw_stats: RawStats
     view_results: ViewResultsPerViewPerMetric
+    _bottlenecks: Optional[dd.DataFrame] = None
 
 
 def humanized_metric_name(metric: Metric):
@@ -247,15 +248,9 @@ def humanized_metric_name(metric: Metric):
 
 def humanized_view_name(view_key_type: Union[ViewKey, ViewType], separator='_'):
     if isinstance(view_key_type, tuple):
-        return separator.join(
-            [HUMANIZED_VIEW_TYPES[view_type] for view_type in view_key_type]
-        )
+        return separator.join([HUMANIZED_VIEW_TYPES[view_type] for view_type in view_key_type])
     return HUMANIZED_VIEW_TYPES[view_key_type]
 
 
 def view_name(view_key_type: Union[ViewKey, ViewType], separator='_'):
-    return (
-        separator.join(view_key_type)
-        if isinstance(view_key_type, tuple)
-        else view_key_type
-    )
+    return separator.join(view_key_type) if isinstance(view_key_type, tuple) else view_key_type
