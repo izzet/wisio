@@ -1,7 +1,7 @@
 project(
     'wisio',
     ['c', 'cpp'],
-    version: '0.1.0',
+    version: '0.1.1',
     default_options: ['buildtype=debugoptimized', 'cpp_std=c++17', 'warning_level=3'],
 )
 
