@@ -903,7 +903,7 @@ class Analyzer(abc.ABC):
         )
 
         # Check view type
-        if view_type is not COL_PROC_NAME and COL_PROC_NAME in view_types:
+        if view_type != COL_PROC_NAME and COL_PROC_NAME in view_types:
             view = (
                 records.reset_index()
                 .groupby([view_type, COL_PROC_NAME])
