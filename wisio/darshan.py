@@ -10,6 +10,12 @@ from .constants import IOCategory
 from .types import RawStats
 
 
+# Non-DXT POSIX records carry no hostname, so a placeholder stands in. DXT
+# records do carry a real hostname -- see `_create_dxt_dataframe`.
+DEFAULT_APP_NAME = 'app'
+DEFAULT_HOST_NAME = 'localhost'
+
+
 class DarshanAnalyzer(Analyzer):
     job_time: float = 0.0
 
@@ -73,7 +79,11 @@ class DarshanAnalyzer(Analyzer):
         raw_stats = RawStats(
             job_time=self.job_time,
             time_granularity=self.time_granularity,
-            total_count=len(file_name_view),
+            # Pre-aggregation record count: this is the denominator for the
+            # retention statistics in ConsoleOutput, so it must be measured
+            # before the groupby -- otherwise the aggregated view always reports
+            # as 100% of raw. Ported from dfanalyzer 913b602.
+            total_count=len(file_name_ddf),
         )
 
         # return file_name_view
@@ -115,7 +125,7 @@ class DarshanAnalyzer(Analyzer):
             rank = record['rank']
             host_name = record['hostname']
             file_name = report.data['name_records'][file_id]
-            proc_name = f"app#localhost#{rank}#0"
+            proc_name = f"{DEFAULT_APP_NAME}#{DEFAULT_HOST_NAME}#{rank}#0"
 
             # Process read segments
             if not record['read_segments'].empty:
@@ -134,6 +144,7 @@ class DarshanAnalyzer(Analyzer):
                             'file_name': file_name,
                             'proc_name': proc_name,
                             'size': lengths[i],
+                            'offset': offsets[i],
                             'end_time': end_times[i],
                             'start_time': start_times[i],
                             'func_id': 'read',
@@ -164,6 +175,7 @@ class DarshanAnalyzer(Analyzer):
                             'file_name': file_name,
                             'proc_name': proc_name,
                             'size': lengths[i],
+                            'offset': offsets[i],
                             'end_time': end_times[i],
                             'start_time': start_times[i],
                             'func_id': 'write',
@@ -212,7 +224,15 @@ class DarshanAnalyzer(Analyzer):
                 right_index=True,
             )
             .reset_index()
-            .assign(proc_name=lambda x: 'app#localhost#' + x['rank'].astype(str) + '#0')
+            .assign(host_name=lambda x: DEFAULT_HOST_NAME)
+            .assign(
+                proc_name=lambda x: DEFAULT_APP_NAME
+                + '#'
+                + x['host_name']
+                + '#'
+                + x['rank'].astype(str)
+                + '#0'
+            )
             # .set_index(['proc_name', 'file_name'])
             .drop(columns=['id', 'rank'])
             .query('~(file_name.str.startswith("<") and file_name.str.endswith(">"))')
