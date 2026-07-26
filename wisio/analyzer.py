@@ -438,31 +438,59 @@ class Analyzer(abc.ABC):
             mapping ViewKey to ViewResult.
         """
         # Keep view results
-        view_results = {}
+        view_results = {metric: {} for metric in metrics}
 
-        # Compute multifaceted views for each metric
-        for metric in metrics:
-            view_results[metric] = {}
+        # `view_permutations` yields keys grouped by increasing length, and a
+        # view of length n depends only on its parent of length n-1. So each
+        # length is resolved as one batch: every (metric, view_key) in it is
+        # independent given the previous one, and their critical indices are
+        # gathered in a single `compute` rather than one round-trip per view.
+        for _, view_keys in it.groupby(
+            self.view_permutations(view_types=view_types), key=len
+        ):
+            pending = []
 
-            for view_key in self.view_permutations(view_types=view_types):
+            for view_key in list(view_keys):
                 view_type = view_key[-1]
                 parent_view_key = view_key[:-1]
 
-                parent_view_result = view_results[metric].get(parent_view_key, None)
-                parent_records = main_view if parent_view_result is None else parent_view_result.records
+                for metric in metrics:
+                    parent_view_result = view_results[metric].get(parent_view_key, None)
+                    parent_records = main_view if parent_view_result is None else parent_view_result.records
 
-                view_result = self.compute_view(
-                    metrics=metrics,
+                    view, critical_view = self.build_view(
+                        metrics=metrics,
+                        metric=metric,
+                        metric_boundary=metric_boundaries[metric],
+                        percentile=percentile,
+                        records=parent_records,
+                        threshold=threshold,
+                        view_key=view_key,
+                        view_type=view_type,
+                    )
+
+                    pending.append(
+                        (metric, view_key, view_type, parent_records, view, critical_view)
+                    )
+
+            if not pending:
+                continue
+
+            (all_indices,) = compute(
+                [critical_view.index.unique() for *_, critical_view in pending]
+            )
+
+            for (metric, view_key, view_type, parent_records, view, critical_view), indices in zip(
+                pending, all_indices
+            ):
+                view_results[metric][view_key] = self.finish_view(
+                    critical_view=critical_view,
+                    indices=indices,
                     metric=metric,
-                    metric_boundary=metric_boundaries[metric],
-                    percentile=percentile,
                     records=parent_records,
-                    threshold=threshold,
-                    view_key=view_key,
+                    view=view,
                     view_type=view_type,
                 )
-
-                view_results[metric][view_key] = view_result
 
         return view_results
 
@@ -493,6 +521,10 @@ class Analyzer(abc.ABC):
         Returns:
             The updated view_results dictionary including the computed logical views.
         """
+        # Every logical view hangs off an already-computed base view and none
+        # depend on each other, so the whole set resolves in one `compute`.
+        pending = []
+
         for metric in metrics:
             for view_key in LOGICAL_VIEW_TYPES:
                 view_type = view_key[-1]
@@ -511,7 +543,7 @@ class Analyzer(abc.ABC):
                         view_types=[parent_view_type],
                     )
 
-                view_result = self.compute_view(
+                view, critical_view = self.build_view(
                     metrics=metrics,
                     metric=metric,
                     metric_boundary=metric_boundaries[metric],
@@ -522,7 +554,28 @@ class Analyzer(abc.ABC):
                     view_type=view_type,
                 )
 
-                view_results[metric][view_key] = view_result
+                pending.append(
+                    (metric, view_key, view_type, parent_records, view, critical_view)
+                )
+
+        if not pending:
+            return view_results
+
+        (all_indices,) = compute(
+            [critical_view.index.unique() for *_, critical_view in pending]
+        )
+
+        for (metric, view_key, view_type, parent_records, view, critical_view), indices in zip(
+            pending, all_indices
+        ):
+            view_results[metric][view_key] = self.finish_view(
+                critical_view=critical_view,
+                indices=indices,
+                metric=metric,
+                records=parent_records,
+                view=view,
+                view_type=view_type,
+            )
 
         return view_results
 
@@ -556,6 +609,58 @@ class Analyzer(abc.ABC):
             A ViewResult object containing the computed view, critical items,
             and filtered records.
         """
+        view, critical_view = self.build_view(
+            metrics=metrics,
+            metric=metric,
+            metric_boundary=metric_boundary,
+            percentile=percentile,
+            records=records,
+            threshold=threshold,
+            view_key=view_key,
+            view_type=view_type,
+        )
+
+        (indices,) = compute(critical_view.index.unique())
+
+        return self.finish_view(
+            critical_view=critical_view,
+            indices=indices,
+            metric=metric,
+            records=records,
+            view=view,
+            view_type=view_type,
+        )
+
+    def build_view(
+        self,
+        metrics: List[Metric],
+        metric: Metric,
+        metric_boundary: "dd.Scalar",
+        percentile: Optional[float],
+        records: dd.DataFrame,
+        threshold: Optional[int],
+        view_key: ViewKey,
+        view_type: str,
+    ) -> Tuple[dd.DataFrame, dd.DataFrame]:
+        """Builds the lazy half of a view: the view and its critical subset.
+
+        Nothing is computed here. Splitting this off lets callers resolve the
+        critical indices of many independent views in a single `compute`
+        instead of one blocking round-trip each -- see `compute_views`.
+
+        Args:
+            metrics: The list of all metrics being analyzed.
+            metric: The specific metric for this view.
+            metric_boundary: The precomputed boundary for the current metric.
+            percentile: The percentile to identify critical items.
+            records: The Dask DataFrame (parent records) to compute the view from.
+            threshold: The threshold for slope-based critical item identification.
+            view_key: The key identifying this specific view.
+            view_type: The primary dimension/column for this view.
+
+        Returns:
+            A tuple of the (still lazy) view and its critical view.
+        """
         # Restore view
         view = self.restore_view(
             name=self.get_checkpoint_name(CHECKPOINT_VIEW, metric, *list(view_key)),
@@ -577,8 +682,36 @@ class Analyzer(abc.ABC):
             threshold=threshold,
         )
 
-        indices = critical_view.index.unique()
+        return view, critical_view
 
+    @staticmethod
+    def finish_view(
+        critical_view: dd.DataFrame,
+        indices,
+        metric: Metric,
+        records: dd.DataFrame,
+        view: dd.DataFrame,
+        view_type: str,
+    ) -> ViewResult:
+        """Applies an already-resolved critical index to the parent records.
+
+        `indices` must be concrete. dask-expr derives a `query`'s meta by
+        running the predicate against an empty frame, and pandas' `isin` calls
+        `list()` on the operand -- so a lazy operand would be computed during
+        graph construction, once per view level.
+
+        Args:
+            critical_view: The critical view this index came from.
+            indices: The resolved critical index values.
+            metric: The specific metric for this view.
+            records: The parent records to filter.
+            view: The computed view.
+            view_type: The primary dimension/column for this view.
+
+        Returns:
+            A ViewResult object containing the computed view, critical items,
+            and filtered records.
+        """
         # Find filtered records
         records = records.query(f"{view_type} in @indices", local_dict={'indices': indices}).persist()
 
