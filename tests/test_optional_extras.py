@@ -1,8 +1,8 @@
 """Optional analyzer extras must never break the base package.
 
 wisio 0.1.1 shipped with `wisio/__init__.py` importing `.dftracer`
-unconditionally, and `wisio/dftracer.py` importing `zindex_py` at module scope.
-A missing (or broken) `zindex_py` therefore made `import wisio` and the `wisio`
+unconditionally, and `wisio/dftracer.py` importing its trace reader at module
+scope. A missing or broken reader therefore made `import wisio` and the `wisio`
 CLI fail outright -- taking down darshan and recorder, which do not use it.
 
 These tests pin the guard so that regression cannot recur.
@@ -16,7 +16,7 @@ import sys
 import pytest
 
 
-OPTIONAL_MODULES = ['zindex_py', 'darshan']
+OPTIONAL_MODULES = ['dftracer', 'darshan']
 
 
 def _reimport_wisio_without(monkeypatch, blocked):
@@ -38,7 +38,7 @@ def _reimport_wisio_without(monkeypatch, blocked):
     return importlib.import_module('wisio')
 
 
-@pytest.mark.parametrize('blocked', [['zindex_py'], ['darshan'], OPTIONAL_MODULES])
+@pytest.mark.parametrize('blocked', [['dftracer'], ['darshan'], OPTIONAL_MODULES])
 def test_import_survives_missing_optional_dependency(monkeypatch, blocked):
     wisio = _reimport_wisio_without(monkeypatch, blocked)
 
@@ -47,9 +47,9 @@ def test_import_survives_missing_optional_dependency(monkeypatch, blocked):
     assert wisio.Analyzer is not None
 
 
-def test_recorder_analyzer_unaffected_by_missing_zindex(monkeypatch):
+def test_recorder_analyzer_unaffected_by_missing_dftracer(monkeypatch):
     """Recorder shares no code path with the dftracer reader."""
-    wisio = _reimport_wisio_without(monkeypatch, ['zindex_py'])
+    wisio = _reimport_wisio_without(monkeypatch, ['dftracer'])
 
     assert wisio.RecorderAnalyzer.__name__ == 'RecorderAnalyzer'
     assert issubclass(wisio.RecorderAnalyzer, wisio.Analyzer)
@@ -58,10 +58,11 @@ def test_recorder_analyzer_unaffected_by_missing_zindex(monkeypatch):
 def test_guard_catches_importerror_not_just_modulenotfounderror(monkeypatch):
     """A broken-but-present extra raises ImportError, not ModuleNotFoundError.
 
-    zindex_py 0.0.5 installs a wheel containing only dist-info metadata; a
-    partially built native extension fails the same way.
+    zindex_py 0.0.5 (the reader wisio previously depended on) installed a
+    wheel containing only dist-info metadata; a partially built native
+    extension fails the same way.
     """
-    wisio = _reimport_wisio_without(monkeypatch, ['zindex_py'])
+    wisio = _reimport_wisio_without(monkeypatch, ['dftracer'])
 
     # Falls back to the base class rather than propagating.
     assert wisio.DFTracerAnalyzer is wisio.Analyzer
