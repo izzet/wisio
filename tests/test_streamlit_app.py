@@ -75,6 +75,40 @@ def test_process_and_file_counts_are_not_swapped():
     assert 'file_count' in file_line, file_line
 
 
+def test_upload_cap_matches_streamlit_config():
+    """The in-app total and `server.maxUploadSize` must not drift apart.
+
+    `maxUploadSize` is enforced per file, so the app checks the total across a
+    submission separately. Two numbers meaning the same budget is exactly the
+    kind of pair that rots.
+    """
+    import re
+    import tomllib
+
+    with open('.streamlit/config.toml', 'rb') as fh:
+        configured = tomllib.load(fh)['server']['maxUploadSize']
+
+    source = open(APP).read()
+    in_app = int(re.search(r'MAX_TOTAL_UPLOAD_MB\s*=\s*(\d+)', source).group(1))
+
+    assert in_app == configured, (
+        f"app allows {in_app} MB total but server.maxUploadSize is {configured} MB"
+    )
+
+
+def test_cluster_is_pinned_for_constrained_hosting():
+    """Community Cloud caps at 2 cores and 2.7GB.
+
+    The default worker fan-out peaked at 2.9GB on the dftracer fixture against
+    955MB with one worker, so leaving this to dask's autodetection is what
+    would exhaust the container.
+    """
+    source = open(APP).read()
+
+    assert 'cluster.n_workers={CLUSTER_N_WORKERS}' in source
+    assert 'cluster.memory_limit={CLUSTER_MEMORY_LIMIT}' in source
+
+
 def test_characteristics_the_app_reads_exist():
     """Every characteristic the app indexes must be a real rule key."""
     source = open(APP).read()
