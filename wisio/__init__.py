@@ -20,17 +20,21 @@ from .types import ViewType
 # darshan and recorder analysis has no dependency on the dftracer reader, and
 # vice versa. Hydra still resolves the real class by `_target_` path, so asking
 # for an unavailable analyzer fails at instantiation with the underlying error.
-# `ImportError` rather than `ModuleNotFoundError`: an extra can be installed yet
-# unimportable (zindex_py 0.0.5 ships a wheel containing only metadata, and a
-# half-built native extension raises plain ImportError).
+# `Exception` rather than `ImportError`: an extra can be installed yet fail on
+# import in ways that are not import errors at all. zindex_py 0.0.5 shipped a
+# wheel containing only metadata (ImportError), while pydarshan raises a plain
+# `RuntimeError` when it cannot locate libdarshan-util.so -- which is what
+# happens on Python 3.13, where it falls back to a pure-python `py3-none-any`
+# wheel with no bundled native library. Narrowing this to ImportError means one
+# broken optional reader takes down the entire package.
 try:
     from .darshan import DarshanAnalyzer
-except ImportError:
+except Exception:
     DarshanAnalyzer = Analyzer
 
 try:
     from .dftracer import DFTracerAnalyzer
-except ImportError:
+except Exception:
     DFTracerAnalyzer = Analyzer
 
 AnalyzerType = Union[DarshanAnalyzer, DFTracerAnalyzer, RecorderAnalyzer]

@@ -13,7 +13,16 @@ import pandas as pd
 import pytest
 from glob import glob
 
-darshan = pytest.importorskip('darshan', reason='requires the [darshan] extra')
+# Not `pytest.importorskip`: that only catches ImportError, and pydarshan raises
+# a plain RuntimeError when libdarshan-util.so is missing -- the case on Python
+# 3.13, which has no cp313 wheel and so gets a pure-python one with no bundled
+# native library.
+try:
+    import darshan
+except Exception as exc:
+    pytest.skip(
+        f"requires a working [darshan] extra: {exc}", allow_module_level=True
+    )
 
 from wisio.constants import IOCategory
 from wisio.darshan import DarshanAnalyzer
