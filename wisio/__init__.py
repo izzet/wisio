@@ -1,6 +1,3 @@
-from dask_jobqueue.lsf import LSFCluster
-from dask_jobqueue.pbs import PBSCluster
-from dask_jobqueue.slurm import SLURMCluster
 from dataclasses import dataclass
 from distributed import Client, LocalCluster
 from hydra import compose, initialize
@@ -38,7 +35,22 @@ except Exception:
     DFTracerAnalyzer = Analyzer
 
 AnalyzerType = Union[DarshanAnalyzer, DFTracerAnalyzer, RecorderAnalyzer]
-ClusterType = Union[LocalCluster, LSFCluster, PBSCluster, SLURMCluster]
+
+# The HPC cluster backends are only ever built by Hydra through their `_target_`
+# path, so importing them here buys nothing but a typing alias -- and it costs a
+# lot. `dask_jobqueue.runner` installs a SIGINT handler at import time, and
+# `signal.signal` raises outside the main thread. Streamlit runs app scripts on
+# a ScriptRunner thread, so importing them eagerly made `import wisio` fail
+# there, taking the whole app down. Degrade the alias instead of the package.
+try:
+    from dask_jobqueue.lsf import LSFCluster
+    from dask_jobqueue.pbs import PBSCluster
+    from dask_jobqueue.slurm import SLURMCluster
+
+    ClusterType = Union[LocalCluster, LSFCluster, PBSCluster, SLURMCluster]
+except Exception:
+    ClusterType = LocalCluster
+
 OutputType = Union[ConsoleOutput, CSVOutput, SQLiteOutput]
 
 
