@@ -186,8 +186,8 @@ if result:
 
         col11, col12, col13 = st.columns(3)
         col11.metric("Runtime", f"{raw_stats.job_time:.2f} s", border=True)
-        col12.metric(r"\# of Processes", f"{file_count:,}", border=True)
-        col13.metric(r"\# of Files", f"{proc_count:,}", border=True)
+        col12.metric(r"\# of Processes", f"{proc_count:,}", border=True)
+        col13.metric(r"\# of Files", f"{file_count:,}", border=True)
 
         col21, col22, col23 = st.columns(3)
         col21.metric("I/O Time", f"{io_time:.2f} s", border=True)
