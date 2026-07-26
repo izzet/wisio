@@ -169,15 +169,13 @@ class TestCreateFileNameView:
 
 
 class TestProcNameHostHandling:
-    """KNOWN DEFECT: proc_name hardcodes 'localhost'.
+    """DXT proc_name carries the record's real hostname.
 
-    DXT records carry the real hostname (`host_name` column), but proc_name is
-    built as 'app#localhost#<rank>#0'. Because `node_name` is derived from
-    proc_name in analysis_utils.set_proc_name_parts, node-level views report
-    'localhost' for every process regardless of the real host.
-
-    dfanalyzer bbd4437 does NOT fix this -- it only extracts the literal into a
-    DEFAULT_HOST_NAME constant. Pinned here as a wisio improvement target.
+    `node_name` is derived by splitting proc_name in
+    analysis_utils.set_proc_name_parts, so a hardcoded host made every
+    node-level view report 'localhost' while the true host sat unused in the
+    adjacent `host_name` column. dfanalyzer has the same defect -- bbd4437 only
+    extracts the literal into a constant -- so this is a wisio-side fix.
     """
 
     def test_real_hostname_is_present_in_records(self, dxt_frame):
@@ -186,11 +184,50 @@ class TestProcNameHostHandling:
         assert hosts, 'expected a real hostname from the DXT record'
         assert 'localhost' not in hosts
 
-    def test_proc_name_discards_the_real_hostname(self, dxt_frame):
-        assert dxt_frame['proc_name'].str.startswith('app#localhost#').all()
+    def test_proc_name_carries_the_real_hostname(self, dxt_frame):
+        expected = 'app#' + dxt_frame['host_name'] + '#'
 
-    def test_node_name_derived_from_proc_name_is_localhost(self, dxt_frame):
-        node_names = dxt_frame['proc_name'].str.split('#').str[1].unique()
+        assert dxt_frame.apply(
+            lambda row: row['proc_name'].startswith(f"app#{row['host_name']}#"),
+            axis=1,
+        ).all()
+        assert not dxt_frame['proc_name'].str.startswith('app#localhost#').any()
 
-        # The bug in one line: real hosts exist, but every node view says this.
-        assert list(node_names) == ['localhost']
+    def test_node_name_matches_host_name_column(self, dxt_frame):
+        node_names = dxt_frame['proc_name'].str.split('#').str[1]
+
+        pd.testing.assert_series_equal(
+            node_names, dxt_frame['host_name'], check_names=False
+        )
+
+    def test_proc_name_still_has_four_segments(self, dxt_frame):
+        """A blank host would shift every downstream split index."""
+        segments = dxt_frame['proc_name'].str.split('#')
+
+        assert (segments.str.len() == 4).all()
+        assert (segments.str[1].str.len() > 0).all()
+
+    def test_rank_segment_is_preserved(self, dxt_frame):
+        ranks = dxt_frame['proc_name'].str.split('#').str[2]
+
+        assert ranks.str.isdigit().all()
+
+
+class TestHostNameFallback:
+    """Traces other than this fixture may omit the hostname."""
+
+    @pytest.mark.parametrize('missing', ['', '   ', None, float('nan')])
+    def test_blank_hostname_falls_back_to_default(self, analyzer, missing):
+        from wisio.darshan import DEFAULT_HOST_NAME, _resolve_host_name
+
+        assert _resolve_host_name(missing) == DEFAULT_HOST_NAME
+
+    def test_real_hostname_passes_through(self):
+        from wisio.darshan import _resolve_host_name
+
+        assert _resolve_host_name('corona171') == 'corona171'
+
+    def test_surrounding_whitespace_is_stripped(self):
+        from wisio.darshan import _resolve_host_name
+
+        assert _resolve_host_name('  corona171  ') == 'corona171'

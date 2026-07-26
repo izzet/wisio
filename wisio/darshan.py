@@ -1,6 +1,7 @@
 import dask.dataframe as dd
 import darshan as d
 import glob
+import math
 import numpy as np
 import os
 import pandas as pd
@@ -14,6 +15,20 @@ from .types import RawStats
 # records do carry a real hostname -- see `_create_dxt_dataframe`.
 DEFAULT_APP_NAME = 'app'
 DEFAULT_HOST_NAME = 'localhost'
+
+
+def _resolve_host_name(host_name) -> str:
+    """Return a non-empty host name for use inside `proc_name`.
+
+    `proc_name` is a '#'-delimited string that analysis_utils.set_proc_name_parts
+    splits positionally into app/node/rank. A blank host would collapse a
+    segment and silently shift rank into the node position, so anything empty or
+    missing falls back to the placeholder.
+    """
+    if host_name is None or (isinstance(host_name, float) and math.isnan(host_name)):
+        return DEFAULT_HOST_NAME
+    resolved = str(host_name).strip()
+    return resolved if resolved else DEFAULT_HOST_NAME
 
 
 class DarshanAnalyzer(Analyzer):
@@ -123,9 +138,12 @@ class DarshanAnalyzer(Analyzer):
         for _, record in dxt_df.iterrows():
             file_id = record['id']
             rank = record['rank']
-            host_name = record['hostname']
+            host_name = _resolve_host_name(record['hostname'])
             file_name = report.data['name_records'][file_id]
-            proc_name = f"{DEFAULT_APP_NAME}#{DEFAULT_HOST_NAME}#{rank}#0"
+            # DXT records know the real host; using it here is what makes
+            # node-level views meaningful, since `node_name` is parsed back out
+            # of this string. dfanalyzer still hardcodes a placeholder.
+            proc_name = f"{DEFAULT_APP_NAME}#{host_name}#{rank}#0"
 
             # Process read segments
             if not record['read_segments'].empty:
