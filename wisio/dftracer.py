@@ -1,15 +1,15 @@
-import dask
-import dask.bag as db
 import dask.dataframe as dd
-import portion as P
-import math
-import json
 import logging
+import math
 import os
-import sys
-import zindex_py as zindex
+import pandas as pd
+import pyarrow as pa
+from dask.delayed import delayed
 from dask.distributed import wait
 from glob import glob
+from typing import List
+
+from dftracer.utils import TraceReader
 
 from .analyzer import Analyzer
 from .constants import (
@@ -36,559 +36,207 @@ PFW_COL_MAPPING = {
     'trange': COL_TIME_RANGE,
 }
 
+# Record kinds in a DFTracer (.pfw) stream. Hash records map an id to a
+# file/host/string name; events reference those ids via `fhash`/`hhash`.
+TYPE_EVENT = 0
+TYPE_FILE_HASH = 1
+TYPE_HOST_HASH = 2
+TYPE_STRING_HASH = 3
+TYPE_METADATA = 4
 
-def create_index(filename):
-    index_file = f"{filename}.zindex"
-    if not os.path.exists(index_file):
-        status = zindex.create_index(
-            filename,
-            index_file=f"file:{index_file}",
-            regex="id:\b([0-9]+)",
-            numeric=True,
-            unique=True,
-            debug=False,
-            verbose=False,
-        )
-        logging.debug(f"Creating Index for {filename} returned {status}")
-    return filename
+# Metadata records are phase-'M' entries tagged by `name` in the raw stream.
+HASH_RECORD_TYPES = {
+    'FH': TYPE_FILE_HASH,
+    'HH': TYPE_HOST_HASH,
+    'SH': TYPE_STRING_HASH,
+}
 
+TRACE_SUFFIXES = ('.pfw', '.pfw.gz')
 
-def generate_line_batches(filename, max_line):
-    batch_size = 1024 * 16
-    for start in range(0, max_line, batch_size):
-        end = min((start + batch_size - 1), (max_line - 1))
-        logging.debug(f"Created a batch for {filename} from [{start}, {end}] lines")
-        yield filename, start, end
+PARTITION_SIZE_BYTES = 128 * 1024**2
 
+# Schema handed to the analyzer, before PFW_COL_MAPPING is applied.
+RECORD_COLUMNS = {
+    'name': 'string',
+    'cat': 'string',
+    'type': 'Int8',
+    'pid': 'Int64',
+    'tid': 'Int64',
+    'ts': 'Int64',
+    'dur': 'Int64',
+    'hash': 'Int64',
+    'fhash': 'Int64',
+    'hhash': 'Int64',
+    'size': 'Int64',
+    'value': 'string',
+}
 
-def get_linenumber(filename):
-    index_file = f"{filename}.zindex"
-    line_number = zindex.get_max_line(
-        filename,
-        index_file=index_file,
-        debug=False,
-        verbose=False,
-    )
-    logging.debug(f" The {filename} has {line_number} lines")
-    return (filename, line_number)
-
-
-def get_size(filename):
-    if filename.endswith('.pfw'):
-        size = os.stat(filename).st_size
-    elif filename.endswith('.pfw.gz'):
-        index_file = f"{filename}.zindex"
-        line_number = zindex.get_max_line(
-            filename,
-            index_file=index_file,
-            debug=False,
-            verbose=False,
-        )
-        size = line_number * 256
-    logging.debug(f" The {filename} has {size / 1024**3} GB size")
-    return int(size)
+HASH_TABLE_COLUMNS = ['name', 'hash', 'pid', 'tid', 'hhash']
+METADATA_COLUMNS = ['name', 'value', 'pid', 'tid', 'hhash']
 
 
-def get_conditions_default(json_obj):
-    io_cond = "POSIX" == json_obj["cat"]
-    return False, False, io_cond
-
-
-def io_columns(time_approximate=True):
-    if is_pyarrow_dtype_supported():
-        cols = {
-            'compute_time': 'string[pyarrow]',
-            'io_time': 'string[pyarrow]',
-            'app_io_time': 'string[pyarrow]',
-            'total_time': 'string[pyarrow]',
-            'fhash': 'uint64[pyarrow]',
-            'hhash': 'uint64[pyarrow]',
-            'phase': 'uint16[pyarrow]',
-            'size': 'uint64[pyarrow]',
-        }
-        if time_approximate:
-            cols['compute_time'] = 'uint64[pyarrow]'
-            cols['io_time'] = 'uint64[pyarrow]'
-            cols['app_io_time'] = 'uint64[pyarrow]'
-            cols['total_time'] = 'uint64[pyarrow]'
-        return cols
-    return {
-        'compute_time': 'Int64' if time_approximate else 'string',
-        'io_time': 'Int64' if time_approximate else 'string',
-        'app_io_time': 'Int64' if time_approximate else 'string',
-        'total_time': 'Int64' if time_approximate else 'string',
-        'fhash': 'Int64',
-        'hhash': 'Int64',
-        'phase': 'Int16',
-        'size': 'Int64',
-    }
-
-
-def io_function(json_object, current_dict, time_approximate, condition_fn):
-    d = {}
-    d["phase"] = 0
-    if not condition_fn:
-        condition_fn = get_conditions_default
-    app_io_cond, compute_cond, io_cond = condition_fn(json_object)
-    if time_approximate:
-        d["total_time"] = 0
-        if compute_cond:
-            d["compute_time"] = current_dict["dur"]
-            d["total_time"] = current_dict["dur"]
-            d["phase"] = 1
-        elif io_cond:
-            d["io_time"] = current_dict["dur"]
-            d["total_time"] = current_dict["dur"]
-            d["phase"] = 2
-        elif app_io_cond:
-            d["total_time"] = current_dict["dur"]
-            d["app_io_time"] = current_dict["dur"]
-            d["phase"] = 3
-    else:
-        if compute_cond:
-            d["compute_time"] = current_dict["tinterval"]
-            d["total_time"] = current_dict["tinterval"]
-            d["phase"] = 1
-        elif io_cond:
-            d["io_time"] = current_dict["tinterval"]
-            d["total_time"] = current_dict["tinterval"]
-            d["phase"] = 2
-        elif app_io_cond:
-            d["app_io_time"] = current_dict["tinterval"]
-            d["total_time"] = current_dict["tinterval"]
-            d["phase"] = 3
+def resolve_trace_files(trace_path: str) -> List[str]:
+    """Expand `trace_path` into the .pfw/.pfw.gz files it refers to."""
+    if os.path.isdir(trace_path) and '*' not in trace_path:
+        trace_path = f"{trace_path}/*.pfw*"
+    files = []
+    for path in sorted(glob(trace_path)):
+        if path.endswith(TRACE_SUFFIXES):
+            files.append(path)
         else:
-            d["total_time"] = P.to_string(P.empty())
-            d["io_time"] = P.to_string(P.empty())
-    if "args" in json_object:
-        if "fhash" in json_object["args"]:
-            if type(json_object["args"]["fhash"]) is str:
-                d["fhash"] = int(json_object["args"]["fhash"], 16)
-            else:
-                d["fhash"] = json_object["args"]["fhash"]
-        if "POSIX" == json_object["cat"] and "ret" in json_object["args"]:
-            size = int(json_object["args"]["ret"])
-            if size > 0:
-                if "write" in json_object["name"]:
-                    d["size"] = size
-                elif (
-                    "read" in json_object["name"]
-                    and "readdir" not in json_object["name"]
-                ):
-                    d["size"] = size
-        else:
-            if "image_size" in json_object["args"]:
-                size = int(json_object["args"]["image_size"])
-                if size > 0:
-                    d["size"] = size
-    return d
+            logging.warning(f"Ignoring unsupported file {path}")
+    return files
 
 
-def is_pyarrow_dtype_supported() -> bool:
-    return sys.version_info >= (3, 9)
+def empty_records() -> pd.DataFrame:
+    return pd.DataFrame({col: pd.Series(dtype=dt) for col, dt in RECORD_COLUMNS.items()})
 
 
-def load_indexed_gzip_files(filename, start, end):
-    index_file = f"{filename}.zindex"
-    json_lines = zindex.zquery(
-        filename,
-        index_file=index_file,
-        raw=f"select a.line from LineOffsets a where a.line >= {start} AND a.line <= {end};",
-        debug=False,
-        verbose=False,
-    )
-    logging.debug(f"Read {len(json_lines)} json lines for [{start}, {end}]")
-    return json_lines
+def _column(df: pd.DataFrame, name: str):
+    """Return a column, or an all-null placeholder when the file lacks it.
+
+    `args.*` columns only materialize when some record in the file carried that
+    key, so a trace with no reads has no `args.size` at all.
+    """
+    if name in df.columns:
+        return df[name]
+    return pd.Series([pd.NA] * len(df), index=df.index)
 
 
-def load_objects(line, fn, time_granularity, time_approximate, condition_fn, load_data):
-    d = {}
-    if (
-        line is not None
-        and line != ""
-        and len(line) > 0
-        and "[" != line[0]
-        and "]" != line[0]
-        and line != "\n"
-    ):
-        val = {}
-        try:
-            unicode_line = ''.join([i if ord(i) < 128 else '#' for i in line])
-            val = json.loads(unicode_line, strict=False)
-            logging.debug(f"Loading dict {val}")
-            if "name" in val:
-                d["name"] = val["name"]
-            if "cat" in val:
-                d["cat"] = val["cat"]
-            if "pid" in val:
-                d["pid"] = val["pid"]
-            if "tid" in val:
-                d["tid"] = val["tid"]
-            if "args" in val:
-                if "hhash" in val["args"]:
-                    if type(val["args"]["hhash"]) is str:
-                        d["hhash"] = int(val["args"]["hhash"], 16)
-                    else:
-                        d["hhash"] = val["args"]["hhash"]
-                if "level" in val["args"]:
-                    d["level"] = int(val["args"]["level"])
-            if "M" == val["ph"]:
-                if d["name"] == "FH":
-                    d["type"] = 1  # 1-> file hash
-                    if (
-                        "args" in val
-                        and "name" in val["args"]
-                        and "value" in val["args"]
-                    ):
-                        d["name"] = val["args"]["name"]
-                        if type(val["args"]["value"]) is str:
-                            d["hash"] = int(val["args"]["value"], 16)
-                        else:
-                            d["hash"] = val["args"]["value"]
-                            # TODO(izzet): maybe add hash here
-                elif d["name"] == "HH":
-                    d["type"] = 2  # 2-> hostname hash
-                    if (
-                        "args" in val
-                        and "name" in val["args"]
-                        and "value" in val["args"]
-                    ):
-                        d["name"] = val["args"]["name"]
-                        if type(val["args"]["value"]) is str:
-                            d["hash"] = int(val["args"]["value"], 16)
-                        else:
-                            d["hash"] = val["args"]["value"]
-                elif d["name"] == "SH":
-                    d["type"] = 3  # 3-> string hash
-                    if (
-                        "args" in val
-                        and "name" in val["args"]
-                        and "value" in val["args"]
-                    ):
-                        d["name"] = val["args"]["name"]
-                        if type(val["args"]["value"]) is str:
-                            d["hash"] = int(val["args"]["value"], 16)
-                        else:
-                            d["hash"] = val["args"]["value"]
-                elif d["name"] == "PR":
-                    d["type"] = 5  # 5-> process metadata
-                    if (
-                        "args" in val
-                        and "name" in val["args"]
-                        and "value" in val["args"]
-                    ):
-                        d["name"] = val["args"]["name"]
-                        if type(val["args"]["value"]) is str:
-                            d["hash"] = int(val["args"]["value"], 16)
-                        else:
-                            d["hash"] = val["args"]["value"]
-                else:
-                    d["type"] = 4  # 4-> others
-                    if (
-                        "args" in val
-                        and "name" in val["args"]
-                        and "value" in val["args"]
-                    ):
-                        d["name"] = val["args"]["name"]
-                        d["value"] = str(val["args"]["value"])
-            else:
-                d["type"] = 0  # 0->regular event
-                if "dur" in val:
-                    val["dur"] = int(val["dur"])
-                    val["ts"] = int(val["ts"])
-                    d["ts"] = val["ts"]
-                    d["dur"] = val["dur"]
-                    d["te"] = d["ts"] + d["dur"]
-                    if not time_approximate:
-                        d["tinterval"] = P.to_string(
-                            P.closed(val["ts"], val["ts"] + val["dur"])
-                        )
-                    d["trange"] = int(
-                        ((val["ts"] + val["dur"]) / 2.0) / time_granularity
-                    )
-                d.update(io_function(val, d, time_approximate, condition_fn))
-            logging.debug(f"built an dictionary for line {d}")
-            yield d
-        except ValueError as error:
-            logging.error(f"Processing {line} failed with {error}")
-    return {}
+def derive_size(df: pd.DataFrame) -> pd.Series:
+    """Bytes transferred per event.
+
+    DFTracer reports this as the syscall return value, so it is only meaningful
+    for POSIX reads and writes that returned a positive count. `readdir` matches
+    'read' textually but transfers no bytes. Non-POSIX events fall back to
+    `image_size`, which is what dataloader traces report.
+    """
+    names = _column(df, 'name').astype('string')
+    is_posix = _column(df, 'cat').astype('string') == CAT_POSIX
+    is_write = names.str.contains('write', na=False)
+    is_read = names.str.contains('read', na=False) & ~names.str.contains('readdir', na=False)
+
+    returned = pd.to_numeric(_column(df, 'args.ret'), errors='coerce')
+    size = returned.where(is_posix & (is_write | is_read) & (returned > 0))
+
+    image_size = pd.to_numeric(_column(df, 'args.image_size'), errors='coerce')
+    return size.fillna(image_size.where(~is_posix & (image_size > 0)))
+
+
+def classify_records(df: pd.DataFrame) -> pd.Series:
+    """Tag each row with its TYPE_*."""
+    types = pd.Series(TYPE_EVENT, index=df.index, dtype='object')
+    # fillna is load-bearing: a file with no metadata records has no `ph`
+    # column, and NA propagating into `mask` would tag every row as metadata,
+    # leaving zero events.
+    is_meta = (_column(df, 'ph').astype('string') == 'M').fillna(False)
+    names = _column(df, 'name').astype('string')
+    for record_name, record_type in HASH_RECORD_TYPES.items():
+        types = types.mask(is_meta & (names == record_name), record_type)
+    types = types.mask(is_meta & ~names.isin(HASH_RECORD_TYPES), TYPE_METADATA)
+    return types
+
+
+def read_pfw_file(filename: str) -> pd.DataFrame:
+    """Read one trace file into wisio's record schema.
+
+    dftracer-utils builds and caches its own index on first read, so gzipped
+    traces are seekable without a separate indexing pass.
+    """
+    reader = TraceReader(filename, auto_build_index=True)
+    frames = [
+        pa.Table.from_batches([pa.record_batch(batch)]).to_pandas()
+        for batch in reader.iter_arrow(flatten_objects=True)
+    ]
+    frames = [frame for frame in frames if len(frame)]
+    if not frames:
+        return empty_records()
+
+    df = pd.concat(frames, ignore_index=True)
+    record_type = classify_records(df)
+    is_event = record_type == TYPE_EVENT
+
+    records = pd.DataFrame(index=df.index)
+    records['type'] = record_type
+    records['cat'] = _column(df, 'cat')
+    # Hash/metadata records carry their payload under `args`; events use `name`.
+    records['name'] = _column(df, 'name').where(is_event, _column(df, 'args.name'))
+    records['value'] = _column(df, 'args.value')
+    records['hash'] = _column(df, 'args.value').where(~is_event)
+    records['pid'] = _column(df, 'pid')
+    records['tid'] = _column(df, 'tid')
+    records['ts'] = _column(df, 'ts')
+    records['dur'] = _column(df, 'dur')
+    records['fhash'] = _column(df, 'args.fhash')
+    records['hhash'] = _column(df, 'args.hhash')
+    records['size'] = derive_size(df)
+
+    # Reindex before astype: dask matches partition schemas positionally.
+    return records[list(RECORD_COLUMNS)].astype(RECORD_COLUMNS)
 
 
 class DFTracerAnalyzer(Analyzer):
     def read_trace(self, trace_path: str) -> dd.DataFrame:
-        conditions = None
-        load_cols = {}
-        load_data = {}
-        load_fn = None
-        metadata_cols = {}
-        if os.path.isdir(trace_path) and '*' not in trace_path:
-            trace_path = f"{trace_path}/*.pfw*"
-        # ===============================================
-        file_pattern = glob(trace_path)
-        all_files = []
-        pfw_pattern = []
-        pfw_gz_pattern = []
-        for file in file_pattern:
-            if file.endswith('.pfw'):
-                pfw_pattern.append(file)
-                all_files.append(file)
-            elif file.endswith('.pfw.gz'):
-                pfw_gz_pattern.append(file)
-                all_files.append(file)
-            else:
-                logging.warning(f"Ignoring unsuported file {file}")
-        if len(all_files) == 0:
-            logging.error(f"No files selected for .pfw and .pfw.gz")
-            exit(1)
-        logging.debug(f"Processing files {all_files}")
-        delayed_indices = []
-        if len(pfw_gz_pattern) > 0:
-            db.from_sequence(pfw_gz_pattern).map(create_index).compute()
-        logging.info(f"Created index for {len(pfw_gz_pattern)} files")
-        total_size = db.from_sequence(all_files).map(get_size).sum().compute()
-        logging.info(f"Total size of all files are {total_size} bytes")
-        gz_bag = None
-        pfw_bag = None
-        if len(pfw_gz_pattern) > 0:
-            max_line_numbers = (
-                db.from_sequence(pfw_gz_pattern).map(get_linenumber).compute()
-            )
-            logging.debug(f"Max lines per file are {max_line_numbers}")
-            json_line_delayed = []
-            total_lines = 0
-            for filename, max_line in max_line_numbers:
-                total_lines += max_line
-                for _, start, end in generate_line_batches(filename, max_line):
-                    json_line_delayed.append((filename, start, end))
+        files = resolve_trace_files(trace_path)
+        if not files:
+            raise ValueError(f"No .pfw or .pfw.gz files found in '{trace_path}'")
 
-            logging.info(
-                f"Loading {len(json_line_delayed)} batches out of {len(pfw_gz_pattern)} files and has {total_lines} lines overall"
-            )
-            json_line_bags = []
-            for filename, start, end in json_line_delayed:
-                num_lines = end - start + 1
-                json_line_bags.append(
-                    dask.delayed(load_indexed_gzip_files, nout=num_lines)(
-                        filename, start, end
-                    )
-                )
-            json_lines = db.concat(json_line_bags)
-            gz_bag = (
-                json_lines.map(
-                    load_objects,
-                    fn=load_fn,
-                    time_granularity=self.time_granularity,
-                    time_approximate=self.time_approximate,
-                    condition_fn=conditions,
-                    load_data=load_data,
-                )
-                .flatten()
-                .filter(lambda x: "name" in x)
-            )
-        main_bag = None
-        if len(pfw_pattern) > 0:
-            pfw_bag = (
-                db.read_text(pfw_pattern)
-                .map(
-                    load_objects,
-                    fn=load_fn,
-                    time_granularity=self.time_granularity,
-                    time_approximate=self.time_approximate,
-                    condition_fn=conditions,
-                    load_data=load_data,
-                )
-                .flatten()
-                .filter(lambda x: "name" in x)
-            )
-        if len(pfw_gz_pattern) > 0 and len(pfw_pattern) > 0:
-            main_bag = db.concat([pfw_bag, gz_bag])
-        elif len(pfw_gz_pattern) > 0:
-            main_bag = gz_bag
-        elif len(pfw_pattern) > 0:
-            main_bag = pfw_bag
-        if main_bag:
-            columns = {
-                'name': 'string',
-                'cat': 'string',
-                'type': 'Int8',
-                'pid': 'Int64',
-                'tid': 'Int64',
-                'ts': 'Int64',
-                'te': 'Int64',
-                'dur': 'Int64',
-                'tinterval': 'Int64' if self.time_approximate else 'string',
-                'trange': 'Int64',
-                'level': 'Int8',
-            }
-            if is_pyarrow_dtype_supported():
-                columns = {
-                    'name': 'string[pyarrow]',
-                    'cat': 'string[pyarrow]',
-                    'type': 'uint8[pyarrow]',
-                    'pid': 'uint64[pyarrow]',
-                    'tid': 'uint64[pyarrow]',
-                    'ts': 'uint64[pyarrow]',
-                    'te': 'uint64[pyarrow]',
-                    'dur': 'uint64[pyarrow]',
-                    'tinterval': 'uint64[pyarrow]',
-                    'trange': 'uint64[pyarrow]',
-                    'level': 'uint8[pyarrow]',
-                }
-                if self.time_approximate:
-                    columns['tinterval'] = 'string[pyarrow]'
-            columns.update(io_columns())
-            columns.update(load_cols)
-            file_hash_columns = {
-                'name': 'string',
-                'hash': 'Int64',
-                'pid': 'Int64',
-                'tid': 'Int64',
-                'hhash': 'Int64',
-            }
-            hostname_hash_columns = {
-                'name': 'string',
-                'hash': 'Int64',
-                'pid': 'Int64',
-                'tid': 'Int64',
-                'hhash': 'Int64',
-            }
-            string_hash_columns = {
-                'name': 'string',
-                'hash': 'Int64',
-                'pid': 'Int64',
-                'tid': 'Int64',
-                'hhash': 'Int64',
-            }
-            other_metadata_columns = {
-                'name': 'string',
-                'value': 'string',
-                'pid': 'Int64',
-                'tid': 'Int64',
-                'hhash': 'Int64',
-            }
-            if is_pyarrow_dtype_supported():
-                file_hash_columns = {
-                    'name': 'string[pyarrow]',
-                    'hash': 'uint64[pyarrow]',
-                    'pid': 'uint64[pyarrow]',
-                    'tid': 'uint64[pyarrow]',
-                    'hhash': 'uint64[pyarrow]',
-                }
-                hostname_hash_columns = {
-                    'name': 'string[pyarrow]',
-                    'hash': 'uint64[pyarrow]',
-                    'pid': 'uint64[pyarrow]',
-                    'tid': 'uint64[pyarrow]',
-                    'hhash': 'uint64[pyarrow]',
-                }
-                string_hash_columns = {
-                    'name': 'string[pyarrow]',
-                    'hash': 'uint64[pyarrow]',
-                    'pid': 'uint64[pyarrow]',
-                    'tid': 'uint64[pyarrow]',
-                    'hhash': 'uint64[pyarrow]',
-                }
-                other_metadata_columns = {
-                    'name': 'string[pyarrow]',
-                    'value': 'string[pyarrow]',
-                    'pid': 'uint64[pyarrow]',
-                    'tid': 'uint64[pyarrow]',
-                    'hhash': 'uint64[pyarrow]',
-                }
-            if "FH" in metadata_cols:
-                file_hash_columns.update(metadata_cols["FH"])
-            if "HH" in metadata_cols:
-                hostname_hash_columns.update(metadata_cols["HH"])
-            if "SH" in metadata_cols:
-                string_hash_columns.update(metadata_cols["SH"])
-            if "M" in metadata_cols:
-                other_metadata_columns.update(metadata_cols["M"])
-            columns.update(file_hash_columns)
-            columns.update(hostname_hash_columns)
-            columns.update(string_hash_columns)
-            columns.update(other_metadata_columns)
+        total_size = sum(os.path.getsize(filename) for filename in files)
+        self.n_partition = max(1, math.ceil(total_size / PARTITION_SIZE_BYTES))
+        logging.info(
+            f"Reading {len(files)} DFTracer files ({total_size} bytes) "
+            f"into {self.n_partition} partitions"
+        )
 
-            self.all_events = main_bag.to_dataframe(meta=columns)
-            events = self.all_events.query("type == 0")
-            self.file_hash = (
-                self.all_events.query("type == 1")[list(file_hash_columns.keys())]
-                .groupby('hash')
-                .first()
-                .persist()
-            )
-            self.host_hash = (
-                self.all_events.query("type == 2")[list(hostname_hash_columns.keys())]
-                .groupby('hash')
-                .first()
-                .persist()
-            )
-            self.string_hash = (
-                self.all_events.query("type == 3")[list(string_hash_columns.keys())]
-                .groupby('hash')
-                .first()
-                .persist()
-            )
-            self.metadata = self.all_events.query("type == 4")[
-                list(other_metadata_columns.keys())
-            ].persist()
-            self.n_partition = math.ceil(total_size / (128 * 1024**2))
-            logging.debug(f"Number of partitions used are {self.n_partition}")
-            self.events = events.repartition(npartitions=self.n_partition).persist()
-            _ = wait(self.events)
-            self.events['ts'] = self.events['ts'] - self.events['ts'].min()
-            self.events['te'] = self.events['ts'] + self.events['dur']
-            self.events['trange'] = self.events['ts'] // self.time_granularity
-            if is_pyarrow_dtype_supported():
-                self.events['ts'] = self.events['ts'].astype('uint64[pyarrow]')
-                self.events['te'] = self.events['te'].astype('uint64[pyarrow]')
-                self.events['trange'] = self.events['trange'].astype('uint16[pyarrow]')
-            else:
-                self.events['ts'] = self.events['ts'].astype('Int64')
-                self.events['te'] = self.events['te'].astype('Int64')
-                self.events['trange'] = self.events['trange'].astype('Int16')
-            self.events = self.events.persist()
-            _ = wait(
-                [
-                    self.file_hash,
-                    self.host_hash,
-                    self.string_hash,
-                    self.metadata,
-                    self.events,
-                ]
-            )
-        else:
-            logging.error("Unable to load traces")
-            exit(1)
+        self.all_events = dd.from_delayed(
+            [delayed(read_pfw_file)(filename) for filename in files],
+            meta=empty_records(),
+        ).persist()
+        _ = wait(self.all_events)
 
-        self.events['dur'] = self.events['dur'] / DFTRACER_TIME_RESOLUTION
+        self.file_hash = self._hash_table(TYPE_FILE_HASH)
+        self.host_hash = self._hash_table(TYPE_HOST_HASH)
+        self.string_hash = self._hash_table(TYPE_STRING_HASH)
+        self.metadata = self.all_events[self.all_events['type'] == TYPE_METADATA][
+            METADATA_COLUMNS
+        ].persist()
+
+        events = self.all_events[self.all_events['type'] == TYPE_EVENT]
+        events = events.repartition(npartitions=self.n_partition).persist()
+        _ = wait(events)
+
+        events['ts'] = events['ts'] - events['ts'].min()
+        events['te'] = events['ts'] + events['dur']
+        events['trange'] = events['ts'] // self.time_granularity
+        events['ts'] = events['ts'].astype('Int64')
+        events['te'] = events['te'].astype('Int64')
+        events['trange'] = events['trange'].astype('Int16')
+        events['dur'] = events['dur'] / DFTRACER_TIME_RESOLUTION
+
+        self.events = events.persist()
+        _ = wait(
+            [
+                self.file_hash,
+                self.host_hash,
+                self.string_hash,
+                self.metadata,
+                self.events,
+            ]
+        )
 
         return self.events.rename(columns=PFW_COL_MAPPING)
 
+    def _hash_table(self, record_type: int) -> dd.DataFrame:
+        """One row per hash id, mapping it to the name it stands for."""
+        table = self.all_events[self.all_events['type'] == record_type]
+        return table[HASH_TABLE_COLUMNS].groupby('hash').first().persist()
+
     def postread_trace(self, traces: dd.DataFrame) -> dd.DataFrame:
-        # 'name': COL_FUNC_ID,
-        # 'dur': COL_TIME,
-        # 'hostname': COL_HOST_NAME,
-        # 'filename': COL_FILE_NAME,
-        # traces[COL_FUNC_ID] = traces['name']
-        # traces[COL_TIME] = traces['dur']
-        # traces[COL_HOST_NAME] = traces['hostname']
-        # traces[COL_FILE_NAME] = traces['filename']
-        # traces = traces.rename(columns=PFW_COL_MAPPING)
         traces = traces[(traces['cat'] == CAT_POSIX) & (traces['ts'] > 0)]
-        # traces[COL_TIME] = traces[COL_TIME] / DFTRACER_TIME_RESOLUTION
-        # traces['ts'] = traces['ts'] - traces['ts'].min()
-        # traces['ts'] = traces['ts'] / DFTRACER_TIME_RESOLUTION
-        # traces['te'] = traces['ts'] + traces[COL_TIME]
-        # traces[COL_TIME_RANGE] = (
-        #     ((traces['te'] / self.time_granularity) * DFTRACER_TIME_RESOLUTION)
-        #     .round()
-        #     .astype(int)
-        # )
         traces[COL_PROC_NAME] = (
             'app#'
             + traces[COL_HOST_NAME].astype(str)
             + '#'
-            # + 'host#'
             + traces['pid'].astype(str)
             + '#'
             + traces['tid'].astype(str)
@@ -625,6 +273,6 @@ class DFTracerAnalyzer(Analyzer):
     def compute_total_count(self, traces: dd.DataFrame) -> int:
         return (
             traces[(traces['cat'] == CAT_POSIX) & (traces['ts'] > 0)]
-            .index.count()
+            .reduction(len, sum)
             .persist()
         )

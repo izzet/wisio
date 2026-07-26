@@ -34,10 +34,14 @@ class RecorderAnalyzer(Analyzer):
         return dd.read_parquet(trace_path)
 
     def postread_trace(self, traces: dd.DataFrame) -> dd.DataFrame:
-        traces['acc_pat'] = traces['acc_pat'].astype(np.uint8)
+        # Nullable extension dtypes rather than raw numpy: recorder parquet can
+        # carry nulls in these columns, which silently become 0/garbage under
+        # numpy casts. Ported from dfanalyzer a784d32.
+        traces['acc_pat'] = traces['acc_pat'].astype('Int8')
         traces['count'] = 1
-        traces['duration'] = traces['duration'].astype(np.float64)
-        traces['io_cat'] = traces['io_cat'].astype(np.uint8)
+        traces['count'] = traces['count'].astype('Int64')
+        traces['duration'] = traces['duration'].astype('Float64')
+        traces['io_cat'] = traces['io_cat'].astype('Int8')
         time_ranges = self._compute_time_ranges(
             global_min_max=self.global_min_max,
             time_granularity=self.time_granularity,
@@ -51,9 +55,11 @@ class RecorderAnalyzer(Analyzer):
         return traces
 
     def compute_total_count(self, traces: dd.DataFrame) -> int:
+        # `reduction(len, sum)` counts rows per partition and sums, rather than
+        # materializing the index. Ported from dfanalyzer a784d32.
         return (
             traces[(traces['cat'] == CAT_POSIX) & (traces['io_cat'].isin(IO_CATS))]
-            .index.count()
+            .reduction(len, sum)
             .persist()
         )
 

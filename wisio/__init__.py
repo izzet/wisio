@@ -11,15 +11,27 @@ from typing import List, Union, Optional
 
 from .analyzer import Analyzer
 from .config import init_hydra_config_store
-from .dftracer import DFTracerAnalyzer
 from .output import ConsoleOutput, CSVOutput, SQLiteOutput
 from .recorder import RecorderAnalyzer
 from .types import ViewType
 
+# Optional analyzers pull in third-party readers (pydarshan, zindex_py) that are
+# installed via extras. A missing extra must not take down the whole package --
+# darshan and recorder analysis has no dependency on the dftracer reader, and
+# vice versa. Hydra still resolves the real class by `_target_` path, so asking
+# for an unavailable analyzer fails at instantiation with the underlying error.
+# `ImportError` rather than `ModuleNotFoundError`: an extra can be installed yet
+# unimportable (zindex_py 0.0.5 ships a wheel containing only metadata, and a
+# half-built native extension raises plain ImportError).
 try:
     from .darshan import DarshanAnalyzer
-except ModuleNotFoundError:
+except ImportError:
     DarshanAnalyzer = Analyzer
+
+try:
+    from .dftracer import DFTracerAnalyzer
+except ImportError:
+    DFTracerAnalyzer = Analyzer
 
 AnalyzerType = Union[DarshanAnalyzer, DFTracerAnalyzer, RecorderAnalyzer]
 ClusterType = Union[LocalCluster, LSFCluster, PBSCluster, SLURMCluster]

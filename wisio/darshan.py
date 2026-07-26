@@ -1,6 +1,7 @@
 import dask.dataframe as dd
 import darshan as d
 import glob
+import math
 import numpy as np
 import os
 import pandas as pd
@@ -8,6 +9,26 @@ import pandas as pd
 from .analyzer import Analyzer
 from .constants import IOCategory
 from .types import RawStats
+
+
+# Non-DXT POSIX records carry no hostname, so a placeholder stands in. DXT
+# records do carry a real hostname -- see `_create_dxt_dataframe`.
+DEFAULT_APP_NAME = 'app'
+DEFAULT_HOST_NAME = 'localhost'
+
+
+def _resolve_host_name(host_name) -> str:
+    """Return a non-empty host name for use inside `proc_name`.
+
+    `proc_name` is a '#'-delimited string that analysis_utils.set_proc_name_parts
+    splits positionally into app/node/rank. A blank host would collapse a
+    segment and silently shift rank into the node position, so anything empty or
+    missing falls back to the placeholder.
+    """
+    if host_name is None or (isinstance(host_name, float) and math.isnan(host_name)):
+        return DEFAULT_HOST_NAME
+    resolved = str(host_name).strip()
+    return resolved if resolved else DEFAULT_HOST_NAME
 
 
 class DarshanAnalyzer(Analyzer):
@@ -73,7 +94,11 @@ class DarshanAnalyzer(Analyzer):
         raw_stats = RawStats(
             job_time=self.job_time,
             time_granularity=self.time_granularity,
-            total_count=len(file_name_view),
+            # Pre-aggregation record count: this is the denominator for the
+            # retention statistics in ConsoleOutput, so it must be measured
+            # before the groupby -- otherwise the aggregated view always reports
+            # as 100% of raw. Ported from dfanalyzer 913b602.
+            total_count=len(file_name_ddf),
         )
 
         # return file_name_view
@@ -113,9 +138,12 @@ class DarshanAnalyzer(Analyzer):
         for _, record in dxt_df.iterrows():
             file_id = record['id']
             rank = record['rank']
-            host_name = record['hostname']
+            host_name = _resolve_host_name(record['hostname'])
             file_name = report.data['name_records'][file_id]
-            proc_name = f"app#localhost#{rank}#0"
+            # DXT records know the real host; using it here is what makes
+            # node-level views meaningful, since `node_name` is parsed back out
+            # of this string. dfanalyzer still hardcodes a placeholder.
+            proc_name = f"{DEFAULT_APP_NAME}#{host_name}#{rank}#0"
 
             # Process read segments
             if not record['read_segments'].empty:
@@ -134,6 +162,7 @@ class DarshanAnalyzer(Analyzer):
                             'file_name': file_name,
                             'proc_name': proc_name,
                             'size': lengths[i],
+                            'offset': offsets[i],
                             'end_time': end_times[i],
                             'start_time': start_times[i],
                             'func_id': 'read',
@@ -164,6 +193,7 @@ class DarshanAnalyzer(Analyzer):
                             'file_name': file_name,
                             'proc_name': proc_name,
                             'size': lengths[i],
+                            'offset': offsets[i],
                             'end_time': end_times[i],
                             'start_time': start_times[i],
                             'func_id': 'write',
@@ -212,7 +242,15 @@ class DarshanAnalyzer(Analyzer):
                 right_index=True,
             )
             .reset_index()
-            .assign(proc_name=lambda x: 'app#localhost#' + x['rank'].astype(str) + '#0')
+            .assign(host_name=lambda x: DEFAULT_HOST_NAME)
+            .assign(
+                proc_name=lambda x: DEFAULT_APP_NAME
+                + '#'
+                + x['host_name']
+                + '#'
+                + x['rank'].astype(str)
+                + '#0'
+            )
             # .set_index(['proc_name', 'file_name'])
             .drop(columns=['id', 'rank'])
             .query('~(file_name.str.startswith("<") and file_name.str.endswith(">"))')
