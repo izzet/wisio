@@ -29,7 +29,7 @@ class ViewEvaluator(object):
         self,
         view_results: ViewResultsPerViewPerMetric,
         metrics: List[Metric],
-        metric_boundaries: Dict[Metric, dd.core.Scalar],
+        metric_boundaries: Dict[Metric, "dd.Scalar"],
         is_slope_based: bool,
     ) -> ScoringPerViewPerMetric:
         # Keep evaluated views
@@ -54,7 +54,7 @@ class ViewEvaluator(object):
         view_key: ViewKey,
         view_result: ViewResult,
         metric: str,
-        metric_boundary: dd.core.Scalar,
+        metric_boundary: "dd.Scalar",
         is_slope_based: bool,
     ):
         # Get view type

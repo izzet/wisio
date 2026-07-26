@@ -216,7 +216,7 @@ class BottleneckRule(RuleHandler):
     def define_tasks(
         self,
         metric: Metric,
-        metric_boundary: dd.core.Scalar,
+        metric_boundary: "dd.Scalar",
         scoring_result: ScoringResult,
         view_key: ViewKey,
     ) -> Dict[str, Delayed]:

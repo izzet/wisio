@@ -142,7 +142,7 @@ class RuleEngine(object):
         self,
         evaluated_views: ScoringPerViewPerMetric,
         group_behavior: bool,
-        metric_boundaries: Dict[Metric, dd.core.Scalar],
+        metric_boundaries: Dict[Metric, "dd.Scalar"],
         exclude_bottlenecks: List[str] = [],
     ) -> Tuple[List[dict], Dict[str, BottleneckRule]]:
         rule_dict = {
@@ -295,7 +295,7 @@ class RuleEngine(object):
     def _define_bottleneck_tasks(
         zipped: Tuple[str, str, ViewKey, ScoringResult],
         rules: Dict[str, BottleneckRule],
-        metric_boundaries: Dict[Metric, dd.core.Scalar],
+        metric_boundaries: Dict[Metric, "dd.Scalar"],
     ):
         rule, metric, view_key, scoring_result = zipped
         rule_impl = rules[rule]

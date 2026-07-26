@@ -382,7 +382,7 @@ class Analyzer(abc.ABC):
         main_view: dd.DataFrame,
         metrics: List[Metric],
         view_types: List[ViewType],
-    ) -> Dict[Metric, dd.core.Scalar]:
+    ) -> Dict[Metric, "dd.Scalar"]:
         """Computes the upper boundary for each specified metric.
 
         For metrics like 'iops' or 'time', it calculates the maximum time
@@ -414,7 +414,7 @@ class Analyzer(abc.ABC):
         self,
         main_view: dd.DataFrame,
         metrics: List[Metric],
-        metric_boundaries: Dict[Metric, dd.core.Scalar],
+        metric_boundaries: Dict[Metric, "dd.Scalar"],
         percentile: Optional[float],
         threshold: Optional[int],
         view_types: List[ViewType],
@@ -469,7 +469,7 @@ class Analyzer(abc.ABC):
     def compute_logical_views(
         self,
         main_view: dd.DataFrame,
-        metric_boundaries: Dict[Metric, dd.core.Scalar],
+        metric_boundaries: Dict[Metric, "dd.Scalar"],
         metrics: List[Metric],
         percentile: Optional[float],
         threshold: Optional[int],
@@ -530,7 +530,7 @@ class Analyzer(abc.ABC):
         self,
         metrics: List[Metric],
         metric: Metric,
-        metric_boundary: dd.core.Scalar,
+        metric_boundary: "dd.Scalar",
         percentile: Optional[float],
         records: dd.DataFrame,
         threshold: Optional[int],
@@ -885,7 +885,7 @@ class Analyzer(abc.ABC):
         view_type: str,
         metrics: List[Metric],
         metric: Metric,
-        metric_boundary: dd.core.Scalar,
+        metric_boundary: "dd.Scalar",
     ) -> dd.DataFrame:
         view_types = records.index._meta.names
 
@@ -954,7 +954,7 @@ class Analyzer(abc.ABC):
         self,
         main_view: dd.DataFrame,
         metrics: List[Metric],
-        metric_boundaries: Dict[Metric, dd.core.Scalar],
+        metric_boundaries: Dict[Metric, "dd.Scalar"],
         view_results: Dict[Metric, Dict[ViewKey, ViewResult]],
         is_slope_based: bool,
         raw_stats: RawStats,
