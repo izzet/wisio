@@ -9,6 +9,7 @@ import pandas as pd
 from .analyzer import Analyzer
 from .constants import IOCategory
 from .types import RawStats
+from .utils.dask_utils import repartition_to_size
 
 
 # Non-DXT POSIX records carry no hostname, so a placeholder stands in. DXT
@@ -83,12 +84,10 @@ class DarshanAnalyzer(Analyzer):
         is_slope_based = threshold is not None
 
         file_name_df = pd.concat(map(self._create_file_name_view, reports), ignore_index=True)
-        file_name_ddf = (
-            dd.from_pandas(file_name_df, npartitions=len(reports))
-            .persist()
-            .repartition(partition_size='256MB')
-            .persist()
-        )
+        file_name_ddf = repartition_to_size(
+            dd.from_pandas(file_name_df, npartitions=len(reports)).persist(),
+            '256MB',
+        ).persist()
         file_name_view = file_name_ddf.groupby(['file_name', 'proc_name']).sum().persist()
 
         raw_stats = RawStats(

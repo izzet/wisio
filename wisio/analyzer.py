@@ -9,6 +9,7 @@ import json
 import logging
 import math
 import os
+import pandas as pd
 from dask.base import compute, unpack_collections
 from dask.delayed import Delayed
 from dask.distributed import fire_and_forget, get_client, wait
@@ -44,7 +45,7 @@ from .types import (
     ViewResult,
     ViewType,
 )
-from .utils.dask_utils import EventLogger, flatten_column_names
+from .utils.dask_utils import EventLogger, flatten_column_names, repartition_to_size
 from .utils.file_utils import ensure_dir
 from .utils.json_encoders import NpEncoder
 
@@ -327,8 +328,8 @@ class Analyzer(abc.ABC):
             .agg(HLM_AGG, split_out=math.ceil(math.sqrt(traces.npartitions)))
             .persist()
             .reset_index()
-            .repartition(partition_size=partition_size)
         )
+        hlm = repartition_to_size(hlm, partition_size)
         hlm = flatten_column_names(hlm)
         return hlm.rename(columns=HLM_COLS).persist()
 
@@ -363,8 +364,8 @@ class Analyzer(abc.ABC):
             hlm.groupby(list(view_types))
             .agg(hlm_agg, split_out=hlm.npartitions)
             .persist()
-            .repartition(partition_size=partition_size)
         )
+        main_view = repartition_to_size(main_view, partition_size)
         # main_view = hlm \
         #     .drop(columns=EXTRA_COLS) \
         #     .groupby(view_types) \
@@ -845,7 +846,7 @@ class Analyzer(abc.ABC):
         Returns:
             The result of the Dask `to_parquet` operation (typically None or a Dask future).
         """
-        return bottlenecks.repartition(partition_size=partition_size).to_parquet(
+        return repartition_to_size(bottlenecks, partition_size).to_parquet(
             self.bottleneck_dir, compute=True, write_metadata_file=True
         )
 
@@ -877,7 +878,7 @@ class Analyzer(abc.ABC):
         Returns:
             The result of the Dask `to_parquet` operation.
         """
-        return view.repartition(partition_size=partition_size).to_parquet(
+        return repartition_to_size(view, partition_size).to_parquet(
             self.get_checkpoint_path(name=name),
             compute=compute,
             write_metadata_file=True,
@@ -1142,52 +1143,78 @@ class Analyzer(abc.ABC):
 
         return evaluated_views, bottlenecks, bottleneck_rules, characteristics
 
-    def _set_derived_columns(self, ddf: dd.DataFrame):
+    def _set_derived_columns(self, ddf: dd.DataFrame) -> dd.DataFrame:
+        """Adds the derived io_cat, acc_pat and metadata-operation columns.
+
+        Applied through `map_partitions` rather than as chained assignments on
+        the Dask frame. The logic is row-local, so the result is identical, but
+        under dask-expr each assignment adds a node to the expression tree and
+        the optimizer then re-walks that tree: profiling the main view showed
+        `simplify_once` called 13,655 times, and `.persist()` taking 6.75s
+        against 0.17s on dask 2023.4. One `map_partitions` is one node.
+
+        Args:
+            ddf: The high-level metrics Dask DataFrame.
+
+        Returns:
+            The same frame with the derived columns added.
+        """
+        # Derive the meta from the empty frame and pass it explicitly. Left to
+        # infer, dask emulates on a synthetic *non-empty* frame whose nullable
+        # columns contain <NA>, and the int64 casts below reject those. Real
+        # partitions have no NA in those columns, which is why the previous
+        # chained-assignment form never hit this.
+        meta = self._derive_columns(ddf._meta.copy())
+        return ddf.map_partitions(self._derive_columns, meta=meta)
+
+    @staticmethod
+    def _derive_columns(df: pd.DataFrame) -> pd.DataFrame:
+        """Row-local derivation of the extra metric columns, per partition."""
         # Derive `io_cat` columns
         for col in ['time', 'size', 'count']:
             for io_cat in list(IOCategory):
                 col_name = f"{io_cat.name.lower()}_{col}"
-                ddf[col_name] = 0.0 if col == 'time' else 0
-                ddf[col_name] = ddf[col_name].mask(ddf['io_cat'] == io_cat.value, ddf[col])
+                df[col_name] = 0.0 if col == 'time' else 0
+                df[col_name] = df[col_name].mask(df['io_cat'] == io_cat.value, df[col])
         for io_cat in list(IOCategory):
             min_name, max_name = (
                 f"{io_cat.name.lower()}_min",
                 f"{io_cat.name.lower()}_max",
             )
-            ddf[min_name] = 0
-            ddf[max_name] = 0
-            ddf[min_name] = ddf[min_name].mask(ddf['io_cat'] == io_cat.value, ddf['size_min'])
-            ddf[max_name] = ddf[max_name].mask(ddf['io_cat'] == io_cat.value, ddf['size_max'])
+            df[min_name] = 0
+            df[max_name] = 0
+            df[min_name] = df[min_name].mask(df['io_cat'] == io_cat.value, df['size_min'])
+            df[max_name] = df[max_name].mask(df['io_cat'] == io_cat.value, df['size_max'])
         # Derive `data` columns
-        ddf['data_count'] = ddf['write_count'] + ddf['read_count']
-        ddf['data_size'] = ddf['write_size'] + ddf['read_size']
-        ddf['data_time'] = ddf['write_time'] + ddf['read_time']
+        df['data_count'] = df['write_count'] + df['read_count']
+        df['data_size'] = df['write_size'] + df['read_size']
+        df['data_time'] = df['write_time'] + df['read_time']
         # Derive `acc_pat` columns
         for col_suffix, col_value in zip(ACC_PAT_SUFFIXES, ['data_time', 'data_size', 'data_count']):
             for acc_pat in list(AccessPattern):
                 col_name = f"{acc_pat.name.lower()}_{col_suffix}"
-                ddf[col_name] = 0.0 if col_suffix == 'time' else 0
-                ddf[col_name] = ddf[col_name].mask(ddf['acc_pat'] == acc_pat.value, ddf[col_value])
+                df[col_name] = 0.0 if col_suffix == 'time' else 0
+                df[col_name] = df[col_name].mask(df['acc_pat'] == acc_pat.value, df[col_value])
         # Derive metadata operation columns
         for col in ['time', 'count']:
             for md_op in DERIVED_MD_OPS:
                 col_name = f"{md_op}_{col}"
-                ddf[col_name] = 0.0 if col == 'time' else 0
+                df[col_name] = 0.0 if col == 'time' else 0
                 if md_op in ['close', 'open']:
-                    ddf[col_name] = ddf[col_name].mask(
-                        ddf['func_id'].str.contains(md_op) & ~ddf['func_id'].str.contains('dir'),
-                        ddf[col],
+                    df[col_name] = df[col_name].mask(
+                        df['func_id'].str.contains(md_op) & ~df['func_id'].str.contains('dir'),
+                        df[col],
                     )
                 else:
-                    ddf[col_name] = ddf[col_name].mask(ddf['func_id'].str.contains(md_op), ddf[col])
+                    df[col_name] = df[col_name].mask(df['func_id'].str.contains(md_op), df[col])
         # Cast columns to correct types
-        for col in ddf.columns:
+        for col in df.columns:
             if col.endswith('_size') or col.endswith('_count'):
-                ddf[col] = ddf[col].astype('int64')
+                df[col] = df[col].astype('int64')
             elif col.endswith('_time'):
-                ddf[col] = ddf[col].astype('float64')
-        # Return ddf
-        return ddf
+                df[col] = df[col].astype('float64')
+        # Return df
+        return df
 
     def _set_logical_columns(self, view: dd.DataFrame, view_types: List[ViewType]) -> dd.DataFrame:
         # Check if view types include `proc_name`
