@@ -155,6 +155,47 @@ def test_unavailable_reader_is_reported_rather_than_raised():
     )
 
 
+@pytest.mark.full
+def test_analysis_renders_findings_end_to_end():
+    """Drive a real trace through the form and check what comes out.
+
+    Everything above this asserts on source text or an empty form. This is the
+    only test that runs an analysis and looks at what the app actually shows,
+    which is where a rendering bug would otherwise hide.
+    """
+    from glob import glob
+
+    traces = sorted(glob('tests/data/extracted/dftracer-posix/*.pfw.gz'))
+    assert traces, 'fixture not extracted'
+    name = traces[0].rsplit('/', 1)[-1]
+
+    at = AppTest.from_file(APP, default_timeout=600).run()
+    at.file_uploader[0].set_value(
+        (name, open(traces[0], 'rb').read(), 'application/gzip')
+    )
+    # 1-second granularity, so the trace spans several time periods and the
+    # bottleneck path is actually reached.
+    at.slider[0].set_value(1)
+    at.button[0].click().run()
+
+    assert not at.exception, [str(e) for e in at.exception]
+
+    metrics = {metric.label: metric.value for metric in at.metric}
+    assert metrics['I/O Operations'] == '2,053'
+    assert metrics['Time Periods'] == '3'
+    # Granularity is set in seconds but the analyzer counts microseconds. When
+    # that conversion went missing every event landed in its own period, and
+    # this read 2,024.
+    assert metrics['Nodes'] == '1'
+    assert metrics['Apps'] == '1'
+
+    assert at.expander, 'no bottlenecks rendered'
+    label = at.expander[0].label
+    assert 'process' in label, label
+    # Score initials and a severity icon, not a raw dataframe.
+    assert any(icon in label for icon in ('🔴', '🟠', '🟡', '🟢', '⚪')), label
+
+
 def test_characteristics_the_app_reads_exist():
     """Every characteristic the app indexes must be a real rule key."""
     source = open(APP).read()
