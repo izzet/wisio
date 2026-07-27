@@ -31,7 +31,7 @@ def test_app_renders_without_exceptions():
     at = AppTest.from_file(APP, default_timeout=120).run()
 
     assert not at.exception, [str(e) for e in at.exception]
-    assert at.title[0].value == 'Welcome to WisIO Live'
+    assert at.title[0].value == 'Welcome to WisIO Web'
     assert any(b.label == 'Analyze' for b in at.button)
 
 

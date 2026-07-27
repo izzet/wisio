@@ -31,6 +31,13 @@ MAX_TOTAL_UPLOAD_MB = 16
 # Recorder reads Parquet through dask and needs no extra.
 ANALYZER_READERS = {'darshan': 'darshan', 'dftracer': 'dftracer'}
 
+XFER_SIZE_CAT_TYPE = pd.CategoricalDtype(categories=XFER_SIZE_BIN_LABELS, ordered=True)
+VIEW_TYPE_MAPPING = {
+    'File': 'file_name',
+    'Process': 'proc_name',
+    'Timeline': 'time_range',
+}
+
 
 def _reader_available(module_name: str) -> bool:
     """Whether a trace reader can actually be imported.
@@ -44,15 +51,9 @@ def _reader_available(module_name: str) -> bool:
     except Exception:
         return False
     return True
-XFER_SIZE_CAT_TYPE = pd.CategoricalDtype(categories=XFER_SIZE_BIN_LABELS, ordered=True)
-VIEW_TYPE_MAPPING = {
-    'File': 'file_name',
-    'Process': 'proc_name',
-    'Timeline': 'time_range',
-}
 
 st.set_page_config(
-    page_title="WisIO Live",
+    page_title="WisIO Web",
     layout="centered",
     menu_items={
         'About': 'https://grc.iit.edu/research/projects/wisio',
@@ -71,7 +72,7 @@ st.write(
 )
 
 st.image("assets/logo.png", width=200)
-st.title("Welcome to WisIO Live")
+st.title("Welcome to WisIO Web")
 st.markdown(
     """
     Analyze, visualize, and understand I/O performance issues in HPC workloads.
