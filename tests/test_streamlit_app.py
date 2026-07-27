@@ -31,7 +31,7 @@ def test_app_renders_without_exceptions():
     at = AppTest.from_file(APP, default_timeout=120).run()
 
     assert not at.exception, [str(e) for e in at.exception]
-    assert at.title[0].value == 'Welcome to WisIO Live'
+    assert at.title[0].value == 'Welcome to WisIO Web'
     assert any(b.label == 'Analyze' for b in at.button)
 
 
@@ -107,6 +107,52 @@ def test_cluster_is_pinned_for_constrained_hosting():
 
     assert 'cluster.n_workers={CLUSTER_N_WORKERS}' in source
     assert 'cluster.memory_limit={CLUSTER_MEMORY_LIMIT}' in source
+
+
+def test_requirements_file_covers_the_reader_extras():
+    """Community Cloud must not fall through to pyproject.toml.
+
+    Cloud takes the first of uv.lock, Pipfile, environment.yml,
+    requirements.txt and pyproject.toml. With no requirements.txt it installed
+    pyproject.toml with poetry, which resolves `[project.dependencies]` but not
+    `[project.optional-dependencies]` -- so no trace reader was installed and
+    the deployed app raised `ModuleNotFoundError: No module named 'dftracer'`
+    on the first analysis.
+    """
+    import tomllib
+
+    requirement = [
+        line.strip()
+        for line in open('requirements.txt')
+        if line.strip() and not line.startswith('#')
+    ]
+    assert len(requirement) == 1, requirement
+
+    with open('pyproject.toml', 'rb') as fh:
+        extras = set(tomllib.load(fh)['project']['optional-dependencies'])
+
+    declared = set(requirement[0].partition('[')[2].rstrip(']').split(','))
+    assert declared == extras, (
+        f"requirements.txt installs {sorted(declared)} but pyproject.toml "
+        f"defines {sorted(extras)}"
+    )
+
+
+def test_unavailable_reader_is_reported_rather_than_raised():
+    """Hydra builds analyzers from a `_target_` path.
+
+    A missing reader therefore surfaces as an InstantiationException traceback
+    in the browser. The app checks first so the user gets told which reader is
+    missing instead.
+    """
+    source = open(APP).read()
+
+    assert 'ANALYZER_READERS' in source
+    assert '_reader_available' in source
+    # The check must run before the analyzer is built, not after it throws.
+    assert source.index('_reader_available(reader)') < source.index(
+        'wis = init_with_hydra('
+    )
 
 
 def test_characteristics_the_app_reads_exist():

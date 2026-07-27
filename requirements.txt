@@ -1,0 +1,22 @@
+# Dependency file for Streamlit Community Cloud.
+#
+# Cloud picks the first of uv.lock, Pipfile, environment.yml, requirements.txt
+# and pyproject.toml. Without this file it finds pyproject.toml and installs it
+# with poetry, which resolves `[project.dependencies]` but *not*
+# `[project.optional-dependencies]` -- so the trace readers never arrive and the
+# app dies with `ModuleNotFoundError: No module named 'dftracer'` the moment
+# anyone hits Analyze.
+#
+# Installing the project itself keeps pyproject.toml the single source of truth
+# for versions, rather than duplicating the dependency list here where it would
+# drift.
+#
+# The deployment is pinned to Python 3.12 in the app's advanced settings on
+# share.streamlit.io, and needs to stay there: `darshan` only works where
+# pydarshan ships a CPython wheel, which today means 3.12 and earlier. On 3.13
+# pip installs a pure-python wheel with no libdarshan-util.so and the reader
+# raises at import. That setting lives in Streamlit's UI, not in this repo, so
+# this comment is the only record of why it is pinned -- raising the version
+# silently drops darshan support. The app reports the reader as unavailable
+# rather than failing with a traceback, so the symptom is recoverable either way.
+.[darshan,dftracer,web]

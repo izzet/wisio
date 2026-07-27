@@ -1,9 +1,11 @@
 import altair as alt
 import dask
+import importlib
 import shutil
 import streamlit as st
 import numpy as np
 import pandas as pd
+import sys
 import tempfile
 from wisio import init_with_hydra
 from wisio.constants import XFER_SIZE_BIN_LABELS
@@ -24,6 +26,11 @@ DEFAULT_TIME_GRANULARITY_IN_SECONDS = 5  # 5 seconds
 CLUSTER_N_WORKERS = 1
 CLUSTER_MEMORY_LIMIT = 1_500_000_000  # bytes; dask spills, pauses, then restarts
 MAX_TOTAL_UPLOAD_MB = 16
+
+# Third-party module each analyzer needs, for the pre-flight check below.
+# Recorder reads Parquet through dask and needs no extra.
+ANALYZER_READERS = {'darshan': 'darshan', 'dftracer': 'dftracer'}
+
 XFER_SIZE_CAT_TYPE = pd.CategoricalDtype(categories=XFER_SIZE_BIN_LABELS, ordered=True)
 VIEW_TYPE_MAPPING = {
     'File': 'file_name',
@@ -31,8 +38,22 @@ VIEW_TYPE_MAPPING = {
     'Timeline': 'time_range',
 }
 
+
+def _reader_available(module_name: str) -> bool:
+    """Whether a trace reader can actually be imported.
+
+    Not `find_spec`: pydarshan installs cleanly and then raises `RuntimeError`
+    at import when it cannot locate libdarshan-util.so, so the module has to be
+    imported to know whether it works.
+    """
+    try:
+        importlib.import_module(module_name)
+    except Exception:
+        return False
+    return True
+
 st.set_page_config(
-    page_title="WisIO Live",
+    page_title="WisIO Web",
     layout="centered",
     menu_items={
         'About': 'https://grc.iit.edu/research/projects/wisio',
@@ -51,7 +72,7 @@ st.write(
 )
 
 st.image("assets/logo.png", width=200)
-st.title("Welcome to WisIO Live")
+st.title("Welcome to WisIO Web")
 st.markdown(
     """
     Analyze, visualize, and understand I/O performance issues in HPC workloads.
@@ -131,6 +152,25 @@ if submit:
         analyzer = 'recorder'
     elif all(file.name.endswith('.pfw') or file.name.endswith('.pfw.gz') for file in trace_files):
         analyzer = 'dftracer'
+
+    # Hydra builds the analyzer from its `_target_` path, so a reader that is
+    # not installed surfaces as an InstantiationException traceback rather than
+    # anything a user can act on. Check first and say what is actually wrong.
+    reader = ANALYZER_READERS.get(analyzer)
+    if reader and not _reader_available(reader):
+        st.error(
+            f"This deployment cannot read {analyzer.title()} traces: the "
+            f"`{reader}` reader is unavailable."
+            + (
+                " pydarshan ships CPython wheels only up to 3.12, and this "
+                f"deployment runs Python {'.'.join(map(str, sys.version_info[:2]))}."
+                if analyzer == 'darshan'
+                else ""
+            )
+            + " Recorder and DFTracer traces work here, or run WisIO locally"
+            " with `pip install 'wisio[darshan]'`."
+        )
+        st.stop()
 
     with st.status("Analyzing trace files", expanded=True) as status:
         st.write(f"Detected analyzer type: {analyzer.title()}")
