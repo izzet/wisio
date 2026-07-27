@@ -30,7 +30,8 @@ def override_hydra_config():
 # Full test matrix for comprehensive testing
 full_analyzer_trace_params = [
     ("darshan", "tests/data/extracted/darshan-dxt"),
-    ("dftracer", "tests/data/extracted/dftracer-raw"),
+    ("dftracer", "tests/data/extracted/dftracer-posix"),
+    ("dftracer", "tests/data/extracted/dftracer-dlio"),
     ("recorder", "tests/data/extracted/recorder-parquet"),
 ]
 full_checkpoint_params = [True, False]
@@ -38,11 +39,11 @@ full_metric_params = ["time", "iops"]
 full_percentile_params = [0.95]
 
 # Reduced matrix for smoke testing (fast runs)
-# Pinned to dftracer rather than chosen at random: a random analyzer per run
-# means a failure or a slow run cannot be compared against the previous one.
-# dftracer is the path under active development and exercises the largest
-# fixture, so it is the most valuable single analyzer to smoke-test.
-smoke_analyzer_trace_params = [("dftracer", "tests/data/extracted/dftracer-raw")]
+# Pinned rather than chosen at random: a random analyzer per run means a failure
+# or a slow run cannot be compared against the previous one. dftracer is the
+# path under active development, and dftracer-posix is the smallest fixture of
+# the three, which keeps the smoke tier quick.
+smoke_analyzer_trace_params = [("dftracer", "tests/data/extracted/dftracer-posix")]
 smoke_checkpoint_params = [False]  # Skip checkpoint to make tests faster
 smoke_metric_params = ["time"]  # Most common metric
 smoke_percentile_params = [0.95]
