@@ -93,12 +93,21 @@ def test_upload_cap_is_declared_once():
     )
 
 
-def test_folder_upload_is_enabled():
-    """Traces arrive as directories, not single files."""
-    source = open(APP).read()
+def test_multiple_files_can_be_uploaded():
+    """A run is many files, so one-at-a-time is not enough.
 
-    assert 'accept_multiple_files="directory"' in source
-    # Directory uploads carry relative paths, so names must be sanitised.
+    Asserted against the rendered form rather than the source: setting
+    `accept_multiple_files="directory"` once replaced multi-file selection
+    instead of adding to it, and a source-text check could not see that.
+    """
+    at = AppTest.from_file(APP, default_timeout=120).run()
+
+    assert not at.exception, [str(e) for e in at.exception]
+    assert len(at.file_uploader) == 1, [u.label for u in at.file_uploader]
+
+    source = open(APP).read()
+    assert 'accept_multiple_files=True' in source
+    # Names are chosen elsewhere and decide where a file is written.
     assert 'safe_trace_filenames' in source
 
 
