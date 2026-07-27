@@ -1,0 +1,18 @@
+# Dependency file for Streamlit Community Cloud.
+#
+# Cloud picks the first of uv.lock, Pipfile, environment.yml, requirements.txt
+# and pyproject.toml. Without this file it finds pyproject.toml and installs it
+# with poetry, which resolves `[project.dependencies]` but *not*
+# `[project.optional-dependencies]` -- so the trace readers never arrive and the
+# app dies with `ModuleNotFoundError: No module named 'dftracer'` the moment
+# anyone hits Analyze.
+#
+# Installing the project itself keeps pyproject.toml the single source of truth
+# for versions, rather than duplicating the dependency list here where it would
+# drift.
+#
+# `darshan` only works where pydarshan ships a CPython wheel, which today means
+# 3.12 and earlier. Community Cloud defaults to a newer interpreter, so pin the
+# Python version to 3.12 in the app's advanced settings if you want the darshan
+# reader to work; the app reports the reader as unavailable otherwise.
+.[darshan,dftracer,web]
