@@ -1,6 +1,7 @@
 import altair as alt
 import dask
 import importlib
+import os
 import shutil
 import streamlit as st
 import numpy as np
@@ -8,6 +9,7 @@ import pandas as pd
 import sys
 import tempfile
 from bottleneck_report import describe_bottlenecks
+from uploads import safe_trace_filenames
 from wisio import init_with_hydra
 from wisio.constants import XFER_SIZE_BIN_LABELS
 from wisio.rules import KnownCharacteristics
@@ -16,17 +18,24 @@ from wisio.types import Characteristics, RawStats
 DEFAULT_THRESHOLD = 45
 DEFAULT_TIME_GRANULARITY_IN_SECONDS = 5  # 5 seconds
 
-# Sized for Streamlit Community Cloud, which guarantees ~1GB of memory and caps
-# at 2.7GB and 2 CPU cores. Measured against the test fixtures, the analyzer
-# costs a fixed ~620MB (imports plus the cluster) and roughly 100MB more per MB
-# of uploaded trace, so the headroom above the guaranteed floor is only a few MB
-# of trace. These keep an over-large upload a clear error rather than an OOM.
+# Sized for Streamlit Community Cloud, which caps at 2.7GB and 2 CPU cores.
+# Measured by replaying the dftracer fixture at increasing multiples: the
+# analyzer costs a fixed ~615MB (imports plus the cluster) and about 60MB more
+# per MB of trace. 7.4MB peaked at 1.0GB, 15MB at 1.7GB, 25MB at 2.3GB.
 #
-# Worker count dominates: the default fan-out peaked at 2.9GB on the dftracer
-# fixture against 955MB with a single worker, for about 20% more wall time.
+# 20MB therefore lands near 2.0GB, leaving headroom under the 2.7GB ceiling.
+# The worker limit has to clear that peak or dask kills the worker mid-run --
+# at 1.5GB a 15MB upload died with KilledWorker.
+#
+# Note this spends the burst headroom: ~1GB is what Community Cloud reliably
+# guarantees, so a large upload may be evicted under memory pressure. Wall time
+# is the other limit -- 25MB took 185s on 40 cores, and Cloud allows at most 2.
+#
+# Worker count dominates everything else: the default fan-out peaked at 2.9GB
+# on the dftracer fixture against 955MB with a single worker.
 CLUSTER_N_WORKERS = 1
-CLUSTER_MEMORY_LIMIT = 1_500_000_000  # bytes; dask spills, pauses, then restarts
-MAX_TOTAL_UPLOAD_MB = 16
+CLUSTER_MEMORY_LIMIT = 2_200_000_000  # bytes; dask spills, pauses, then restarts
+MAX_TOTAL_UPLOAD_MB = 20
 
 # Third-party module each analyzer needs, for the pre-flight check below.
 # Recorder reads Parquet through dask and needs no extra.
@@ -172,9 +181,19 @@ raw_stats: RawStats = {}
 
 with st.form('analysis_form'):
     trace_files = st.file_uploader(
-        "Upload a trace file",
+        "Upload trace files or a folder",
         type=["darshan", "parquet", "pfw", "pfw.gz"],
-        accept_multiple_files=True,
+        # Traces arrive as directories -- dftracer writes one file per rank,
+        # recorder writes a Parquet directory -- so let a folder be picked
+        # directly. `type` still filters, so unrelated files are left behind.
+        accept_multiple_files="directory",
+        # Per file, and authoritative over config.toml, which keeps the limit
+        # next to the total check below rather than in a separate file.
+        max_upload_size=MAX_TOTAL_UPLOAD_MB,
+        help=(
+            f"Up to {MAX_TOTAL_UPLOAD_MB} MB in total. Larger runs are better "
+            "analyzed locally with the `wisio` command."
+        ),
     )
 
     view_types = st.multiselect(
@@ -264,8 +283,11 @@ if submit:
         with tempfile.TemporaryDirectory() as temp_dir:
             st.write(f"Using temporary directory: {temp_dir}")
 
-            for trace_file in trace_files:
-                with open(f"{temp_dir}/{trace_file.name}", "wb") as temp_trace_file:
+            safe_names = safe_trace_filenames(
+                trace_file.name for trace_file in trace_files
+            )
+            for trace_file, safe_name in zip(trace_files, safe_names):
+                with open(os.path.join(temp_dir, safe_name), "wb") as temp_trace_file:
                     temp_trace_file.write(trace_file.getbuffer())
 
             wis = init_with_hydra(

@@ -6,6 +6,8 @@ import that only works on the main thread renders nothing at all, and the
 failure never shows up in the analyzer test suite.
 """
 
+import os
+
 import pytest
 
 streamlit = pytest.importorskip(
@@ -75,25 +77,29 @@ def test_process_and_file_counts_are_not_swapped():
     assert 'file_count' in file_line, file_line
 
 
-def test_upload_cap_matches_streamlit_config():
-    """The in-app total and `server.maxUploadSize` must not drift apart.
+def test_upload_cap_is_declared_once():
+    """The per-file cap and the total check must come from one constant.
 
-    `maxUploadSize` is enforced per file, so the app checks the total across a
-    submission separately. Two numbers meaning the same budget is exactly the
-    kind of pair that rots.
+    They used to be two numbers -- `server.maxUploadSize` in config.toml and
+    `MAX_TOTAL_UPLOAD_MB` in the app -- which is the kind of pair that drifts.
+    `max_upload_size` on the widget overrides the config file, so the config
+    file is gone and the constant is the single source.
     """
-    import re
-    import tomllib
-
-    with open('.streamlit/config.toml', 'rb') as fh:
-        configured = tomllib.load(fh)['server']['maxUploadSize']
-
     source = open(APP).read()
-    in_app = int(re.search(r'MAX_TOTAL_UPLOAD_MB\s*=\s*(\d+)', source).group(1))
 
-    assert in_app == configured, (
-        f"app allows {in_app} MB total but server.maxUploadSize is {configured} MB"
+    assert 'max_upload_size=MAX_TOTAL_UPLOAD_MB' in source
+    assert not os.path.exists('.streamlit/config.toml'), (
+        'config.toml is back; the cap is now set on the widget'
     )
+
+
+def test_folder_upload_is_enabled():
+    """Traces arrive as directories, not single files."""
+    source = open(APP).read()
+
+    assert 'accept_multiple_files="directory"' in source
+    # Directory uploads carry relative paths, so names must be sanitised.
+    assert 'safe_trace_filenames' in source
 
 
 def test_cluster_is_pinned_for_constrained_hosting():
