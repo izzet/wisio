@@ -54,9 +54,9 @@ class ScoringResult:
 
 @dataclass
 class RawStats:
-    job_time: dd.core.Scalar
+    job_time: "dd.Scalar"
     time_granularity: int
-    total_count: dd.core.Scalar
+    total_count: "dd.Scalar"
 
 
 @dataclass

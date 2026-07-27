@@ -1,6 +1,5 @@
 import pathlib
 import pytest
-import random
 from glob import glob
 from hydra import compose, initialize
 from hydra.core.hydra_config import HydraConfig
@@ -39,7 +38,11 @@ full_metric_params = ["time", "iops"]
 full_percentile_params = [0.95]
 
 # Reduced matrix for smoke testing (fast runs)
-smoke_analyzer_trace_params = [random.choice(full_analyzer_trace_params)]
+# Pinned to dftracer rather than chosen at random: a random analyzer per run
+# means a failure or a slow run cannot be compared against the previous one.
+# dftracer is the path under active development and exercises the largest
+# fixture, so it is the most valuable single analyzer to smoke-test.
+smoke_analyzer_trace_params = [("dftracer", "tests/data/extracted/dftracer-raw")]
 smoke_checkpoint_params = [False]  # Skip checkpoint to make tests faster
 smoke_metric_params = ["time"]  # Most common metric
 smoke_percentile_params = [0.95]

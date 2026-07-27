@@ -2,7 +2,7 @@ import dask.dataframe as dd
 import dataclasses
 import itertools as it
 import pandas as pd
-from dask import delayed, persist
+from dask import compute
 from scipy.cluster.hierarchy import linkage, fcluster
 from sklearn.preprocessing import StandardScaler
 from typing import Dict, List, Tuple, Union
@@ -123,18 +123,31 @@ class RuleEngine(object):
             if excluded_char in rule_dict:
                 rule_dict.pop(excluded_char)
 
-        tasks = {}
-        for rule, impl in rule_dict.items():
-            tasks[rule] = delayed(impl.handle_task_results)(
-                characteristics={dep: tasks[dep] for dep in impl.deps},
-                dask_key_name=f"characteristics-{rule}",
-                raw_stats=self.raw_stats,
-                result=impl.define_tasks(
-                    main_view=main_view, view_results=view_results
-                ),
-            )
+        # Build every rule's tasks first, then resolve them in a single
+        # `compute` so the rules still evaluate as one parallel graph.
+        #
+        # These used to be threaded through `delayed(handle_task_results)`, but
+        # dask-expr collections cannot be unpacked as delayed arguments -- a
+        # DataFrame, Series, Index or Scalar all raise NotImplementedError out
+        # of `Expr._divisions()`. `handle_task_results` already received fully
+        # computed values under the old wiring, and `Characteristics` is
+        # already declared as a dict of plain `RuleResult`, so resolving the
+        # tasks here matches the contract both sides were written against.
+        task_defs = {
+            rule: impl.define_tasks(main_view=main_view, view_results=view_results)
+            for rule, impl in rule_dict.items()
+        }
+        (task_results,) = compute(task_defs)
 
-        (characteristics,) = persist(tasks)
+        # `rules` above is declared in dependency order, so one pass is enough
+        # for each rule to see the results of the deps it names.
+        characteristics = {}
+        for rule, impl in rule_dict.items():
+            characteristics[rule] = impl.handle_task_results(
+                characteristics={dep: characteristics[dep] for dep in impl.deps},
+                raw_stats=self.raw_stats,
+                result=task_results[rule],
+            )
 
         return characteristics
 
@@ -142,7 +155,7 @@ class RuleEngine(object):
         self,
         evaluated_views: ScoringPerViewPerMetric,
         group_behavior: bool,
-        metric_boundaries: Dict[Metric, dd.core.Scalar],
+        metric_boundaries: Dict[Metric, "dd.Scalar"],
         exclude_bottlenecks: List[str] = [],
     ) -> Tuple[List[dict], Dict[str, BottleneckRule]]:
         rule_dict = {
@@ -155,16 +168,31 @@ class RuleEngine(object):
 
         bottlenecks = []
 
+        # dask-expr does not substitute dask collections passed as
+        # `map_partitions` keyword arguments -- the partition function receives
+        # the collection object itself, not its computed value.
+        # `_assign_bottlenecks` is written against concrete pandas objects, so
+        # resolve these to the types its signature already declares. Every
+        # boundary and record index is independent, so they are gathered as one
+        # graph rather than a blocking round-trip per view.
+        metric_boundary_values, records_index_values = compute(
+            {metric: metric_boundaries[metric] for metric in evaluated_views},
+            {
+                (metric, view_key): evaluated_views[metric][view_key].records_index
+                for metric in evaluated_views
+                for view_key in evaluated_views[metric]
+            },
+        )
+
         for metric in evaluated_views:
             for view_key in evaluated_views[metric]:
                 scored_view = evaluated_views[metric][view_key].scored_view
-                records_index = evaluated_views[metric][view_key].records_index
                 bottlenecks.append(
                     scored_view.map_partitions(
                         self._assign_bottlenecks,
                         metric=metric,
-                        metric_boundary=metric_boundaries[metric],
-                        records_index=records_index,
+                        metric_boundary=metric_boundary_values[metric],
+                        records_index=records_index_values[(metric, view_key)],
                         rule_dict=rule_dict,
                         view_key=view_key,
                     )
@@ -295,7 +323,7 @@ class RuleEngine(object):
     def _define_bottleneck_tasks(
         zipped: Tuple[str, str, ViewKey, ScoringResult],
         rules: Dict[str, BottleneckRule],
-        metric_boundaries: Dict[Metric, dd.core.Scalar],
+        metric_boundaries: Dict[Metric, "dd.Scalar"],
     ):
         rule, metric, view_key, scoring_result = zipped
         rule_impl = rules[rule]

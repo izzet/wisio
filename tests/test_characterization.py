@@ -68,7 +68,22 @@ def _bottlenecks(tmp_path):
     return pd.read_parquet(f"{tmp_path}/bottlenecks")
 
 
+def _darshan_available():
+    """pydarshan raises RuntimeError, not ImportError, without its native lib."""
+    try:
+        import darshan  # noqa: F401
+    except Exception:
+        return False
+    return True
+
+
+requires_darshan = pytest.mark.skipif(
+    not _darshan_available(), reason="requires a working [darshan] extra"
+)
+
+
 @pytest.mark.full
+@requires_darshan
 class TestDarshanDxtCharacterization:
     """DXT path: tests/data/darshan-dxt (unet3d_a100.darshan)."""
 
@@ -111,6 +126,7 @@ class TestRecorderCharacterization:
 
 
 @pytest.mark.full
+@requires_darshan
 class TestDarshanNonDxtCharacterization:
     """Non-DXT path: tests/data/darshan-raw (multiple .darshan reports).
 

@@ -13,9 +13,11 @@ jobs:
       fail-fast: false
       matrix:
         os: ["ubuntu-22.04", "ubuntu-24.04"]
-        python: ["3.8", "3.9", "3.10"]
+        python: ["3.10", "3.11", "3.12", "3.13"]
     name: ${{ matrix.python }}-${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    env:
+      ARROW_VERSION: 25.0.0-1
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -31,15 +33,18 @@ jobs:
           wget https://apache.jfrog.io/artifactory/arrow/$(lsb_release --id --short | tr 'A-Z' 'a-z')/apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
           sudo apt install -y ./apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
           sudo apt update
+          # Pinned for the same reason as ci.yml -- the apt source is "latest",
+          # so unpinned Arrow rolls forward and can break the build without any
+          # change on our side. Bump deliberately, together with pyarrow.
           sudo apt install -y \
             build-essential \
             cmake \
             git \
-            libarrow-dev \
+            libarrow-dev=${{ env.ARROW_VERSION }} \
             libhdf5-dev \
             libncurses-dev \
             libopenmpi-dev \
-            libparquet-dev \
+            libparquet-dev=${{ env.ARROW_VERSION }} \
             libreadline-dev \
             ninja-build \
             nlohmann-json3-dev \

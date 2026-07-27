@@ -1,6 +1,3 @@
-from dask_jobqueue.lsf import LSFCluster
-from dask_jobqueue.pbs import PBSCluster
-from dask_jobqueue.slurm import SLURMCluster
 from dataclasses import dataclass
 from distributed import Client, LocalCluster
 from hydra import compose, initialize
@@ -20,21 +17,40 @@ from .types import ViewType
 # darshan and recorder analysis has no dependency on the dftracer reader, and
 # vice versa. Hydra still resolves the real class by `_target_` path, so asking
 # for an unavailable analyzer fails at instantiation with the underlying error.
-# `ImportError` rather than `ModuleNotFoundError`: an extra can be installed yet
-# unimportable (zindex_py 0.0.5 ships a wheel containing only metadata, and a
-# half-built native extension raises plain ImportError).
+# `Exception` rather than `ImportError`: an extra can be installed yet fail on
+# import in ways that are not import errors at all. zindex_py 0.0.5 shipped a
+# wheel containing only metadata (ImportError), while pydarshan raises a plain
+# `RuntimeError` when it cannot locate libdarshan-util.so -- which is what
+# happens on Python 3.13, where it falls back to a pure-python `py3-none-any`
+# wheel with no bundled native library. Narrowing this to ImportError means one
+# broken optional reader takes down the entire package.
 try:
     from .darshan import DarshanAnalyzer
-except ImportError:
+except Exception:
     DarshanAnalyzer = Analyzer
 
 try:
     from .dftracer import DFTracerAnalyzer
-except ImportError:
+except Exception:
     DFTracerAnalyzer = Analyzer
 
 AnalyzerType = Union[DarshanAnalyzer, DFTracerAnalyzer, RecorderAnalyzer]
-ClusterType = Union[LocalCluster, LSFCluster, PBSCluster, SLURMCluster]
+
+# The HPC cluster backends are only ever built by Hydra through their `_target_`
+# path, so importing them here buys nothing but a typing alias -- and it costs a
+# lot. `dask_jobqueue.runner` installs a SIGINT handler at import time, and
+# `signal.signal` raises outside the main thread. Streamlit runs app scripts on
+# a ScriptRunner thread, so importing them eagerly made `import wisio` fail
+# there, taking the whole app down. Degrade the alias instead of the package.
+try:
+    from dask_jobqueue.lsf import LSFCluster
+    from dask_jobqueue.pbs import PBSCluster
+    from dask_jobqueue.slurm import SLURMCluster
+
+    ClusterType = Union[LocalCluster, LSFCluster, PBSCluster, SLURMCluster]
+except Exception:
+    ClusterType = LocalCluster
+
 OutputType = Union[ConsoleOutput, CSVOutput, SQLiteOutput]
 
 

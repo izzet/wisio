@@ -9,6 +9,7 @@ import json
 import logging
 import math
 import os
+import pandas as pd
 from dask.base import compute, unpack_collections
 from dask.delayed import Delayed
 from dask.distributed import fire_and_forget, get_client, wait
@@ -44,7 +45,7 @@ from .types import (
     ViewResult,
     ViewType,
 )
-from .utils.dask_utils import EventLogger, flatten_column_names
+from .utils.dask_utils import EventLogger, flatten_column_names, repartition_to_size
 from .utils.file_utils import ensure_dir
 from .utils.json_encoders import NpEncoder
 
@@ -327,8 +328,8 @@ class Analyzer(abc.ABC):
             .agg(HLM_AGG, split_out=math.ceil(math.sqrt(traces.npartitions)))
             .persist()
             .reset_index()
-            .repartition(partition_size=partition_size)
         )
+        hlm = repartition_to_size(hlm, partition_size)
         hlm = flatten_column_names(hlm)
         return hlm.rename(columns=HLM_COLS).persist()
 
@@ -363,8 +364,8 @@ class Analyzer(abc.ABC):
             hlm.groupby(list(view_types))
             .agg(hlm_agg, split_out=hlm.npartitions)
             .persist()
-            .repartition(partition_size=partition_size)
         )
+        main_view = repartition_to_size(main_view, partition_size)
         # main_view = hlm \
         #     .drop(columns=EXTRA_COLS) \
         #     .groupby(view_types) \
@@ -382,7 +383,7 @@ class Analyzer(abc.ABC):
         main_view: dd.DataFrame,
         metrics: List[Metric],
         view_types: List[ViewType],
-    ) -> Dict[Metric, dd.core.Scalar]:
+    ) -> Dict[Metric, "dd.Scalar"]:
         """Computes the upper boundary for each specified metric.
 
         For metrics like 'iops' or 'time', it calculates the maximum time
@@ -414,7 +415,7 @@ class Analyzer(abc.ABC):
         self,
         main_view: dd.DataFrame,
         metrics: List[Metric],
-        metric_boundaries: Dict[Metric, dd.core.Scalar],
+        metric_boundaries: Dict[Metric, "dd.Scalar"],
         percentile: Optional[float],
         threshold: Optional[int],
         view_types: List[ViewType],
@@ -438,38 +439,66 @@ class Analyzer(abc.ABC):
             mapping ViewKey to ViewResult.
         """
         # Keep view results
-        view_results = {}
+        view_results = {metric: {} for metric in metrics}
 
-        # Compute multifaceted views for each metric
-        for metric in metrics:
-            view_results[metric] = {}
+        # `view_permutations` yields keys grouped by increasing length, and a
+        # view of length n depends only on its parent of length n-1. So each
+        # length is resolved as one batch: every (metric, view_key) in it is
+        # independent given the previous one, and their critical indices are
+        # gathered in a single `compute` rather than one round-trip per view.
+        for _, view_keys in it.groupby(
+            self.view_permutations(view_types=view_types), key=len
+        ):
+            pending = []
 
-            for view_key in self.view_permutations(view_types=view_types):
+            for view_key in list(view_keys):
                 view_type = view_key[-1]
                 parent_view_key = view_key[:-1]
 
-                parent_view_result = view_results[metric].get(parent_view_key, None)
-                parent_records = main_view if parent_view_result is None else parent_view_result.records
+                for metric in metrics:
+                    parent_view_result = view_results[metric].get(parent_view_key, None)
+                    parent_records = main_view if parent_view_result is None else parent_view_result.records
 
-                view_result = self.compute_view(
-                    metrics=metrics,
+                    view, critical_view = self.build_view(
+                        metrics=metrics,
+                        metric=metric,
+                        metric_boundary=metric_boundaries[metric],
+                        percentile=percentile,
+                        records=parent_records,
+                        threshold=threshold,
+                        view_key=view_key,
+                        view_type=view_type,
+                    )
+
+                    pending.append(
+                        (metric, view_key, view_type, parent_records, view, critical_view)
+                    )
+
+            if not pending:
+                continue
+
+            (all_indices,) = compute(
+                [critical_view.index.unique() for *_, critical_view in pending]
+            )
+
+            for (metric, view_key, view_type, parent_records, view, critical_view), indices in zip(
+                pending, all_indices
+            ):
+                view_results[metric][view_key] = self.finish_view(
+                    critical_view=critical_view,
+                    indices=indices,
                     metric=metric,
-                    metric_boundary=metric_boundaries[metric],
-                    percentile=percentile,
                     records=parent_records,
-                    threshold=threshold,
-                    view_key=view_key,
+                    view=view,
                     view_type=view_type,
                 )
-
-                view_results[metric][view_key] = view_result
 
         return view_results
 
     def compute_logical_views(
         self,
         main_view: dd.DataFrame,
-        metric_boundaries: Dict[Metric, dd.core.Scalar],
+        metric_boundaries: Dict[Metric, "dd.Scalar"],
         metrics: List[Metric],
         percentile: Optional[float],
         threshold: Optional[int],
@@ -493,6 +522,10 @@ class Analyzer(abc.ABC):
         Returns:
             The updated view_results dictionary including the computed logical views.
         """
+        # Every logical view hangs off an already-computed base view and none
+        # depend on each other, so the whole set resolves in one `compute`.
+        pending = []
+
         for metric in metrics:
             for view_key in LOGICAL_VIEW_TYPES:
                 view_type = view_key[-1]
@@ -511,7 +544,7 @@ class Analyzer(abc.ABC):
                         view_types=[parent_view_type],
                     )
 
-                view_result = self.compute_view(
+                view, critical_view = self.build_view(
                     metrics=metrics,
                     metric=metric,
                     metric_boundary=metric_boundaries[metric],
@@ -522,7 +555,28 @@ class Analyzer(abc.ABC):
                     view_type=view_type,
                 )
 
-                view_results[metric][view_key] = view_result
+                pending.append(
+                    (metric, view_key, view_type, parent_records, view, critical_view)
+                )
+
+        if not pending:
+            return view_results
+
+        (all_indices,) = compute(
+            [critical_view.index.unique() for *_, critical_view in pending]
+        )
+
+        for (metric, view_key, view_type, parent_records, view, critical_view), indices in zip(
+            pending, all_indices
+        ):
+            view_results[metric][view_key] = self.finish_view(
+                critical_view=critical_view,
+                indices=indices,
+                metric=metric,
+                records=parent_records,
+                view=view,
+                view_type=view_type,
+            )
 
         return view_results
 
@@ -530,7 +584,7 @@ class Analyzer(abc.ABC):
         self,
         metrics: List[Metric],
         metric: Metric,
-        metric_boundary: dd.core.Scalar,
+        metric_boundary: "dd.Scalar",
         percentile: Optional[float],
         records: dd.DataFrame,
         threshold: Optional[int],
@@ -556,6 +610,58 @@ class Analyzer(abc.ABC):
             A ViewResult object containing the computed view, critical items,
             and filtered records.
         """
+        view, critical_view = self.build_view(
+            metrics=metrics,
+            metric=metric,
+            metric_boundary=metric_boundary,
+            percentile=percentile,
+            records=records,
+            threshold=threshold,
+            view_key=view_key,
+            view_type=view_type,
+        )
+
+        (indices,) = compute(critical_view.index.unique())
+
+        return self.finish_view(
+            critical_view=critical_view,
+            indices=indices,
+            metric=metric,
+            records=records,
+            view=view,
+            view_type=view_type,
+        )
+
+    def build_view(
+        self,
+        metrics: List[Metric],
+        metric: Metric,
+        metric_boundary: "dd.Scalar",
+        percentile: Optional[float],
+        records: dd.DataFrame,
+        threshold: Optional[int],
+        view_key: ViewKey,
+        view_type: str,
+    ) -> Tuple[dd.DataFrame, dd.DataFrame]:
+        """Builds the lazy half of a view: the view and its critical subset.
+
+        Nothing is computed here. Splitting this off lets callers resolve the
+        critical indices of many independent views in a single `compute`
+        instead of one blocking round-trip each -- see `compute_views`.
+
+        Args:
+            metrics: The list of all metrics being analyzed.
+            metric: The specific metric for this view.
+            metric_boundary: The precomputed boundary for the current metric.
+            percentile: The percentile to identify critical items.
+            records: The Dask DataFrame (parent records) to compute the view from.
+            threshold: The threshold for slope-based critical item identification.
+            view_key: The key identifying this specific view.
+            view_type: The primary dimension/column for this view.
+
+        Returns:
+            A tuple of the (still lazy) view and its critical view.
+        """
         # Restore view
         view = self.restore_view(
             name=self.get_checkpoint_name(CHECKPOINT_VIEW, metric, *list(view_key)),
@@ -577,8 +683,36 @@ class Analyzer(abc.ABC):
             threshold=threshold,
         )
 
-        indices = critical_view.index.unique()
+        return view, critical_view
 
+    @staticmethod
+    def finish_view(
+        critical_view: dd.DataFrame,
+        indices,
+        metric: Metric,
+        records: dd.DataFrame,
+        view: dd.DataFrame,
+        view_type: str,
+    ) -> ViewResult:
+        """Applies an already-resolved critical index to the parent records.
+
+        `indices` must be concrete. dask-expr derives a `query`'s meta by
+        running the predicate against an empty frame, and pandas' `isin` calls
+        `list()` on the operand -- so a lazy operand would be computed during
+        graph construction, once per view level.
+
+        Args:
+            critical_view: The critical view this index came from.
+            indices: The resolved critical index values.
+            metric: The specific metric for this view.
+            records: The parent records to filter.
+            view: The computed view.
+            view_type: The primary dimension/column for this view.
+
+        Returns:
+            A ViewResult object containing the computed view, critical items,
+            and filtered records.
+        """
         # Find filtered records
         records = records.query(f"{view_type} in @indices", local_dict={'indices': indices}).persist()
 
@@ -712,7 +846,7 @@ class Analyzer(abc.ABC):
         Returns:
             The result of the Dask `to_parquet` operation (typically None or a Dask future).
         """
-        return bottlenecks.repartition(partition_size=partition_size).to_parquet(
+        return repartition_to_size(bottlenecks, partition_size).to_parquet(
             self.bottleneck_dir, compute=True, write_metadata_file=True
         )
 
@@ -744,7 +878,7 @@ class Analyzer(abc.ABC):
         Returns:
             The result of the Dask `to_parquet` operation.
         """
-        return view.repartition(partition_size=partition_size).to_parquet(
+        return repartition_to_size(view, partition_size).to_parquet(
             self.get_checkpoint_path(name=name),
             compute=compute,
             write_metadata_file=True,
@@ -885,7 +1019,7 @@ class Analyzer(abc.ABC):
         view_type: str,
         metrics: List[Metric],
         metric: Metric,
-        metric_boundary: dd.core.Scalar,
+        metric_boundary: "dd.Scalar",
     ) -> dd.DataFrame:
         view_types = records.index._meta.names
 
@@ -954,7 +1088,7 @@ class Analyzer(abc.ABC):
         self,
         main_view: dd.DataFrame,
         metrics: List[Metric],
-        metric_boundaries: Dict[Metric, dd.core.Scalar],
+        metric_boundaries: Dict[Metric, "dd.Scalar"],
         view_results: Dict[Metric, Dict[ViewKey, ViewResult]],
         is_slope_based: bool,
         raw_stats: RawStats,
@@ -1009,52 +1143,78 @@ class Analyzer(abc.ABC):
 
         return evaluated_views, bottlenecks, bottleneck_rules, characteristics
 
-    def _set_derived_columns(self, ddf: dd.DataFrame):
+    def _set_derived_columns(self, ddf: dd.DataFrame) -> dd.DataFrame:
+        """Adds the derived io_cat, acc_pat and metadata-operation columns.
+
+        Applied through `map_partitions` rather than as chained assignments on
+        the Dask frame. The logic is row-local, so the result is identical, but
+        under dask-expr each assignment adds a node to the expression tree and
+        the optimizer then re-walks that tree: profiling the main view showed
+        `simplify_once` called 13,655 times, and `.persist()` taking 6.75s
+        against 0.17s on dask 2023.4. One `map_partitions` is one node.
+
+        Args:
+            ddf: The high-level metrics Dask DataFrame.
+
+        Returns:
+            The same frame with the derived columns added.
+        """
+        # Derive the meta from the empty frame and pass it explicitly. Left to
+        # infer, dask emulates on a synthetic *non-empty* frame whose nullable
+        # columns contain <NA>, and the int64 casts below reject those. Real
+        # partitions have no NA in those columns, which is why the previous
+        # chained-assignment form never hit this.
+        meta = self._derive_columns(ddf._meta.copy())
+        return ddf.map_partitions(self._derive_columns, meta=meta)
+
+    @staticmethod
+    def _derive_columns(df: pd.DataFrame) -> pd.DataFrame:
+        """Row-local derivation of the extra metric columns, per partition."""
         # Derive `io_cat` columns
         for col in ['time', 'size', 'count']:
             for io_cat in list(IOCategory):
                 col_name = f"{io_cat.name.lower()}_{col}"
-                ddf[col_name] = 0.0 if col == 'time' else 0
-                ddf[col_name] = ddf[col_name].mask(ddf['io_cat'] == io_cat.value, ddf[col])
+                df[col_name] = 0.0 if col == 'time' else 0
+                df[col_name] = df[col_name].mask(df['io_cat'] == io_cat.value, df[col])
         for io_cat in list(IOCategory):
             min_name, max_name = (
                 f"{io_cat.name.lower()}_min",
                 f"{io_cat.name.lower()}_max",
             )
-            ddf[min_name] = 0
-            ddf[max_name] = 0
-            ddf[min_name] = ddf[min_name].mask(ddf['io_cat'] == io_cat.value, ddf['size_min'])
-            ddf[max_name] = ddf[max_name].mask(ddf['io_cat'] == io_cat.value, ddf['size_max'])
+            df[min_name] = 0
+            df[max_name] = 0
+            df[min_name] = df[min_name].mask(df['io_cat'] == io_cat.value, df['size_min'])
+            df[max_name] = df[max_name].mask(df['io_cat'] == io_cat.value, df['size_max'])
         # Derive `data` columns
-        ddf['data_count'] = ddf['write_count'] + ddf['read_count']
-        ddf['data_size'] = ddf['write_size'] + ddf['read_size']
-        ddf['data_time'] = ddf['write_time'] + ddf['read_time']
+        df['data_count'] = df['write_count'] + df['read_count']
+        df['data_size'] = df['write_size'] + df['read_size']
+        df['data_time'] = df['write_time'] + df['read_time']
         # Derive `acc_pat` columns
         for col_suffix, col_value in zip(ACC_PAT_SUFFIXES, ['data_time', 'data_size', 'data_count']):
             for acc_pat in list(AccessPattern):
                 col_name = f"{acc_pat.name.lower()}_{col_suffix}"
-                ddf[col_name] = 0.0 if col_suffix == 'time' else 0
-                ddf[col_name] = ddf[col_name].mask(ddf['acc_pat'] == acc_pat.value, ddf[col_value])
+                df[col_name] = 0.0 if col_suffix == 'time' else 0
+                df[col_name] = df[col_name].mask(df['acc_pat'] == acc_pat.value, df[col_value])
         # Derive metadata operation columns
         for col in ['time', 'count']:
             for md_op in DERIVED_MD_OPS:
                 col_name = f"{md_op}_{col}"
-                ddf[col_name] = 0.0 if col == 'time' else 0
+                df[col_name] = 0.0 if col == 'time' else 0
                 if md_op in ['close', 'open']:
-                    ddf[col_name] = ddf[col_name].mask(
-                        ddf['func_id'].str.contains(md_op) & ~ddf['func_id'].str.contains('dir'),
-                        ddf[col],
+                    df[col_name] = df[col_name].mask(
+                        df['func_id'].str.contains(md_op) & ~df['func_id'].str.contains('dir'),
+                        df[col],
                     )
                 else:
-                    ddf[col_name] = ddf[col_name].mask(ddf['func_id'].str.contains(md_op), ddf[col])
+                    df[col_name] = df[col_name].mask(df['func_id'].str.contains(md_op), df[col])
         # Cast columns to correct types
-        for col in ddf.columns:
+        for col in df.columns:
             if col.endswith('_size') or col.endswith('_count'):
-                ddf[col] = ddf[col].astype('int64')
+                df[col] = df[col].astype('int64')
             elif col.endswith('_time'):
-                ddf[col] = ddf[col].astype('float64')
-        # Return ddf
-        return ddf
+                df[col] = df[col].astype('float64')
+        # Return df
+        return df
 
     def _set_logical_columns(self, view: dd.DataFrame, view_types: List[ViewType]) -> dd.DataFrame:
         # Check if view types include `proc_name`

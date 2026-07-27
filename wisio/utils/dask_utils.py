@@ -1,5 +1,8 @@
 import logging
+import math
 import dask.dataframe as dd
+from dask.base import compute
+from dask.utils import parse_bytes
 from distributed import get_client
 from .logger import ElapsedTimeLogger
 
@@ -27,3 +30,30 @@ class EventLogger(ElapsedTimeLogger):
 def flatten_column_names(ddf: dd.DataFrame):
     ddf.columns = ['_'.join(tup).rstrip('_') for tup in ddf.columns.values]
     return ddf
+
+
+def repartition_to_size(ddf: dd.DataFrame, partition_size: str) -> dd.DataFrame:
+    """Repartitions so each partition holds roughly `partition_size` of data.
+
+    Equivalent in intent to `ddf.repartition(partition_size=...)`, but measures
+    the frame here instead of letting dask do it inside the query optimizer.
+    dask-expr defers that measurement until the expression is lowered, which
+    happens during graph construction -- `to_parquet` asks for
+    `known_divisions`, that lowers the repartition, and the lowering computes
+    memory usage while the graph is still being built. On Python 3.10 and 3.11
+    that nested compute deadlocks outright; on 3.12 it merely costs several
+    times what an explicit measurement does.
+
+    The measurement itself is the same work dask would have done, just hoisted
+    out of the optimizer, so this is not an extra pass over the data.
+
+    Args:
+        ddf: The Dask DataFrame to repartition.
+        partition_size: Target size per partition, e.g. '256MB'.
+
+    Returns:
+        The repartitioned Dask DataFrame.
+    """
+    (total_bytes,) = compute(ddf.memory_usage(deep=True).sum())
+    npartitions = max(1, math.ceil(int(total_bytes) / parse_bytes(partition_size)))
+    return ddf.repartition(npartitions=npartitions)

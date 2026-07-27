@@ -68,6 +68,36 @@ def test_guard_catches_importerror_not_just_modulenotfounderror(monkeypatch):
     assert wisio.DFTracerAnalyzer is wisio.Analyzer
 
 
+@pytest.mark.parametrize('blocked', [['dftracer'], ['darshan']])
+def test_guard_catches_non_import_errors(monkeypatch, blocked):
+    """An installed extra can fail on import without raising ImportError.
+
+    pydarshan raises `RuntimeError` when it cannot find libdarshan-util.so,
+    which is what happens on Python 3.13 -- it has no cp313 wheel, so pip
+    installs a pure-python one with no bundled native library. Guarding only
+    ImportError there makes `import wisio` fail outright.
+    """
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name in blocked or name.split('.')[0] in blocked:
+            raise RuntimeError(f"broken native library for test: {name}")
+        return real_import(name, *args, **kwargs)
+
+    for mod in list(sys.modules):
+        if mod == 'wisio' or mod.startswith('wisio.'):
+            monkeypatch.delitem(sys.modules, mod, raising=False)
+    for mod in blocked:
+        monkeypatch.delitem(sys.modules, mod, raising=False)
+    monkeypatch.setattr(builtins, '__import__', fake_import)
+
+    wisio = importlib.import_module('wisio')
+
+    assert wisio.RecorderAnalyzer.__name__ == 'RecorderAnalyzer'
+    attr = 'DFTracerAnalyzer' if blocked == ['dftracer'] else 'DarshanAnalyzer'
+    assert getattr(wisio, attr) is wisio.Analyzer
+
+
 def test_cli_entry_point_imports_in_clean_subprocess():
     """End-to-end: `python -c 'import wisio'` must not depend on extras.
 

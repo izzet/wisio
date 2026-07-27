@@ -20,13 +20,14 @@ jobs:
       fail-fast: false
       matrix:
         os: ["ubuntu-22.04"]
-        python: ["3.8", "3.9", "3.10"]
+        python: ["3.10", "3.11", "3.12", "3.13"]
     name: ${{ matrix.os }}-${{ matrix.python }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
       OMPI_ALLOW_RUN_AS_ROOT: 1
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
+      ARROW_VERSION: 25.0.0-1
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -49,15 +50,20 @@ jobs:
           wget https://apache.jfrog.io/artifactory/arrow/$(lsb_release --id --short | tr 'A-Z' 'a-z')/apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
           sudo apt install -y ./apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
           sudo apt update
+          # Arrow is pinned. The apt source above is "latest", so leaving these
+          # unpinned lets Arrow roll forward on its own -- which is exactly how
+          # the build broke in #4, when its headers started requiring C++20. A
+          # stale pin fails loudly ("Version ... was not found") instead of as a
+          # wall of compiler errors. Bump deliberately, together with pyarrow.
           sudo apt install -y \
             build-essential \
             cmake \
             git \
-            libarrow-dev \
+            libarrow-dev=${{ env.ARROW_VERSION }} \
             libhdf5-dev \
             libncurses-dev \
             libopenmpi-dev \
-            libparquet-dev \
+            libparquet-dev=${{ env.ARROW_VERSION }} \
             libreadline-dev \
             ninja-build \
             nlohmann-json3-dev \
@@ -112,15 +118,24 @@ jobs:
 
       - name: Run WisIO
         run: |
-          wisio +analyzer=darshan percentile=0.99 trace_path=tests/data/extracted/darshan-raw view_types=[file_name,proc_name] metrics=[time]
-          wisio +analyzer=darshan percentile=0.99 trace_path=tests/data/extracted/darshan-dxt
+          # pydarshan publishes CPython wheels only up to cp312. On 3.13 pip
+          # falls back to a pure-python wheel with no bundled
+          # libdarshan-util.so, so the darshan reader cannot run there. The
+          # pytest suite skips the same way; this keeps the rest of the matrix
+          # exercising darshan rather than dropping 3.13 entirely.
+          if python -c "import darshan" >/dev/null 2>&1; then
+            wisio +analyzer=darshan percentile=0.99 trace_path=tests/data/extracted/darshan-raw view_types=[file_name,proc_name] metrics=[time]
+            wisio +analyzer=darshan percentile=0.99 trace_path=tests/data/extracted/darshan-dxt
+          else
+            echo "Skipping darshan analyzers: no working [darshan] extra on $(python -V)"
+          fi
           wisio +analyzer=dftracer percentile=0.99 trace_path=tests/data/extracted/dftracer-raw
           wisio +analyzer=recorder percentile=0.99 trace_path=tests/data/extracted/recorder-parquet
 
       - name: Upload test coverage
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v5
         with:
-          file: ./coverage.xml
+          files: ./coverage.xml
           fail_ci_if_error: false
 
       - name: Upload test artifacts
