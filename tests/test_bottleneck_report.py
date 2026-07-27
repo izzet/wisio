@@ -128,6 +128,39 @@ def test_all_permutations_leaves_no_views(rules):
     )
 
 
+def test_ratio_is_carried_and_stated_for_iops(rules):
+    """Severity is scored on cost per operation, so the finding must say so.
+
+    Without this a critical finding worth 0.0% of I/O time reads like a
+    mislabel: the number that justifies the score is the ratio, not the share.
+    """
+    views = describe_bottlenecks(
+        _frame([_row('file_name', iops_slope=0.1)]), rules, metric=METRIC
+    )
+
+    bottleneck = views[0].bottlenecks[0]
+    assert bottleneck.ops_time_ratio == pytest.approx(10.0)
+    assert '10.0x as much of the I/O time' in bottleneck.description
+
+
+def test_break_even_ratio_is_left_unsaid(rules):
+    """At ~1x the clause would round to '1.0x', which explains nothing."""
+    views = describe_bottlenecks(
+        _frame([_row('file_name', iops_slope=0.99)]), rules, metric=METRIC
+    )
+
+    assert 'as much of the I/O time' not in views[0].bottlenecks[0].description
+
+
+def test_ratio_is_absent_for_non_slope_metrics(rules):
+    """For `time` the slope is already a fraction and the sentence states it."""
+    views = describe_bottlenecks(
+        _frame([_row('file_name', time_slope=0.1)]), rules, metric='time'
+    )
+
+    assert views[0].bottlenecks[0].ops_time_ratio is None
+
+
 def test_counts_are_carried_alongside_the_sentence(rules):
     """A renderer should not have to parse numbers back out of the prose."""
     views = describe_bottlenecks(

@@ -398,6 +398,7 @@ class BottleneckRule(RuleHandler):
         processes=[],
         time_periods=[],
         compact=False,
+        ops_time_ratio: float = None,
     ) -> str:
         if num_files > 0 and num_processes > 0 and num_time_periods > 0:
             nice_view_type = HUMANIZED_VIEW_TYPES[COL_PROC_NAME].lower()
@@ -463,6 +464,19 @@ class BottleneckRule(RuleHandler):
                 f"{self.pluralize.plural_verb('has', count)} an I/O time of {time:.2f} seconds "
                 f"across {num_ops:,} I/O {self.pluralize.plural_noun('operation', num_ops)} "
                 f"which is {time_overall * 100:.2f}% of overall I/O time of the workload."
+            )
+
+        # Under slope-based scoring the severity comes from cost per operation,
+        # not from absolute time -- so a finding worth 0.0% of I/O time can
+        # still rank critical, and the description has to say why. This is the
+        # reciprocal of the slope: the share of I/O time over the share of
+        # operations.
+        # Below ~1.05 the finding is at break-even (tan(45deg) on the slope
+        # scale) and the clause would round to "1.0x", which says nothing.
+        if ops_time_ratio is not None and ops_time_ratio >= 1.05:
+            description += (
+                f" It takes {ops_time_ratio:,.1f}x as much of the I/O time as "
+                f"its share of operations."
             )
 
         return description

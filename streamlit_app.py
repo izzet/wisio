@@ -62,6 +62,10 @@ def _render_bottleneck(bottleneck) -> None:
     still the first thing inside.
     """
     color = SCORE_COLORS.get(bottleneck.score, 'gray')
+    # The ratio comes before the time share deliberately: severity is scored on
+    # cost per operation, so a finding worth 0.0% of I/O time can still rank
+    # critical. Leading with the share alone reads like a mislabel.
+    ratio = bottleneck.ops_time_ratio
     headline = ' · '.join(
         part
         for part in (
@@ -76,6 +80,7 @@ def _render_bottleneck(bottleneck) -> None:
             f"{bottleneck.num_ops:,} {pluralize('op', bottleneck.num_ops)}"
             if bottleneck.num_ops
             else '',
+            f"{ratio:,.1f}x time vs. ops" if ratio and ratio >= 1.05 else '',
             f"{bottleneck.time_overall * 100:.1f}% of I/O time",
         )
         if part
@@ -84,12 +89,20 @@ def _render_bottleneck(bottleneck) -> None:
     with st.expander(f":{color}-badge[{bottleneck.score.title()}] {headline}"):
         st.markdown(bottleneck.description)
 
-        col_time, col_share, col_ops = st.columns(3)
+        col_time, col_share, col_ops, col_ratio = st.columns(4)
         col_time.metric("I/O Time", f"{bottleneck.time:.2f} s", border=True)
         col_share.metric(
             "Share of I/O", f"{bottleneck.time_overall * 100:.1f}%", border=True
         )
         col_ops.metric("Operations", f"{bottleneck.num_ops:,}", border=True)
+        col_ratio.metric(
+            "Time vs. ops",
+            f"{ratio:,.1f}x" if ratio else "—",
+            border=True,
+            help="Share of I/O time divided by share of operations. Above 1x "
+            "means this costs more time than its operation count suggests, "
+            "which is what the severity is ranked on.",
+        )
 
         if bottleneck.subject:
             st.caption(f"Subject: `{bottleneck.subject}`")
@@ -408,6 +421,11 @@ if result:
                     with st.expander(
                         f"**{view.name}** — {summary}", expanded=position == 0
                     ):
+                        st.caption(
+                            "Ranked by cost per operation, not by total time, so "
+                            "a small but disproportionately slow operation can "
+                            "outrank a large one."
+                        )
                         for bottleneck in view.bottlenecks:
                             _render_bottleneck(bottleneck)
 

@@ -152,6 +152,33 @@ def set_metric_scores(
     return df
 
 
+def ops_time_ratio(slope) -> float:
+    """How much more of the I/O time a finding takes than its share of ops.
+
+    The reciprocal of the `iops` slope, which is `count_per / time_per`. The
+    slope is what the score is binned from, and it runs the opposite way to
+    intuition: a low slope means few operations consuming a lot of time, which
+    is the worst case. Reporting `1 / slope` says that plainly -- "takes 10.4x
+    more of the I/O time than its share of operations" -- so a finding worth
+    0.0% of total I/O time can still be seen to deserve its severity.
+
+    Only meaningful for the `iops` metric; for `time` the slope is already a
+    fraction of the boundary and the description states it directly.
+
+    Args:
+        slope: The `iops_slope` of one bottleneck.
+
+    Returns:
+        The ratio, or None when the slope is missing, zero or not finite.
+    """
+    if slope is None:
+        return None
+    slope = float(slope)
+    if not np.isfinite(slope) or slope <= 0:
+        return None
+    return 1.0 / slope
+
+
 def set_metric_slope(
     df: pd.DataFrame,
     metrics: List[Metric],

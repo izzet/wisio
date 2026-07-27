@@ -18,7 +18,7 @@ from rich.tree import Tree
 from scipy.stats import skew
 from typing import Dict, List
 
-from .analysis import SCORE_INITIALS, SCORE_NAMES
+from .analysis import SCORE_INITIALS, SCORE_NAMES, ops_time_ratio
 from .constants import (
     COL_APP_NAME,
     COL_FILE_DIR,
@@ -703,6 +703,11 @@ class ConsoleOutput(Output):
                         bot_desc = rule_impl.describe_bottleneck(
                             compact=compact,
                             metric=getattr(bottleneck, 'metric'),
+                            ops_time_ratio=(
+                                ops_time_ratio(getattr(bottleneck, f"{metric}_slope", None))
+                                if metric == 'iops'
+                                else None
+                            ),
                             num_files=num_files,
                             num_ops=int(bottleneck['count']),
                             num_processes=num_processes,

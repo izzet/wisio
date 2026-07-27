@@ -19,7 +19,7 @@ from typing import Dict, List, Tuple
 
 import pandas as pd
 
-from wisio.analysis import SCORE_INITIALS, SCORE_NAMES
+from wisio.analysis import SCORE_INITIALS, SCORE_NAMES, ops_time_ratio
 from wisio.constants import (
     COL_APP_NAME,
     COL_FILE_DIR,
@@ -75,6 +75,9 @@ class Bottleneck:
     num_ops: int = 0
     time: float = 0.0
     time_overall: float = 0.0
+    # How much more of the I/O time this takes than its share of operations.
+    # None when the metric is not scored by slope. See `wisio.analysis`.
+    ops_time_ratio: float = None
     reasons: List[Reason] = field(default_factory=list)
 
 
@@ -220,6 +223,11 @@ def describe_bottlenecks(
         for _, row in rows.iterrows():
             num_files, num_processes, num_time_periods = _subject_counts(row, view_type)
             score = row.get(score_column, SCORE_NAMES[0])
+            ratio = (
+                ops_time_ratio(row.get(f"{metric}_slope"))
+                if metric == 'iops'
+                else None
+            )
             # Any rule can build the description -- it reads only these
             # arguments, not the rule it is called on.
             any_rule = next(iter(bottleneck_rules.values()))
@@ -236,9 +244,11 @@ def describe_bottlenecks(
                     num_ops=int(row.get('count', 0) or 0),
                     time=float(row.get('time', 0) or 0),
                     time_overall=float(row.get('time_overall', 0) or 0),
+                    ops_time_ratio=ratio,
                     description=any_rule.describe_bottleneck(
                         compact=compact,
                         metric=row.get('metric', metric),
+                        ops_time_ratio=ratio,
                         num_files=num_files,
                         num_ops=int(row.get('count', 0) or 0),
                         num_processes=num_processes,
