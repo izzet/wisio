@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import sys
 import tempfile
+from bottleneck_report import describe_bottlenecks
 from wisio import init_with_hydra
 from wisio.constants import XFER_SIZE_BIN_LABELS
 from wisio.rules import KnownCharacteristics
@@ -31,6 +32,77 @@ MAX_TOTAL_UPLOAD_MB = 16
 # Recorder reads Parquet through dask and needs no extra.
 ANALYZER_READERS = {'darshan': 'darshan', 'dftracer': 'dftracer'}
 
+# Findings shown per view before collapsing to a count. Expanders are cheap
+# collapsed, but a pathological run should not render thousands of rows.
+MAX_BOTTLENECKS_PER_VIEW = 20
+
+# Severity as a Streamlit badge colour. The score already carries this, so the
+# badge replaces repeating it as text -- `[LO1]` said "low" twice.
+SCORE_COLORS = {
+    'critical': 'red',
+    'very high': 'red',
+    'high': 'orange',
+    'medium': 'orange',
+    'low': 'green',
+    'very low': 'green',
+    'trivial': 'gray',
+    'none': 'gray',
+}
+
+
+def pluralize(noun: str, count: int) -> str:
+    return noun if count == 1 else f"{noun}s"
+
+
+def _render_bottleneck(bottleneck) -> None:
+    """One finding: a scannable headline, then the detail behind it.
+
+    The headline leads with the numbers rather than the full sentence, which
+    runs to about 150 characters and wraps badly at this width. The sentence is
+    still the first thing inside.
+    """
+    color = SCORE_COLORS.get(bottleneck.score, 'gray')
+    headline = ' · '.join(
+        part
+        for part in (
+            f"#{bottleneck.id}",
+            f"{bottleneck.num_processes:,} "
+            f"{pluralize('process', bottleneck.num_processes)}"
+            if bottleneck.num_processes
+            else '',
+            f"{bottleneck.num_files:,} {pluralize('file', bottleneck.num_files)}"
+            if bottleneck.num_files
+            else '',
+            f"{bottleneck.num_ops:,} {pluralize('op', bottleneck.num_ops)}"
+            if bottleneck.num_ops
+            else '',
+            f"{bottleneck.time_overall * 100:.1f}% of I/O time",
+        )
+        if part
+    )
+
+    with st.expander(f":{color}-badge[{bottleneck.score.title()}] {headline}"):
+        st.markdown(bottleneck.description)
+
+        col_time, col_share, col_ops = st.columns(3)
+        col_time.metric("I/O Time", f"{bottleneck.time:.2f} s", border=True)
+        col_share.metric(
+            "Share of I/O", f"{bottleneck.time_overall * 100:.1f}%", border=True
+        )
+        col_ops.metric("Operations", f"{bottleneck.num_ops:,}", border=True)
+
+        if bottleneck.subject:
+            st.caption(f"Subject: `{bottleneck.subject}`")
+
+        if bottleneck.reasons:
+            for reason in bottleneck.reasons:
+                st.markdown(
+                    f":blue-badge[{reason.rule_name}] {reason.description}"
+                )
+        else:
+            st.markdown("_No reasons were attached._")
+
+
 XFER_SIZE_CAT_TYPE = pd.CategoricalDtype(categories=XFER_SIZE_BIN_LABELS, ordered=True)
 VIEW_TYPE_MAPPING = {
     'File': 'file_name',
@@ -51,6 +123,7 @@ def _reader_available(module_name: str) -> bool:
     except Exception:
         return False
     return True
+
 
 st.set_page_config(
     page_title="WisIO Web",
@@ -189,7 +262,8 @@ if submit:
                     f"cluster.memory_limit={CLUSTER_MEMORY_LIMIT}",
                     f"analyzer.bottleneck_dir={temp_dir}",
                     f"analyzer.checkpoint={False}",
-                    f"analyzer.time_granularity={time_granularity}",
+                    # The slider is in seconds; the analyzer counts microseconds.
+                    f"analyzer.time_granularity={time_granularity * 1e6}",
                     f"hydra.run.dir={temp_dir}",
                     f"hydra.runtime.output_dir={temp_dir}",
                     f"logical_view_types={logical_view_types}",
@@ -248,6 +322,9 @@ if result:
         io_ops = characteristics[KnownCharacteristics.IO_COUNT.value].value
         io_size_fmt = characteristics[KnownCharacteristics.IO_SIZE.value].value_fmt
         io_time = characteristics[KnownCharacteristics.IO_TIME.value].value
+        node_count = characteristics[KnownCharacteristics.NODE_COUNT.value].value
+        app_count = characteristics[KnownCharacteristics.APP_COUNT.value].value
+        time_periods = characteristics[KnownCharacteristics.TIME_PERIOD.value].value
         read_xfer_bins = characteristics[KnownCharacteristics.READ_XFER_SIZE.value]._dataframe
         write_xfer_bins = characteristics[KnownCharacteristics.WRITE_XFER_SIZE.value]._dataframe
 
@@ -261,14 +338,23 @@ if result:
         col22.metric("I/O Operations", f"{io_ops:,}", border=True)
         col23.metric("I/O Size", io_size_fmt, border=True)
 
-        col31, col32 = st.columns(2)
-        col31.markdown("**Read Request Size Distribution**")
+        # Computed all along and shown by the console, but never surfaced here.
+        # Access Pattern is deliberately still omitted: it is hardcoded for the
+        # DXT and DFTracer readers, so it would report an unmeasured
+        # "100% sequential" rather than a missing value.
+        col31, col32, col33 = st.columns(3)
+        col31.metric("Nodes", f"{node_count:,}", border=True)
+        col32.metric("Apps", f"{app_count:,}", border=True)
+        col33.metric("Time Periods", f"{time_periods:,}", border=True)
+
+        col41, col42 = st.columns(2)
+        col41.markdown("**Read Request Size Distribution**")
         read_xfer_bins_full = read_xfer_bins['read_count'].reindex(XFER_SIZE_BIN_LABELS).fillna(0)
         read_xfer_bins_fixed = pd.DataFrame(
             {"Size Range": read_xfer_bins_full.index, "Operations": read_xfer_bins_full.values}
         )
         read_xfer_bins_fixed['Size Range'] = read_xfer_bins_fixed['Size Range'].astype(XFER_SIZE_CAT_TYPE)
-        col31.write(
+        col41.write(
             alt.Chart(read_xfer_bins_fixed)
             .mark_bar()
             .encode(
@@ -276,14 +362,14 @@ if result:
                 y=alt.Y('Size Range', sort=None, title=None),
             )
         )
-        # col31.bar_chart(read_xfer_bins_fixed.set_index('Size Range'), horizontal=True)
-        col32.markdown("**Write Request Size Distribution**")
+        # col41.bar_chart(read_xfer_bins_fixed.set_index('Size Range'), horizontal=True)
+        col42.markdown("**Write Request Size Distribution**")
         write_xfer_bins_fixed = write_xfer_bins['write_count'].reindex(XFER_SIZE_BIN_LABELS).fillna(0)
         write_xfer_bins_fixed = pd.DataFrame(
             {"Size Range": write_xfer_bins_fixed.index, "Operations": write_xfer_bins_fixed.values}
         )
         write_xfer_bins_fixed['Size Range'] = write_xfer_bins_fixed['Size Range'].astype(XFER_SIZE_CAT_TYPE)
-        col32.write(
+        col42.write(
             alt.Chart(write_xfer_bins_fixed)
             .mark_bar()
             .encode(
@@ -293,18 +379,40 @@ if result:
         )
 
     with bottlenecks_tab:
-        st.write(bottlenecks)
+        if bottlenecks is None or len(bottlenecks) == 0:
+            st.info(
+                "No bottlenecks were detected. Lower the threshold and analyze "
+                "again to surface less severe findings."
+            )
+        else:
+            for reported_metric in bottlenecks['metric'].unique():
+                for_metric = bottlenecks[bottlenecks['metric'] == reported_metric]
+                views = describe_bottlenecks(
+                    for_metric,
+                    result.bottleneck_rules,
+                    metric=reported_metric,
+                    max_bottlenecks=MAX_BOTTLENECKS_PER_VIEW,
+                )
 
-        # st.subheader("Time View (4 bottlenecks with 7 reasons)")
+                # One accordion per view. A real trace yields hundreds of
+                # findings across a handful of views, so collapsing by view is
+                # what makes the page navigable; the first opens so the page is
+                # not a row of shut boxes.
+                for position, view in enumerate(views):
+                    summary = (
+                        f"{view.num_bottlenecks:,} "
+                        f"{pluralize('bottleneck', view.num_bottlenecks)} · "
+                        f"{view.num_reasons:,} "
+                        f"{pluralize('reason', view.num_reasons)}"
+                    )
+                    with st.expander(
+                        f"**{view.name}** — {summary}", expanded=position == 0
+                    ):
+                        for bottleneck in view.bottlenecks:
+                            _render_bottleneck(bottleneck)
 
-        # with st.expander("[CR1] 32 processes, 2 files, I/O Time: 2.19s (53.26%)"):
-        #     st.markdown("""
-        #     - **[Excessive metadata access]** Overall **100.00%** (2.19 seconds) of I/O time is spent on metadata access.
-        #         - Specifically, **100.00%** (2.19 seconds) is on the 'open' operation.
-        #     """)
-
-        # with st.expander("[CR2] 1 process, 6 files, I/O Time: 0.33s (7.97%)"):
-        #     st.markdown("""
-        #     - **[Excessive metadata access]** Overall **99.35%** (0.33 seconds) of I/O time is spent on metadata access.
-        #         - Specifically, **99.13%** (0.33 seconds) is on the 'open' operation.
-        #     """)
+                        if view.num_hidden:
+                            st.caption(
+                                f"{view.num_hidden:,} more not shown, worst first. "
+                                "Run WisIO locally for the full report."
+                            )
