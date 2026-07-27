@@ -11,8 +11,12 @@
 # for versions, rather than duplicating the dependency list here where it would
 # drift.
 #
-# `darshan` only works where pydarshan ships a CPython wheel, which today means
-# 3.12 and earlier. Community Cloud defaults to a newer interpreter, so pin the
-# Python version to 3.12 in the app's advanced settings if you want the darshan
-# reader to work; the app reports the reader as unavailable otherwise.
+# The deployment is pinned to Python 3.12 in the app's advanced settings on
+# share.streamlit.io, and needs to stay there: `darshan` only works where
+# pydarshan ships a CPython wheel, which today means 3.12 and earlier. On 3.13
+# pip installs a pure-python wheel with no libdarshan-util.so and the reader
+# raises at import. That setting lives in Streamlit's UI, not in this repo, so
+# this comment is the only record of why it is pinned -- raising the version
+# silently drops darshan support. The app reports the reader as unavailable
+# rather than failing with a traceback, so the symptom is recoverable either way.
 .[darshan,dftracer,web]
