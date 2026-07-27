@@ -12,6 +12,18 @@ from wisio.types import Characteristics, RawStats
 
 DEFAULT_THRESHOLD = 45
 DEFAULT_TIME_GRANULARITY_IN_SECONDS = 5  # 5 seconds
+
+# Sized for Streamlit Community Cloud, which guarantees ~1GB of memory and caps
+# at 2.7GB and 2 CPU cores. Measured against the test fixtures, the analyzer
+# costs a fixed ~620MB (imports plus the cluster) and roughly 100MB more per MB
+# of uploaded trace, so the headroom above the guaranteed floor is only a few MB
+# of trace. These keep an over-large upload a clear error rather than an OOM.
+#
+# Worker count dominates: the default fan-out peaked at 2.9GB on the dftracer
+# fixture against 955MB with a single worker, for about 20% more wall time.
+CLUSTER_N_WORKERS = 1
+CLUSTER_MEMORY_LIMIT = 1_500_000_000  # bytes; dask spills, pauses, then restarts
+MAX_TOTAL_UPLOAD_MB = 16
 XFER_SIZE_CAT_TYPE = pd.CategoricalDtype(categories=XFER_SIZE_BIN_LABELS, ordered=True)
 VIEW_TYPE_MAPPING = {
     'File': 'file_name',
@@ -101,6 +113,19 @@ if submit:
         st.error("All trace files must be of the same type.")
         st.stop()
 
+    # `server.maxUploadSize` is enforced per file, so several accepted files can
+    # still add up to more than the analysis has memory for.
+    total_upload_mb = sum(file.size for file in trace_files) / (1024 * 1024)
+    if total_upload_mb > MAX_TOTAL_UPLOAD_MB:
+        st.error(
+            f"These traces total {total_upload_mb:.1f} MB, over the "
+            f"{MAX_TOTAL_UPLOAD_MB} MB this deployment can analyze. Upload a "
+            "shorter run or a subset of the ranks, or run WisIO locally with "
+            "`wisio +analyzer=... trace_path=...` where the limit is your own "
+            "machine."
+        )
+        st.stop()
+
     analyzer = 'darshan'
     if all(file.name.endswith('.parquet') for file in trace_files):
         analyzer = 'recorder'
@@ -120,6 +145,8 @@ if submit:
             wis = init_with_hydra(
                 hydra_overrides=[
                     f"+analyzer={analyzer}",
+                    f"cluster.n_workers={CLUSTER_N_WORKERS}",
+                    f"cluster.memory_limit={CLUSTER_MEMORY_LIMIT}",
                     f"analyzer.bottleneck_dir={temp_dir}",
                     f"analyzer.checkpoint={False}",
                     f"analyzer.time_granularity={time_granularity}",
@@ -186,8 +213,8 @@ if result:
 
         col11, col12, col13 = st.columns(3)
         col11.metric("Runtime", f"{raw_stats.job_time:.2f} s", border=True)
-        col12.metric(r"\# of Processes", f"{file_count:,}", border=True)
-        col13.metric(r"\# of Files", f"{proc_count:,}", border=True)
+        col12.metric(r"\# of Processes", f"{proc_count:,}", border=True)
+        col13.metric(r"\# of Files", f"{file_count:,}", border=True)
 
         col21, col22, col23 = st.columns(3)
         col21.metric("I/O Time", f"{io_time:.2f} s", border=True)
