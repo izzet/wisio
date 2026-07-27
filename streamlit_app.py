@@ -181,18 +181,16 @@ raw_stats: RawStats = {}
 
 with st.form('analysis_form'):
     trace_files = st.file_uploader(
-        "Upload trace files or a folder",
+        "Upload trace files",
         type=["darshan", "parquet", "pfw", "pfw.gz"],
-        # Traces arrive as directories -- dftracer writes one file per rank,
-        # recorder writes a Parquet directory -- so let a folder be picked
-        # directly. `type` still filters, so unrelated files are left behind.
-        accept_multiple_files="directory",
+        accept_multiple_files=True,
         # Per file, and authoritative over config.toml, which keeps the limit
         # next to the total check below rather than in a separate file.
         max_upload_size=MAX_TOTAL_UPLOAD_MB,
         help=(
-            f"Up to {MAX_TOTAL_UPLOAD_MB} MB in total. Larger runs are better "
-            "analyzed locally with the `wisio` command."
+            f"Up to {MAX_TOTAL_UPLOAD_MB} MB in total. Select every file in a "
+            "run at once. Larger runs are better analyzed locally with the "
+            "`wisio` command."
         ),
     )
 

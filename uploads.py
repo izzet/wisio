@@ -11,20 +11,18 @@ from typing import Iterable, List
 
 
 def safe_trace_filenames(names: Iterable[str]) -> List[str]:
-    """Flatten uploaded names to unique, writable basenames.
+    """Reduce uploaded names to unique, writable basenames.
 
-    Directory uploads report a path relative to the chosen folder, so a name
-    can be `worker_0/trace.pfw.gz` or, if something upstream is careless or
-    hostile, `../../etc/passwd`. Both are handled the same way: take the
-    basename, which cannot escape the directory it is joined to.
+    The uploader accepts files additively, so a run split across directories
+    can contribute two files with one basename -- `worker_0/trace.pfw.gz` and
+    `worker_1/trace.pfw.gz` are distinct traces. Writing both under the same
+    name would silently drop one, so later duplicates are suffixed.
 
-    Flattening is also what the readers need. `resolve_trace_files` globs
-    `<dir>/*.pfw*` rather than walking the tree, so a file left in a
-    subdirectory would simply not be found.
-
-    Collisions become real once the tree is flattened -- `worker_0/trace.pfw.gz`
-    and `worker_1/trace.pfw.gz` are distinct traces with one basename -- so
-    later duplicates are suffixed rather than overwriting each other.
+    Taking the basename also means a name can never escape the directory it is
+    joined to. A browser sends only the filename for individually picked files,
+    so that is insurance rather than a live hole -- but this is the point where
+    a name chosen elsewhere decides where a file is written, and the check
+    costs nothing.
 
     Args:
         names: Uploaded filenames, in submission order.
