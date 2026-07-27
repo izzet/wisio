@@ -64,15 +64,20 @@ RECORD_COLUMNS = {
     'tid': 'Int64',
     'ts': 'Int64',
     'dur': 'Int64',
-    'hash': 'Int64',
-    'fhash': 'Int64',
-    'hhash': 'Int64',
+    # DFTracer writes hash ids as 16-character hex digests, which are join keys
+    # rather than numbers. dfanalyzer types them the same way.
+    'hash': 'string',
+    'fhash': 'string',
+    'hhash': 'string',
     'size': 'Int64',
     'value': 'string',
 }
 
 HASH_TABLE_COLUMNS = ['name', 'hash', 'pid', 'tid', 'hhash']
 METADATA_COLUMNS = ['name', 'value', 'pid', 'tid', 'hhash']
+
+# Raw columns holding a hash id, cast to string while still in Arrow.
+HASH_ARROW_COLUMNS = ('args.value', 'args.fhash', 'args.hhash')
 
 
 def resolve_trace_files(trace_path: str) -> List[str]:
@@ -137,6 +142,32 @@ def classify_records(df: pd.DataFrame) -> pd.Series:
     return types
 
 
+def _stringify_hash_columns(table: pa.Table) -> pa.Table:
+    """Cast the hash columns to string while the data is still in Arrow.
+
+    Current traces write hex digests, which Arrow already types as `string`, so
+    this is a no-op for them. It matters for traces from older DFTracer builds,
+    which wrote the ids as integers: Arrow reads those exactly, but `to_pandas`
+    renders them through `float64`, turning 5692 into "5692.0" and rounding
+    anything above 2**53. Because the hash is a join key, that does not raise --
+    the event simply stops matching the hash table entry it refers to, and the
+    file or host name silently goes missing.
+
+    Args:
+        table: One Arrow batch as read from the trace.
+
+    Returns:
+        The same table with any present hash column cast to string.
+    """
+    for name in HASH_ARROW_COLUMNS:
+        index = table.schema.get_field_index(name)
+        if index >= 0:
+            table = table.set_column(
+                index, name, table.column(name).cast(pa.string())
+            )
+    return table
+
+
 def read_pfw_file(filename: str) -> pd.DataFrame:
     """Read one trace file into wisio's record schema.
 
@@ -145,7 +176,9 @@ def read_pfw_file(filename: str) -> pd.DataFrame:
     """
     reader = TraceReader(filename, auto_build_index=True)
     frames = [
-        pa.Table.from_batches([pa.record_batch(batch)]).to_pandas()
+        _stringify_hash_columns(
+            pa.Table.from_batches([pa.record_batch(batch)])
+        ).to_pandas()
         for batch in reader.iter_arrow(flatten_objects=True)
     ]
     frames = [frame for frame in frames if len(frame)]
