@@ -9,7 +9,7 @@ the AppTest smoke test.
 import pandas as pd
 import pytest
 
-from bottleneck_report import describe_bottlenecks
+from bottleneck_report import describe_bottlenecks, is_primary_view
 from wisio.rules import KNOWN_RULES, BottleneckRule
 
 
@@ -62,6 +62,86 @@ def _row(view_name, score='critical', **overrides):
 
 def _frame(rows):
     return pd.DataFrame(rows)
+
+
+@pytest.mark.parametrize(
+    'view_name, expected',
+    [
+        ('file_name', True),  # root
+        ('proc_name', True),
+        ('time_range', True),
+        ('proc_name.node_name', True),  # logical breakdown of a root view
+        ('proc_name.app_name', True),
+        ('file_name.file_dir', True),
+        ('file_name.file_pattern', True),
+        ('time_range.file_name', False),  # permutation
+        ('file_name.proc_name', False),
+        ('time_range.file_name.proc_name', False),
+    ],
+)
+def test_primary_views_are_root_or_logical(view_name, expected):
+    assert is_primary_view(view_name) is expected
+
+
+def test_permutation_views_are_dropped_by_default(rules):
+    """A real trace produces far more permutations than root views."""
+    views = describe_bottlenecks(
+        _frame(
+            [
+                _row('file_name'),
+                _row('proc_name'),
+                _row('time_range'),
+                _row('proc_name.node_name'),  # logical, kept
+                _row('time_range.file_name'),  # permutation, dropped
+                _row('file_name.proc_name.time_range'),  # permutation, dropped
+            ]
+        ),
+        rules,
+        metric=METRIC,
+    )
+
+    assert sorted(view.name for view in views) == [
+        'File View',
+        'Process > Node View',
+        'Process View',
+        'Time View',
+    ]
+
+
+def test_permutations_can_be_kept_explicitly(rules):
+    views = describe_bottlenecks(
+        _frame([_row('file_name'), _row('time_range.file_name')]),
+        rules,
+        metric=METRIC,
+        primary_views_only=False,
+    )
+
+    assert len(views) == 2
+
+
+def test_all_permutations_leaves_no_views(rules):
+    assert (
+        describe_bottlenecks(
+            _frame([_row('time_range.file_name')]), rules, metric=METRIC
+        )
+        == []
+    )
+
+
+def test_counts_are_carried_alongside_the_sentence(rules):
+    """A renderer should not have to parse numbers back out of the prose."""
+    views = describe_bottlenecks(
+        _frame([_row('file_name', count=1234, time=2.5, time_overall=0.25)]),
+        rules,
+        metric=METRIC,
+    )
+
+    bottleneck = views[0].bottlenecks[0]
+    assert bottleneck.num_ops == 1234
+    assert bottleneck.time == 2.5
+    assert bottleneck.time_overall == 0.25
+    assert bottleneck.num_processes == 3
+    assert bottleneck.num_files == 2
 
 
 def test_no_bottlenecks_returns_no_views(rules):

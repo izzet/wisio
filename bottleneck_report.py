@@ -28,6 +28,7 @@ from wisio.constants import (
     COL_NODE_NAME,
     COL_PROC_NAME,
     COL_RANK,
+    LOGICAL_VIEW_TYPES,
 )
 from wisio.rules import HUMANIZED_KNOWN_RULES
 from wisio.types import humanized_view_name
@@ -36,6 +37,13 @@ from wisio.types import humanized_view_name
 # `num_*` column describes "how many files" and "how many processes".
 FILE_VIEW_TYPES = (COL_FILE_NAME, COL_FILE_DIR, COL_FILE_PATTERN)
 PROCESS_VIEW_TYPES = (COL_APP_NAME, COL_NODE_NAME, COL_PROC_NAME, COL_RANK)
+
+# Views worth reporting on their own terms: the root ones, plus the logical
+# breakdowns of a root view. Everything else is a permutation -- 'Time > File',
+# 'Time > Process' and so on -- which multiplies the view count without adding a
+# perspective a reader asked for. A real trace produces hundreds of bottlenecks,
+# so those permutations are the difference between five views and twenty.
+LOGICAL_VIEW_NAMES = frozenset('.'.join(key) for key in LOGICAL_VIEW_TYPES)
 
 DEFAULT_MAX_BOTTLENECKS = 20
 
@@ -59,6 +67,14 @@ class Bottleneck:
     severity: int
     subject: str
     description: str
+    # Carried alongside the sentence so a renderer can lead with the numbers
+    # instead of making a reader parse them back out of prose.
+    num_files: int = 0
+    num_processes: int = 0
+    num_time_periods: int = 0
+    num_ops: int = 0
+    time: float = 0.0
+    time_overall: float = 0.0
     reasons: List[Reason] = field(default_factory=list)
 
 
@@ -133,12 +149,24 @@ def _reasons_for(row: pd.Series, bottleneck_rules: Dict[str, object]) -> List[Re
     return reasons
 
 
+def is_primary_view(view_name: str) -> bool:
+    """Whether a view stands on its own rather than being a permutation.
+
+    Root views are single-component. Logical views have two components but are
+    a breakdown of a root view -- processes by node, files by directory -- so
+    they are reported when the user asks for them. `Time > File` and friends are
+    permutations and are not.
+    """
+    return '.' not in view_name or view_name in LOGICAL_VIEW_NAMES
+
+
 def describe_bottlenecks(
     bottlenecks: pd.DataFrame,
     bottleneck_rules: Dict[str, object],
     metric: str,
     max_bottlenecks: int = DEFAULT_MAX_BOTTLENECKS,
     compact: bool = True,
+    primary_views_only: bool = True,
 ) -> List[BottleneckView]:
     """Group the bottleneck table into described findings, per view.
 
@@ -147,9 +175,11 @@ def describe_bottlenecks(
         bottleneck_rules: The rule implementations, from `AnalyzerResultType`.
         metric: The metric being reported, which selects the score column.
         max_bottlenecks: Findings to describe per view; the rest are counted
-            in `num_hidden`. Describing is cheap, but a pathological run should
-            not render thousands of rows.
+            in `num_hidden`. Describing is cheap, but a real trace yields
+            hundreds of bottlenecks and a page cannot usefully show them all.
         compact: Shorten a file subject to its basename.
+        primary_views_only: Drop permutation views, keeping root and logical
+            ones. See `is_primary_view`.
 
     Returns:
         One `BottleneckView` per perspective, each with its findings ordered
@@ -157,6 +187,12 @@ def describe_bottlenecks(
     """
     if bottlenecks is None or len(bottlenecks) == 0:
         return []
+
+    if primary_views_only:
+        keep = bottlenecks['view_name'].map(is_primary_view)
+        bottlenecks = bottlenecks[keep]
+        if len(bottlenecks) == 0:
+            return []
 
     # `id` is what makes a finding citable ("the CR2 one"). The console adds it
     # while reading the parquet back; the in-memory table has not been through
@@ -194,6 +230,12 @@ def describe_bottlenecks(
                     score=score,
                     severity=_severity(score),
                     subject=str(row.get('subject', '')),
+                    num_files=num_files,
+                    num_processes=num_processes,
+                    num_time_periods=num_time_periods,
+                    num_ops=int(row.get('count', 0) or 0),
+                    time=float(row.get('time', 0) or 0),
+                    time_overall=float(row.get('time_overall', 0) or 0),
                     description=any_rule.describe_bottleneck(
                         compact=compact,
                         metric=row.get('metric', metric),

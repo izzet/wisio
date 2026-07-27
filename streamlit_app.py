@@ -36,22 +36,71 @@ ANALYZER_READERS = {'darshan': 'darshan', 'dftracer': 'dftracer'}
 # collapsed, but a pathological run should not render thousands of rows.
 MAX_BOTTLENECKS_PER_VIEW = 20
 
-# Severity at a glance. Streamlit cannot colour an expander, so the score rides
-# in the label instead.
-SCORE_ICONS = {
-    'critical': '🔴',
-    'very high': '🟠',
-    'high': '🟠',
-    'medium': '🟡',
-    'low': '🟢',
-    'very low': '🟢',
-    'trivial': '⚪',
-    'none': '⚪',
+# Severity as a Streamlit badge colour. The score already carries this, so the
+# badge replaces repeating it as text -- `[LO1]` said "low" twice.
+SCORE_COLORS = {
+    'critical': 'red',
+    'very high': 'red',
+    'high': 'orange',
+    'medium': 'orange',
+    'low': 'green',
+    'very low': 'green',
+    'trivial': 'gray',
+    'none': 'gray',
 }
 
 
 def pluralize(noun: str, count: int) -> str:
     return noun if count == 1 else f"{noun}s"
+
+
+def _render_bottleneck(bottleneck) -> None:
+    """One finding: a scannable headline, then the detail behind it.
+
+    The headline leads with the numbers rather than the full sentence, which
+    runs to about 150 characters and wraps badly at this width. The sentence is
+    still the first thing inside.
+    """
+    color = SCORE_COLORS.get(bottleneck.score, 'gray')
+    headline = ' · '.join(
+        part
+        for part in (
+            f"#{bottleneck.id}",
+            f"{bottleneck.num_processes:,} "
+            f"{pluralize('process', bottleneck.num_processes)}"
+            if bottleneck.num_processes
+            else '',
+            f"{bottleneck.num_files:,} {pluralize('file', bottleneck.num_files)}"
+            if bottleneck.num_files
+            else '',
+            f"{bottleneck.num_ops:,} {pluralize('op', bottleneck.num_ops)}"
+            if bottleneck.num_ops
+            else '',
+            f"{bottleneck.time_overall * 100:.1f}% of I/O time",
+        )
+        if part
+    )
+
+    with st.expander(f":{color}-badge[{bottleneck.score.title()}] {headline}"):
+        st.markdown(bottleneck.description)
+
+        col_time, col_share, col_ops = st.columns(3)
+        col_time.metric("I/O Time", f"{bottleneck.time:.2f} s", border=True)
+        col_share.metric(
+            "Share of I/O", f"{bottleneck.time_overall * 100:.1f}%", border=True
+        )
+        col_ops.metric("Operations", f"{bottleneck.num_ops:,}", border=True)
+
+        if bottleneck.subject:
+            st.caption(f"Subject: `{bottleneck.subject}`")
+
+        if bottleneck.reasons:
+            for reason in bottleneck.reasons:
+                st.markdown(
+                    f":blue-badge[{reason.rule_name}] {reason.description}"
+                )
+        else:
+            st.markdown("_No reasons were attached._")
 
 
 XFER_SIZE_CAT_TYPE = pd.CategoricalDtype(categories=XFER_SIZE_BIN_LABELS, ordered=True)
@@ -345,35 +394,25 @@ if result:
                     max_bottlenecks=MAX_BOTTLENECKS_PER_VIEW,
                 )
 
-                for view in views:
-                    st.markdown(f"##### {view.name}")
-                    st.caption(
+                # One accordion per view. A real trace yields hundreds of
+                # findings across a handful of views, so collapsing by view is
+                # what makes the page navigable; the first opens so the page is
+                # not a row of shut boxes.
+                for position, view in enumerate(views):
+                    summary = (
                         f"{view.num_bottlenecks:,} "
                         f"{pluralize('bottleneck', view.num_bottlenecks)} · "
                         f"{view.num_reasons:,} "
                         f"{pluralize('reason', view.num_reasons)}"
                     )
+                    with st.expander(
+                        f"**{view.name}** — {summary}", expanded=position == 0
+                    ):
+                        for bottleneck in view.bottlenecks:
+                            _render_bottleneck(bottleneck)
 
-                    for bottleneck in view.bottlenecks:
-                        icon = SCORE_ICONS.get(bottleneck.score, '')
-                        # No markdown escape on the bracket: a link needs
-                        # `[text](url)`, and the description always follows with
-                        # a space, so `[CR1] 1 process...` is plain text.
-                        with st.expander(
-                            f"{icon} [{bottleneck.label}] {bottleneck.description}"
-                        ):
-                            if bottleneck.subject:
-                                st.caption(f"Subject: `{bottleneck.subject}`")
-                            if bottleneck.reasons:
-                                for reason in bottleneck.reasons:
-                                    st.markdown(
-                                        f"- **{reason.rule_name}** — {reason.description}"
-                                    )
-                            else:
-                                st.markdown("_No reasons were attached._")
-
-                    if view.num_hidden:
-                        st.caption(
-                            f"{view.num_hidden:,} more not shown. Run WisIO locally "
-                            "to see the full report."
-                        )
+                        if view.num_hidden:
+                            st.caption(
+                                f"{view.num_hidden:,} more not shown, worst first. "
+                                "Run WisIO locally for the full report."
+                            )

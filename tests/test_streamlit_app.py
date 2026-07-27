@@ -189,11 +189,21 @@ def test_analysis_renders_findings_end_to_end():
     assert metrics['Nodes'] == '1'
     assert metrics['Apps'] == '1'
 
-    assert at.expander, 'no bottlenecks rendered'
-    label = at.expander[0].label
-    assert 'process' in label, label
-    # Score initials and a severity icon, not a raw dataframe.
-    assert any(icon in label for icon in ('🔴', '🟠', '🟡', '🟢', '⚪')), label
+    # Two accordion levels: one per view, one per finding inside it.
+    labels = [expander.label for expander in at.expander]
+    assert labels, 'no bottlenecks rendered'
+
+    view_labels = [label for label in labels if 'bottleneck' in label]
+    assert view_labels, labels
+    assert 'View' in view_labels[0], view_labels[0]
+
+    finding_labels = [label for label in labels if '-badge[' in label]
+    assert finding_labels, labels
+    # Severity as a badge and the numbers up front, not a raw dataframe.
+    assert 'of I/O time' in finding_labels[0], finding_labels[0]
+
+    # Permutation views are dropped, so only root (and logical) views appear.
+    assert not any('>' in label for label in view_labels), view_labels
 
 
 def test_characteristics_the_app_reads_exist():
