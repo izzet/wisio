@@ -2,6 +2,7 @@ import dask.dataframe as dd
 import dataclasses
 import itertools as it
 import pandas as pd
+from betterframe import BetterFrame
 from dask import compute
 from scipy.cluster.hierarchy import linkage, fcluster
 from sklearn.preprocessing import StandardScaler
@@ -188,7 +189,8 @@ class RuleEngine(object):
             for view_key in evaluated_views[metric]:
                 scored_view = evaluated_views[metric][view_key].scored_view
                 bottlenecks.append(
-                    scored_view.map_partitions(
+                    BetterFrame(scored_view)
+                    .apply(
                         self._assign_bottlenecks,
                         metric=metric,
                         metric_boundary=metric_boundary_values[metric],
@@ -196,16 +198,25 @@ class RuleEngine(object):
                         rule_dict=rule_dict,
                         view_key=view_key,
                     )
+                    .native
                 )
+
+        # Every view descends from the same main view, so they share an engine
+        # and the concat cannot be handed a mixture.
+        combined = (
+            dd.concat(bottlenecks)
+            if any(isinstance(frame, dd.DataFrame) for frame in bottlenecks)
+            else pd.concat(bottlenecks)
+        )
 
         if group_behavior:
             concatenated = (
-                dd.concat(bottlenecks)
-                .map_partitions(_assign_behavior, metric=metric)
-                .persist()
+                BetterFrame(combined)
+                .apply(_assign_behavior, metric=metric)
+                .finalize()
             )
         else:
-            concatenated = dd.concat(bottlenecks).persist()
+            concatenated = BetterFrame(combined).finalize()
 
         return concatenated, rule_dict
 
@@ -255,6 +266,25 @@ class RuleEngine(object):
                 bottlenecks[col_name] = col.astype(float)
         for view_type in view_types:
             bottlenecks[f"num_{view_type}"] = 1  # current view type fix
+        # The join above can miss, so Dask types every `num_*` column float64
+        # from its meta whether or not any row actually misses, while pandas
+        # keeps int64 when none do. Pin to float64 so the Parquet schema does
+        # not depend on which engine ran -- float64 being what the Dask path
+        # has always written.
+        # `num_*` come from the join above, which can miss, so Dask types them
+        # float64 from its meta whether or not any row misses while pandas
+        # keeps int64. `_min`/`_max` fall out of the view aggregation the same
+        # way, in the other direction. Pin both here -- the one place holding
+        # real values rather than a synthetic meta frame -- so the Parquet
+        # schema does not depend on which engine ran. float64 is what the Dask
+        # path has always written.
+        engine_dependent = [
+            col
+            for col in bottlenecks.columns
+            if col.startswith('num_') or col.endswith('_min') or col.endswith('_max')
+        ]
+        for col_name in engine_dependent:
+            bottlenecks[col_name] = bottlenecks[col_name].astype('float64')
         bottlenecks['metric'] = metric
         bottlenecks['view_depth'] = len(view_key) if isinstance(view_key, tuple) else 1
         bottlenecks['view_name'] = format_view_name(view_key, '.')
@@ -274,8 +304,13 @@ class RuleEngine(object):
             bottlenecks.index.rename('subject', inplace=True)
 
         bottlenecks = bottlenecks.reset_index()
-        # change int type subject to str
-        bottlenecks['subject'] = bottlenecks['subject'].astype(str)
+        # Subject is an index value -- a file name, a rank, a time bucket -- so
+        # it may arrive as an integer. The second cast pins the result to
+        # `object` on both engines: `astype(str)` follows its input, and the
+        # index is `object` under Dask's meta coercion but `string` in pandas,
+        # which would otherwise put a different dtype in the Parquet schema
+        # depending on which engine ran.
+        bottlenecks['subject'] = bottlenecks['subject'].astype(str).astype(object)
 
         return bottlenecks
 

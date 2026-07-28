@@ -10,8 +10,9 @@ import logging
 import math
 import os
 import pandas as pd
+from betterframe import BetterFrame
 from dask.base import compute, unpack_collections
-from dask.delayed import Delayed
+from dask.delayed import Delayed, delayed
 from dask.distributed import fire_and_forget, get_client, wait
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
@@ -45,7 +46,12 @@ from .types import (
     ViewResult,
     ViewType,
 )
-from .utils.dask_utils import EventLogger, flatten_column_names, repartition_to_size
+from .utils.dask_utils import (
+    EventLogger,
+    as_single_dask_partition,
+    flatten_column_names,
+    repartition_to_size,
+)
 from .utils.file_utils import ensure_dir
 from .utils.json_encoders import NpEncoder
 
@@ -75,8 +81,57 @@ VIEW_AGG = {
     'size': sum,
     'time': sum,
 }
+# `compute_main_view` repartitions to this, which is what makes
+# `npartitions * PARTITION_SIZE_BYTES` a sound bound on a frame's materialised
+# size without asking the scheduler. See `_materialize_if_small`.
+PARTITION_SIZE_BYTES = 256 * 1024**2
+# Above this, views stay on Dask. Sized so a real trace's main view is not
+# pulled into the client, while the tiny ones that dominate runtime are.
+VIEW_MATERIALIZE_MAX_BYTES = 64 * 1024**2
+
 HASH_CHECKPOINT_NAMES = False
 WAIT_ENABLED = True
+
+
+
+def _match_dask_agg_dtypes(view, records, aggregate):
+    """Give a pandas aggregation the dtypes Dask would have produced.
+
+    Dask types an aggregation from its *meta*: it runs the same operation over
+    a synthetic non-empty frame and takes the resulting schema, which can
+    differ from what the real data yields. A `min` over a column that never
+    goes null comes back int64 in pandas and float64 through Dask, and the
+    reverse happens elsewhere -- same values, different dtype, and so a
+    different Parquet schema depending only on how large the trace was.
+
+    Deriving the reference the same way Dask does keeps one schema. Only
+    dtypes are touched; values are already identical.
+
+    Args:
+        view: The aggregated frame, computed in pandas.
+        records: The frame it was aggregated from.
+        aggregate: The aggregation, so it can be replayed on a synthetic frame.
+
+    Returns:
+        The view, cast to Dask's schema where they disagree.
+    """
+    if isinstance(view, dd.DataFrame):
+        return view
+    try:
+        from dask.dataframe.utils import meta_nonempty
+
+        reference = aggregate(meta_nonempty(records.iloc[:0]))
+    except Exception:
+        # Without a reference the honest thing is to leave the frame alone
+        # rather than guess at a schema.
+        return view
+    return view.astype(
+        {
+            column: dtype
+            for column, dtype in reference.dtypes.items()
+            if column in view.columns and view.dtypes[column] != dtype
+        }
+    )
 
 
 class Analyzer(abc.ABC):
@@ -89,6 +144,7 @@ class Analyzer(abc.ABC):
         time_approximate: bool = True,
         time_granularity: float = 1e6,
         verbose: bool = False,
+        view_materialize_max_bytes: int = VIEW_MATERIALIZE_MAX_BYTES,
     ):
         """Initializes the Analyzer instance.
 
@@ -100,6 +156,9 @@ class Analyzer(abc.ABC):
             time_approximate: Whether to use approximate time for I/O operations.
             time_granularity: The time granularity for analysis, in microseconds.
             verbose: Whether to enable verbose logging.
+            view_materialize_max_bytes: Main views smaller than this are pulled
+                into memory so the view loop runs in pandas. Zero disables it
+                and keeps everything on Dask.
         """
         if checkpoint:
             assert checkpoint_dir != '', 'Checkpoint directory must be defined'
@@ -111,6 +170,7 @@ class Analyzer(abc.ABC):
         self.time_approximate = time_approximate
         self.time_granularity = time_granularity
         self.verbose = verbose
+        self.view_materialize_max_bytes = view_materialize_max_bytes
 
         # Setup directories
         ensure_dir(self.bottleneck_dir)
@@ -438,6 +498,10 @@ class Analyzer(abc.ABC):
             A dictionary where keys are metrics and values are dictionaries
             mapping ViewKey to ViewResult.
         """
+        # Every view descends from the main view, so gating once here covers
+        # the whole loop rather than re-deciding per view.
+        main_view = self._materialize_if_small(main_view)
+
         # Keep view results
         view_results = {metric: {} for metric in metrics}
 
@@ -685,13 +749,49 @@ class Analyzer(abc.ABC):
 
         return view, critical_view
 
+    def _materialize_if_small(self, frame):
+        """Bring a frame into memory when it is provably small enough.
+
+        The per-view Dask machinery costs seconds per view whatever the size,
+        and these frames are tiny: on the dftracer fixture the largest view is
+        78 rows and every one is a single partition. Materialising once here
+        lets the whole view loop run in pandas.
+
+        The threshold and the fallback bound stay here rather than in
+        betterframe: the bound is only sound because `compute_main_view`
+        repartitions to `PARTITION_SIZE`, which the library has no way to know.
+        The size check never triggers a computation -- `len()` and
+        `memory_usage()` would execute the chain on exactly the large frames
+        the gate exists to protect.
+
+        Args:
+            frame: The main view, Dask or already pandas.
+
+        Returns:
+            A pandas frame when it fits, the original otherwise.
+        """
+        if not self.view_materialize_max_bytes:
+            return frame
+        return (
+            BetterFrame(frame)
+            .materialize_if_under(
+                self.view_materialize_max_bytes,
+                fallback_bound=(
+                    frame.npartitions * PARTITION_SIZE_BYTES
+                    if isinstance(frame, dd.DataFrame)
+                    else None
+                ),
+            )
+            .native
+        )
+
     @staticmethod
     def finish_view(
-        critical_view: dd.DataFrame,
+        critical_view,
         indices,
         metric: Metric,
-        records: dd.DataFrame,
-        view: dd.DataFrame,
+        records,
+        view,
         view_type: str,
     ) -> ViewResult:
         """Applies an already-resolved critical index to the parent records.
@@ -713,8 +813,17 @@ class Analyzer(abc.ABC):
             A ViewResult object containing the computed view, critical items,
             and filtered records.
         """
-        # Find filtered records
-        records = records.query(f"{view_type} in @indices", local_dict={'indices': indices}).persist()
+        # Find filtered records. `finalize` persists on Dask and is a no-op on
+        # pandas, which is already concrete.
+        records = (
+            BetterFrame(records)
+            .pipe(
+                lambda df: df.query(
+                    f"{view_type} in @indices", local_dict={'indices': indices}
+                )
+            )
+            .finalize()
+        )
 
         # Return views & normalization data
         return ViewResult(
@@ -846,6 +955,15 @@ class Analyzer(abc.ABC):
         Returns:
             The result of the Dask `to_parquet` operation (typically None or a Dask future).
         """
+        # Bottlenecks follow the engine the views were computed on, and a
+        # materialised run produces them in pandas. Wrapped back into one Dask
+        # partition so the on-disk shape stays a Parquet directory with the
+        # `_metadata` file the readers expect. `from_delayed` rather than
+        # `from_pandas`: bottlenecks carry a MultiIndex.
+        if not isinstance(bottlenecks, dd.DataFrame):
+            return as_single_dask_partition(bottlenecks).to_parquet(
+                self.bottleneck_dir, compute=True, write_metadata_file=True
+            )
         return repartition_to_size(bottlenecks, partition_size).to_parquet(
             self.bottleneck_dir, compute=True, write_metadata_file=True
         )
@@ -863,21 +981,38 @@ class Analyzer(abc.ABC):
         with open(data_path, 'w') as f:
             return json.dump(data[0], f, cls=NpEncoder)
 
-    def store_view(self, name: str, view: dd.DataFrame, compute=True, partition_size='64MB'):
-        """Stores a Dask DataFrame view to a Parquet checkpoint.
+    def store_view(self, name: str, view, compute=True, partition_size='64MB'):
+        """Stores a view to a Parquet checkpoint.
 
-        The view DataFrame is repartitioned and then written to a subdirectory
-        named `name` within the `checkpoint_dir`.
+        The view is repartitioned and then written to a subdirectory named
+        `name` within the `checkpoint_dir`.
+
+        A view may arrive as pandas rather than Dask, since a main view small
+        enough to materialise is computed in pandas from there on (see
+        `_materialize_if_small`). It is wrapped back into a single Dask
+        partition rather than written through pandas directly, so a checkpoint
+        keeps one on-disk shape: a Parquet directory carrying the `_metadata`
+        file that `has_checkpoint` looks for and `restore_view` reads back.
+
+        The wrapping goes through `from_delayed` rather than `from_pandas`
+        because views are indexed by their view type -- a MultiIndex whenever
+        there is more than one -- and `from_pandas` rejects a MultiIndex.
 
         Args:
             name: The name of the checkpoint.
-            view: The Dask DataFrame to store.
+            view: The Dask or pandas DataFrame to store.
             compute: Whether to compute the DataFrame before writing (Dask default is True).
             partition_size: The desired partition size for the output Parquet files.
 
         Returns:
             The result of the Dask `to_parquet` operation.
         """
+        if not isinstance(view, dd.DataFrame):
+            return as_single_dask_partition(view).to_parquet(
+                self.get_checkpoint_path(name=name),
+                compute=compute,
+                write_metadata_file=True,
+            )
         return repartition_to_size(view, partition_size).to_parquet(
             self.get_checkpoint_path(name=name),
             compute=compute,
@@ -931,6 +1066,13 @@ class Analyzer(abc.ABC):
                 ),
             )
             self._wait_all(tasks=metric_boundaries)
+            # Resolve to plain numbers. `set_metric_slope` divides by this, and
+            # dask-expr does not substitute collections passed as map_partitions
+            # keyword arguments, so a lazy boundary reaches the partition
+            # function as a Scalar object rather than a value. That is latent
+            # today because only the `time` metric divides by it, and it is
+            # fatal on a pandas frame, which has no scheduler to fall back on.
+            (metric_boundaries,) = compute(metric_boundaries)
 
         # Compute views
         with EventLogger(key=EVENT_COMP_PERS, message='Compute perspectives'):
@@ -1000,28 +1142,42 @@ class Analyzer(abc.ABC):
         Returns:
             A Dask DataFrame containing the filtered critical view.
         """
+        frame = BetterFrame(view)
         if percentile is not None and percentile > 0:
-            return view.query(
-                f"{metric}_pth >= @percentile",
-                local_dict={'percentile': percentile},
-            ).persist()
+            return frame.pipe(
+                lambda df: df.query(
+                    f"{metric}_pth >= @percentile",
+                    local_dict={'percentile': percentile},
+                )
+            ).finalize()
         elif threshold is not None and threshold > 0:
             corrected_threshold = THRESHOLD_FUNCTIONS[metric](threshold)
-            return view.query(
-                f"{metric}_slope <= @threshold",
-                local_dict={'threshold': corrected_threshold},
-            ).persist()
+            return frame.pipe(
+                lambda df: df.query(
+                    f"{metric}_slope <= @threshold",
+                    local_dict={'threshold': corrected_threshold},
+                )
+            ).finalize()
         return view
 
     def _compute_view(
         self,
-        records: dd.DataFrame,
+        records,
         view_type: str,
         metrics: List[Metric],
         metric: Metric,
-        metric_boundary: "dd.Scalar",
-    ) -> dd.DataFrame:
-        view_types = records.index._meta.names
+        metric_boundary: float,
+    ):
+        """Aggregate records into one view.
+
+        Runs on a Dask or a pandas frame, whichever it is handed. Views are
+        routinely a few dozen rows -- the largest across the dftracer fixture is
+        78 -- and Dask costs seconds per view regardless of size, so
+        `compute_views` materialises the main view when it is provably small
+        and this runs in pandas from there.
+        """
+        frame = BetterFrame(records)
+        view_types = frame.index_names()
 
         non_proc_agg_dict = self._get_agg_dict(
             for_view_type=view_type,
@@ -1038,18 +1194,26 @@ class Analyzer(abc.ABC):
 
         # Check view type
         if view_type != COL_PROC_NAME and COL_PROC_NAME in view_types:
-            view = (
-                records.reset_index()
-                .groupby([view_type, COL_PROC_NAME])
-                .agg(non_proc_agg_dict)
-                .groupby([view_type])
-                .agg(proc_agg_dict)
-            )
+
+            def aggregate(df):
+                return (
+                    df.reset_index()
+                    .groupby([view_type, COL_PROC_NAME])
+                    .agg(non_proc_agg_dict)
+                    .groupby([view_type])
+                    .agg(proc_agg_dict)
+                )
+
         else:
-            view = records.reset_index().groupby([view_type]).agg(non_proc_agg_dict)
+
+            def aggregate(df):
+                return df.reset_index().groupby([view_type]).agg(non_proc_agg_dict)
+
+        view = frame.pipe(aggregate)
+        view = view.pipe(lambda df: _match_dask_agg_dtypes(df, records, aggregate))
 
         # Set metric slope
-        view = view.map_partitions(
+        view = view.apply(
             set_metric_slope,
             metrics=metrics,
             metric=metric,
@@ -1057,7 +1221,7 @@ class Analyzer(abc.ABC):
         )
 
         # Return view
-        return view
+        return view.finalize()
 
     @staticmethod
     def _get_agg_dict(
@@ -1066,16 +1230,20 @@ class Analyzer(abc.ABC):
         view_types: List[ViewType],
         is_proc=False,
     ):
+        # Named aggregations rather than the builtins. Dask translated
+        # `sum`/`min`/`max` for us; pandas takes them literally and warns that a
+        # future version will apply the callable directly, which would change
+        # the result. The strings are what pandas says preserves behaviour.
         if is_proc:
-            agg_dict = {col: max if 'time' in col else sum for col in view_columns}
+            agg_dict = {col: 'max' if 'time' in col else 'sum' for col in view_columns}
         else:
-            agg_dict = {col: sum for col in view_columns}
+            agg_dict = {col: 'sum' for col in view_columns}
 
         # agg_dict['bw'] = max
         # agg_dict['intensity'] = max
         # agg_dict['iops'] = max
-        agg_dict['size_min'] = min
-        agg_dict['size_max'] = max
+        agg_dict['size_min'] = 'min'
+        agg_dict['size_max'] = 'max'
 
         unwanted_agg_cols = ['id', for_view_type]
         for agg_col in unwanted_agg_cols:
@@ -1207,7 +1375,11 @@ class Analyzer(abc.ABC):
                     )
                 else:
                     df[col_name] = df[col_name].mask(df['func_id'].str.contains(md_op), df[col])
-        # Cast columns to correct types
+        # Cast columns to correct types. `_min`/`_max` are deliberately not
+        # cast here: Dask builds meta by running this over a synthetic frame
+        # whose nullable columns hold <NA>, and an int64 cast rejects those.
+        # They are normalised once on the bottleneck frame instead, where the
+        # values are real.
         for col in df.columns:
             if col.endswith('_size') or col.endswith('_count'):
                 df[col] = df[col].astype('int64')
@@ -1230,6 +1402,9 @@ class Analyzer(abc.ABC):
     @staticmethod
     def _wait_all(tasks: Union[dd.DataFrame, Delayed, dict]):
         if WAIT_ENABLED:
+            if isinstance(tasks, pd.DataFrame):
+                # Already concrete; there is nothing scheduled to wait on.
+                return
             if isinstance(tasks, dd.DataFrame):
                 _ = wait(tasks)
             else:
