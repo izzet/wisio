@@ -19,23 +19,41 @@ DEFAULT_THRESHOLD = 45
 DEFAULT_TIME_GRANULARITY_IN_SECONDS = 5  # 5 seconds
 
 # Sized for Streamlit Community Cloud, which caps at 2.7GB and 2 CPU cores.
-# Measured by replaying the dftracer fixture at increasing multiples: the
-# analyzer costs a fixed ~615MB (imports plus the cluster) and about 60MB more
-# per MB of trace. 7.4MB peaked at 1.0GB, 15MB at 1.7GB, 25MB at 2.3GB.
+# Measured by replaying the dftracer fixture at increasing multiples, one
+# worker. The baseline depends on whether that worker is threaded or a child
+# process (see THREADED_WORKER_MAX_MB); memory then grows about 60MB per MB of
+# trace either way, more steeply when threaded:
 #
-# 20MB therefore lands near 2.0GB, leaving headroom under the 2.7GB ceiling.
+#            32KB    1.3MB    7.4MB     15MB     20MB
+#   process  614MB    660MB   1037MB   1687MB   1932MB
+#   thread   296MB    430MB   1217MB   2116MB   2382MB
+#
+# 20MB on a process worker lands near 1.9GB, leaving headroom under the ceiling.
 # The worker limit has to clear that peak or dask kills the worker mid-run --
 # at 1.5GB a 15MB upload died with KilledWorker.
 #
 # Note this spends the burst headroom: ~1GB is what Community Cloud reliably
 # guarantees, so a large upload may be evicted under memory pressure. Wall time
-# is the other limit -- 25MB took 185s on 40 cores, and Cloud allows at most 2.
+# is the other limit -- 20MB took 70s on 40 cores, and Cloud allows at most 2.
 #
 # Worker count dominates everything else: the default fan-out peaked at 2.9GB
 # on the dftracer fixture against 955MB with a single worker.
 CLUSTER_N_WORKERS = 1
 CLUSTER_MEMORY_LIMIT = 2_200_000_000  # bytes; dask spills, pauses, then restarts
 MAX_TOTAL_UPLOAD_MB = 20
+
+# Whether the single worker runs in this process or a child of it, decided from
+# the upload size because the two trade against each other. A threaded worker
+# does not re-import pandas, pyarrow and dask into a child, which halves memory
+# on a small trace -- 296MB against 614MB at 32KB, 429MB against 660MB at
+# 1.3MB -- and is faster at every size measured. But its memory grows more
+# steeply, since intermediates and results share one heap: the two cross around
+# 4MB, and by the 20MB cap the threaded worker reaches 2.4GB against 1.9GB,
+# which is 88% of Community Cloud's ceiling.
+#
+# Most uploads are small, so the common case gets the cheaper worker and the
+# tail keeps the headroom.
+THREADED_WORKER_MAX_MB = 4
 
 # Third-party module each analyzer needs, for the pre-flight check below.
 # Recorder reads Parquet through dask and needs no extra.
@@ -293,6 +311,7 @@ if submit:
                     f"+analyzer={analyzer}",
                     f"cluster.n_workers={CLUSTER_N_WORKERS}",
                     f"cluster.memory_limit={CLUSTER_MEMORY_LIMIT}",
+                    f"cluster.processes={total_upload_mb > THREADED_WORKER_MAX_MB}",
                     f"analyzer.bottleneck_dir={temp_dir}",
                     f"analyzer.checkpoint={False}",
                     # The slider is in seconds; the analyzer counts microseconds.

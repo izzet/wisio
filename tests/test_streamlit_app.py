@@ -235,3 +235,24 @@ def test_characteristics_the_app_reads_exist():
     assert referenced, 'app no longer reads any characteristics'
     for name in referenced:
         assert getattr(KnownCharacteristics, name).value
+
+
+def test_worker_mode_follows_upload_size():
+    """A threaded worker is cheaper for small traces and dearer for large ones.
+
+    It avoids re-importing pandas, pyarrow and dask into a child process, which
+    halves memory on a small trace, but intermediates then share one heap and
+    its memory grows more steeply -- the two cross around 4MB, and at the 20MB
+    cap the threaded worker reaches 2.4GB against 1.9GB. So the mode is chosen
+    from the size, which the app already knows before it starts.
+    """
+    source = open(APP).read()
+
+    assert 'THREADED_WORKER_MAX_MB' in source
+    assert (
+        'cluster.processes={total_upload_mb > THREADED_WORKER_MAX_MB}' in source
+    ), 'worker mode is no longer decided from the upload size'
+    # The comparison must run after the size is known, not before.
+    assert source.index('total_upload_mb = sum(') < source.index(
+        'cluster.processes={total_upload_mb'
+    )
