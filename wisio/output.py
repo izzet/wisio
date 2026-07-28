@@ -41,6 +41,7 @@ from .rules import (
     BottleneckRule,
     KnownCharacteristics,
 )
+from .utils.dask_utils import row_count
 from .types import (
     AnalyzerResultType,
     Characteristics,
@@ -195,9 +196,9 @@ class Output(abc.ABC):
             num_metrics = num_metrics + 1
             for view_key, view_result in result.view_results[metric].items():
                 count_key = format_view_name(view_key, '>')
-                bot_important_count = view_result.view.reduction(len, sum)
-                view_critical_count = view_result.critical_view.reduction(len, sum)
-                view_record_count = view_result.records.reduction(len, sum)
+                bot_important_count = row_count(view_result.view)
+                view_critical_count = row_count(view_result.critical_view)
+                view_record_count = row_count(view_result.records)
                 perspective_count_tree[metric][count_key] = bot_important_count
                 perspective_critical_count_tree[metric][count_key] = view_critical_count
                 perspective_record_count_tree[metric][count_key] = view_record_count
@@ -411,8 +412,8 @@ class Output(abc.ABC):
         slope_filtered_record_dict[metric] = {}
         for view_key in result.evaluated_views[metric]:
             scoring = result.evaluated_views[metric][view_key]
-            evaluated_record_dict[metric][view_key] = scoring.critical_view.reduction(len, sum)
-            slope_filtered_record_dict[metric][view_key] = scoring.records_index.reduction(len, sum)
+            evaluated_record_dict[metric][view_key] = row_count(scoring.critical_view)
+            slope_filtered_record_dict[metric][view_key] = row_count(scoring.records_index)
         (
             evaluated_record_dict,
             slope_filtered_record_dict,

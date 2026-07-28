@@ -1,6 +1,8 @@
 import dask.dataframe as dd
 from typing import Dict, List
 
+from betterframe import BetterFrame
+
 from .analysis import set_metric_scores
 from .types import (
     Metric,
@@ -60,18 +62,23 @@ class ViewEvaluator(object):
         # Get view type
         view_type = view_key[-1]
 
-        records_index = view_result.records.index.persist()
+        # A view small enough to materialise is computed in pandas, where the
+        # index is already concrete and has nothing to persist.
+        records_index = view_result.records.index
+        if isinstance(view_result.records, dd.DataFrame):
+            records_index = records_index.persist()
 
         scored_view = (
-            view_result.critical_view.map_partitions(
+            BetterFrame(view_result.critical_view)
+            .apply(
                 set_metric_scores,
                 view_type=view_type,
                 metric=metric,
                 metric_boundary=metric_boundary,
                 is_slope_based=is_slope_based,
             )
-            .sort_values(f"{metric}_slope", ascending=True)
-            .persist()
+            .pipe(lambda df: df.sort_values(f"{metric}_slope", ascending=True))
+            .finalize()
         )
 
         return ScoringResult(

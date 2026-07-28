@@ -16,6 +16,10 @@ class AnalyzerConfig:
     checkpoint_dir: Optional[str] = "${hydra:runtime.output_dir}/checkpoints"
     time_approximate: Optional[bool] = True
     time_granularity: Optional[float] = MISSING
+    # Main views under this size are pulled into memory and the view loop runs
+    # in pandas. Zero keeps everything on Dask, which is what the backend
+    # equivalence tests use to compare the two engines.
+    view_materialize_max_bytes: Optional[int] = 64 * 1024**2
 
 
 @dataclass
