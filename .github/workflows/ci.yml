@@ -23,7 +23,14 @@ jobs:
         python: ["3.10", "3.11", "3.12", "3.13"]
     name: ${{ matrix.os }}-${{ matrix.python }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    # Sized for the full tier, which only runs on release tags and manual
+    # dispatch; the smoke tier every push takes about 6 minutes. The full tier
+    # is 16 e2e runs plus the characterization and dual-engine suites, and it
+    # should now finish well inside this -- the reason it blew past 30 minutes
+    # on the v0.2.0 tag was leaked Dask workers, fixed separately, not the size
+    # of the suite. The headroom stays because a timeout reports as a failure
+    # and says nothing about what actually went wrong.
+    timeout-minutes: 60
     env:
       OMPI_ALLOW_RUN_AS_ROOT: 1
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
