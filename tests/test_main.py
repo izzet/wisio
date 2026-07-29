@@ -8,6 +8,8 @@ from typing import List
 from wisio.config import init_hydra_config_store
 from wisio.__main__ import main
 
+from .conftest import requires_darshan
+
 
 @pytest.fixture(scope="function")
 def override_hydra_config():
@@ -29,7 +31,11 @@ def override_hydra_config():
 
 # Full test matrix for comprehensive testing
 full_analyzer_trace_params = [
-    ("darshan", "tests/data/extracted/darshan-dxt"),
+    # Skipped where the [darshan] extra cannot work -- Python 3.13 -- rather
+    # than dropped, so the other interpreters still exercise the reader.
+    pytest.param(
+        "darshan", "tests/data/extracted/darshan-dxt", marks=requires_darshan
+    ),
     ("dftracer", "tests/data/extracted/dftracer-posix"),
     ("dftracer", "tests/data/extracted/dftracer-dlio"),
     ("recorder", "tests/data/extracted/recorder-parquet"),
