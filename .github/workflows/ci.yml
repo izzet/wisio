@@ -26,8 +26,10 @@ jobs:
     # Sized for the full tier, which only runs on release tags and manual
     # dispatch; the smoke tier every push takes about 6 minutes. The full tier
     # is 16 e2e runs plus the characterization and dual-engine suites, and it
-    # overran a 30-minute budget on the v0.2.0 tag -- killed mid-suite on
-    # 3.10-3.12, which reads as a failure rather than as a timeout.
+    # should now finish well inside this -- the reason it blew past 30 minutes
+    # on the v0.2.0 tag was leaked Dask workers, fixed separately, not the size
+    # of the suite. The headroom stays because a timeout reports as a failure
+    # and says nothing about what actually went wrong.
     timeout-minutes: 60
     env:
       OMPI_ALLOW_RUN_AS_ROOT: 1
