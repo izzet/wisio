@@ -4,7 +4,7 @@ requires = ["meson>=1.5.0,<1.10.0", "meson-python>=0.15.0"]
 
 [project]
 name = "wisio"
-version = "0.1.1"
+version = "0.2.0"
 description = "Analyze, visualize, and understand I/O performance issues in HPC workflows"
 authors = [{ name = "Izzet Yildirim", email = "izzetcyildirim@gmail.com" }]
 maintainers = [{ name = "Izzet Yildirim", email = "izzetcyildirim@gmail.com" }]
@@ -47,7 +47,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-darshan = ["darshan>=3.4"]
+# pydarshan publishes CPython wheels only up to cp312. On 3.13 pip falls back
+# to the sdist, which builds a pure-python `py3-none-any` wheel carrying no
+# libdarshan-util.so, so `import darshan` then raises RuntimeError -- an extra
+# that installs successfully and cannot work. The marker makes the extra a
+# no-op there instead, so `pip install wisio[darshan]` on 3.13 gets a working
+# WisIO without the darshan reader rather than a broken one. Darshan support is
+# honestly 3.10-3.12; do not lift the marker until pydarshan ships a cp313
+# wheel. WisIO still degrades at runtime if the extra is simply absent -- see
+# the optional-import guard in wisio/__init__.py.
+darshan = ["darshan>=3.4; python_version < '3.13'"]
 dftracer = ["dftracer-utils>=0.0.12"]
 web = ["altair>=5.0", "streamlit>=1.40"]
 

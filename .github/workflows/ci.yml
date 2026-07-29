@@ -118,11 +118,11 @@ jobs:
 
       - name: Run WisIO
         run: |
-          # pydarshan publishes CPython wheels only up to cp312. On 3.13 pip
-          # falls back to a pure-python wheel with no bundled
-          # libdarshan-util.so, so the darshan reader cannot run there. The
-          # pytest suite skips the same way; this keeps the rest of the matrix
-          # exercising darshan rather than dropping 3.13 entirely.
+          # The [darshan] extra carries a `python_version < "3.13"` marker, so
+          # on the 3.13 leg it resolves to nothing and the reader is absent by
+          # design -- see pyproject.toml. The pytest suite skips the same way;
+          # this keeps the rest of the matrix exercising darshan rather than
+          # dropping 3.13 entirely.
           if python -c "import darshan" >/dev/null 2>&1; then
             wisio +analyzer=darshan percentile=0.99 trace_path=tests/data/extracted/darshan-raw view_types=[file_name,proc_name] metrics=[time]
             wisio +analyzer=darshan percentile=0.99 trace_path=tests/data/extracted/darshan-dxt
